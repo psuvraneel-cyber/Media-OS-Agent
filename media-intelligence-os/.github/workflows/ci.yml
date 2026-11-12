@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  python-and-docker-baseline:
+    name: Format, Lint, Type Check, Security Scan, DB/Redis Integration & Docker Smoke Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+        env:
+          POSTGRES_USER: media_os_ci
+          POSTGRES_PASSWORD: ci_only_test_password
+          POSTGRES_DB: media_os_ci_test
+          TZ: UTC
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U media_os_ci -d media_os_ci_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7.2@sha256:5b816bb37d9707a70f10ef5002ecf8ee431750d397010fc4314c93dca887962f
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Check Python formatting (Ruff)
+        run: ruff format --check .
+
+      - name: Run static lint checks (Ruff)
+        run: ruff check .
+
+      - name: Run strict static type checking (MyPy)
+        run: mypy
+
+      - name: Run repository secret hygiene scan
+        run: python scripts/scan_secrets.py
+
+      - name: Run unit tests
+        run: pytest tests/unit
+
+      - name: Verify reference manifest integrity (if present locally)
+        run: |
+          if [ -d "references/manifests" ]; then
+            python scripts/generate_ref_manifests.py --verify
+          fi
+
+      - name: Run Alembic migrations and integration tests against PostgreSQL & Redis
+        env:
+          DATABASE_URL: postgresql+psycopg://media_os_ci:ci_only_test_password@127.0.0.1:5432/media_os_ci_test
+          MEDIA_OS_TEST_DATABASE_URL: postgresql+psycopg://media_os_ci:ci_only_test_password@127.0.0.1:5432/media_os_ci_test
+          MEDIA_OS_TEST_REDIS_URL: redis://127.0.0.1:6379/15
+        run: |
+          alembic upgrade head
+          pytest tests/integration
+
+      - name: Run live Docker baseline smoke tests
+        run: pytest tests/smoke
+
+  web-dashboard:
+    name: Next.js Type Check, Lint, Vitest & Production Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install locked npm dependencies
+        run: npm ci
+
+      - name: Generate Next.js route types & verify TypeScript
+        run: |
+          npx next typegen
+          npm run typecheck
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run frontend unit & component tests (Vitest)
+        run: npm test
+
+      - name: Build production standalone Next.js bundle
+        run: npm run build

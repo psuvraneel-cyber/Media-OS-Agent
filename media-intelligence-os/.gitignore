@@ -1,0 +1,74 @@
+# =============================================================================
+# Media Intelligence OS - Git Ignore Rules
+# Created prior to introducing any credentials or tracked files.
+# =============================================================================
+
+# --- Environment & Secrets (NEVER commit real secrets) ---
+.env
+.env.*
+!.env.example
+
+**/secrets/
+**/tokens/
+**/*token*.json
+**/*token*.txt
+**/*token*.env
+**/*token*.yaml
+**/*token*.yml
+**/*token*.pem
+**/*credentials*.json
+**/*oauth*.json
+**/*secret*.json
+**/*secret*.txt
+*.pem
+*.key
+*.p12
+*.pfx
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# --- Node / Frontend ---
+node_modules/
+.next/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Generated Media & Temporary Outputs ---
+media/
+generated/
+artifacts/
+tmp/
+temp/
+
+# --- Databases & Dumps ---
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+*.sql.gz
+
+# --- OS & Local IDE State ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json

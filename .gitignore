@@ -1,0 +1,73 @@
+# ============================================================
+# Media OS Agent — Top-Level .gitignore
+# ============================================================
+
+# ── Runtime secrets & environment files ─────────────────────
+.env
+.env.local
+.env.*.local
+*.env
+media-os-runtime/
+
+# ── Database backups & dumps ─────────────────────────────────
+media-os-backups/
+*.dump
+*.dump.sha256
+*.sql.gz
+*.pgdump
+
+# ── Third-party reference repos (read-only, not ours) ────────
+postiz-app-main/
+postiz-runtime/
+socialai-agent-main/
+
+# ── OS & editor noise ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# ── Python artifacts (top-level, subdirs have own .gitignore) ─
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+*.whl
+
+# ── Node.js artifacts ────────────────────────────────────────
+node_modules/
+.npm
+.pnp
+.pnp.js
+
+# ── Docker volumes & local data ──────────────────────────────
+docker-data/
+volumes/
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Certificates & keys ──────────────────────────────────────
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# ── Agents plugin data (Antigravity workspace metadata) ──────
+.agents/

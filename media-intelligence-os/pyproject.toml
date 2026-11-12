@@ -1,0 +1,86 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "media-intelligence-os"
+version = "0.1.0"
+description = "Local-first autonomous AI research, content-production, and publishing intelligence system"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "alembic==1.20.1",
+  "argon2-cffi==25.1.0",
+  "celery==5.7.0",
+  "fastapi==0.162.2",
+  "httpx==0.28.1",
+  "packaging==26.3",
+  "psycopg[binary]==3.3.8",
+  "pydantic==2.14.3",
+  "pydantic-settings==2.16.2",
+  "redis==8.1.0",
+  "sqlalchemy==2.0.57",
+  "tzdata==2026.6",
+  "uvicorn==0.54.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy==2.4.1",
+  "pre-commit==4.7.0",
+  "pytest==9.2.0",
+  "pyyaml==6.0.3",
+  "ruff==0.17.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["apps/api/src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["apps/api/src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # flake8-bugbear
+  "UP",   # pyupgrade
+  "S",    # flake8-bandit security checks
+  "SIM",  # flake8-simplify
+]
+ignore = [
+  "S603", # subprocess calls with explicit arg lists are validated in tests/scripts
+  "S607", # docker / git executables resolved via PATH
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["media_os_api", "scripts"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"] # pytest assertions and dummy test placeholder strings
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+warn_return_any = true
+disallow_untyped_defs = true
+files = ["apps/api/src", "scripts", "tests"]
+mypy_path = [".", "apps/api/src"]
+
+[[tool.mypy.overrides]]
+module = ["celery", "celery.*", "kombu", "kombu.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+pythonpath = [".", "apps/api/src"]
+testpaths = ["tests"]
+markers = [
+  "unit: Fast isolated unit tests",
+  "integration: Configuration and service boundary checks",
+  "smoke: Live workspace and Docker baseline lifecycle tests",
+]
+addopts = "-ra"

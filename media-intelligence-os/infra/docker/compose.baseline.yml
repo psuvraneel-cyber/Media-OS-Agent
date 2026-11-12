@@ -1,0 +1,26 @@
+name: media-os-baseline
+
+services:
+  baseline-api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.baseline
+    container_name: media-os-baseline-api
+    environment:
+      APP_ENV: baseline
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - media-os-baseline-net
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    restart: "no"
+
+networks:
+  media-os-baseline-net:
+    name: media-os-baseline-net
+    driver: bridge

@@ -1,0 +1,333 @@
+name: media-intelligence-os
+
+services:
+  media-os-api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    image: media-intelligence-os-api:phase4
+    container_name: media-os-api
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_PHASE: ${APP_PHASE:-phase-4-persistence}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_DISPLAY_TIMEZONE: ${APP_DISPLAY_TIMEZONE:-Asia/Kolkata}
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      OWNER_USERNAME: ${OWNER_USERNAME:-}
+      OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:-}
+      OWNER_PASSWORD_HASH_B64: ${OWNER_PASSWORD_HASH_B64:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-28800}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:3000,http://localhost:3000}
+      LOGIN_RATE_LIMIT_MAX_ATTEMPTS: ${LOGIN_RATE_LIMIT_MAX_ATTEMPTS:-5}
+      LOGIN_RATE_LIMIT_WINDOW_SECONDS: ${LOGIN_RATE_LIMIT_WINDOW_SECONDS:-300}
+      RATE_LIMIT_FAIL_CLOSED_ON_REDIS_OUTAGE: ${RATE_LIMIT_FAIL_CLOSED_ON_REDIS_OUTAGE:-false}
+      POSTGRES_HOST: ${POSTGRES_HOST:-media-os-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-media_os}
+      POSTGRES_USER: ${POSTGRES_USER:-media_os_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      REDIS_HOST: ${REDIS_HOST:-media-os-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_URL: ${REDIS_URL:-}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
+      POSTIZ_BASE_URL: ${POSTIZ_BASE_URL:-http://host.docker.internal:4007}
+      SOURCE_REDDIT_STATUS: ${SOURCE_REDDIT_STATUS:-BLOCKED}
+    ports:
+      - "127.0.0.1:8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      media-os-postgres:
+        condition: service_healthy
+      media-os-redis:
+        condition: service_healthy
+    networks:
+      - media-os-net
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  media-os-web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.web
+    image: media-intelligence-os-web:phase4
+    container_name: media-os-web
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      INTERNAL_API_BASE_URL: http://media-os-api:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      media-os-api:
+        condition: service_healthy
+    networks:
+      - media-os-net
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  media-os-postgres:
+    image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+    container_name: media-os-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-media_os}
+      POSTGRES_USER: ${POSTGRES_USER:-media_os_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: UTC
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - max_connections=40
+      - -c
+      - timezone=UTC
+    volumes:
+      - media_os_pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - media-os-net
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-media_os_user} -d ${POSTGRES_DB:-media_os}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  media-os-redis:
+    image: redis:7.2@sha256:5b816bb37d9707a70f10ef5002ecf8ee431750d397010fc4314c93dca887962f
+    container_name: media-os-redis
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      - sh
+      - -c
+      - |
+        umask 077
+        printf 'requirepass %s\n' "$$REDIS_PASSWORD" > /tmp/redis-auth.conf
+        chown redis:redis /tmp/redis-auth.conf
+        chmod 0600 /tmp/redis-auth.conf
+        exec docker-entrypoint.sh redis-server /tmp/redis-auth.conf --appendonly yes --appendfsync everysec --maxmemory 96mb --maxmemory-policy noeviction
+    volumes:
+      - media_os_redisdata:/data
+    tmpfs:
+      - /tmp
+    expose:
+      - "6379"
+    networks:
+      - media-os-net
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  media-os-worker:
+    image: media-intelligence-os-api:phase4
+    container_name: media-os-worker
+    command:
+      - celery
+      - -A
+      - media_os_api.jobs.celery_app:celery_app
+      - worker
+      - --loglevel=INFO
+      - --concurrency=1
+      - -Q
+      - control,maintenance,default
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_PHASE: ${APP_PHASE:-phase-4-persistence}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_DISPLAY_TIMEZONE: ${APP_DISPLAY_TIMEZONE:-Asia/Kolkata}
+      OWNER_USERNAME: ${OWNER_USERNAME:-}
+      OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:-}
+      OWNER_PASSWORD_HASH_B64: ${OWNER_PASSWORD_HASH_B64:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      POSTGRES_HOST: ${POSTGRES_HOST:-media-os-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-media_os}
+      POSTGRES_USER: ${POSTGRES_USER:-media_os_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      REDIS_HOST: ${REDIS_HOST:-media-os-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_URL: ${REDIS_URL:-}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-120}
+      OUTBOX_POLL_INTERVAL_SECONDS: ${OUTBOX_POLL_INTERVAL_SECONDS:-1.0}
+      SCHEDULER_POLL_INTERVAL_SECONDS: ${SCHEDULER_POLL_INTERVAL_SECONDS:-5.0}
+      RETENTION_SOURCE_DEFAULT_DAYS: ${RETENTION_SOURCE_DEFAULT_DAYS:-365}
+      RETENTION_YOUTUBE_NON_AUTH_DAYS: ${RETENTION_YOUTUBE_NON_AUTH_DAYS:-30}
+      RETENTION_YOUTUBE_VERIFY_INTERVAL_DAYS: ${RETENTION_YOUTUBE_VERIFY_INTERVAL_DAYS:-30}
+      RETENTION_APP_LOG_DAYS: ${RETENTION_APP_LOG_DAYS:-30}
+      RETENTION_AUDIT_EVENT_DAYS: ${RETENTION_AUDIT_EVENT_DAYS:-365}
+      RETENTION_FAILED_TEMP_MEDIA_DAYS: ${RETENTION_FAILED_TEMP_MEDIA_DAYS:-7}
+      MEDIA_STORAGE_DIR: ${MEDIA_STORAGE_DIR:-/tmp/media_os_artifacts}
+      MEDIA_STORAGE_WARN_PERCENT: ${MEDIA_STORAGE_WARN_PERCENT:-80}
+    depends_on:
+      media-os-postgres:
+        condition: service_healthy
+      media-os-redis:
+        condition: service_healthy
+    networks:
+      - media-os-net
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import pathlib, time; ts=int(pathlib.Path('/tmp/media_os_worker.heartbeat').read_text()); assert time.time()-ts < 60; from media_os_api.config import load_settings; from media_os_api.auth.rate_limit import create_redis_client; assert create_redis_client(load_settings().resolved_redis_url() or '').ping()",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  media-os-scheduler:
+    image: media-intelligence-os-api:phase4
+    container_name: media-os-scheduler
+    command:
+      - python
+      - -m
+      - media_os_api.jobs.scheduler_runner
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_PHASE: ${APP_PHASE:-phase-4-persistence}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_DISPLAY_TIMEZONE: ${APP_DISPLAY_TIMEZONE:-Asia/Kolkata}
+      OWNER_USERNAME: ${OWNER_USERNAME:-}
+      OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:-}
+      OWNER_PASSWORD_HASH_B64: ${OWNER_PASSWORD_HASH_B64:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      POSTGRES_HOST: ${POSTGRES_HOST:-media-os-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-media_os}
+      POSTGRES_USER: ${POSTGRES_USER:-media_os_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      REDIS_HOST: ${REDIS_HOST:-media-os-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_URL: ${REDIS_URL:-}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-120}
+      OUTBOX_POLL_INTERVAL_SECONDS: ${OUTBOX_POLL_INTERVAL_SECONDS:-1.0}
+      SCHEDULER_POLL_INTERVAL_SECONDS: ${SCHEDULER_POLL_INTERVAL_SECONDS:-5.0}
+      RETENTION_SOURCE_DEFAULT_DAYS: ${RETENTION_SOURCE_DEFAULT_DAYS:-365}
+      RETENTION_YOUTUBE_NON_AUTH_DAYS: ${RETENTION_YOUTUBE_NON_AUTH_DAYS:-30}
+      RETENTION_YOUTUBE_VERIFY_INTERVAL_DAYS: ${RETENTION_YOUTUBE_VERIFY_INTERVAL_DAYS:-30}
+      RETENTION_APP_LOG_DAYS: ${RETENTION_APP_LOG_DAYS:-30}
+      RETENTION_AUDIT_EVENT_DAYS: ${RETENTION_AUDIT_EVENT_DAYS:-365}
+      RETENTION_FAILED_TEMP_MEDIA_DAYS: ${RETENTION_FAILED_TEMP_MEDIA_DAYS:-7}
+      MEDIA_STORAGE_DIR: ${MEDIA_STORAGE_DIR:-/tmp/media_os_artifacts}
+      MEDIA_STORAGE_WARN_PERCENT: ${MEDIA_STORAGE_WARN_PERCENT:-80}
+    depends_on:
+      media-os-postgres:
+        condition: service_healthy
+      media-os-redis:
+        condition: service_healthy
+    networks:
+      - media-os-net
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import pathlib, time; ts=int(pathlib.Path('/tmp/media_os_scheduler.heartbeat').read_text()); assert time.time()-ts < 30",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+volumes:
+  media_os_pgdata:
+    name: media_os_pgdata
+  media_os_redisdata:
+    name: media_os_redisdata
+
+networks:
+  media-os-net:
+    name: media-os-net
+    driver: bridge
