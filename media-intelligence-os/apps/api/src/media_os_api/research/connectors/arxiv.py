@@ -57,6 +57,11 @@ class ArxivConnector(BaseConnector):
                 "base_id": base_id,
                 "version": version,
                 "primary_category": raw_item.get("primary_category"),
-                "authors_count": len(raw_item.get("authors", [])),
+                # Only a count is kept (data minimisation); fetchers pass `authors_count` directly.
+                "authors_count": (
+                    raw_item["authors_count"]
+                    if isinstance(raw_item.get("authors_count"), int)
+                    else len(raw_item.get("authors", []))
+                ),
             },
         )

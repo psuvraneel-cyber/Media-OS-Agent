@@ -4,7 +4,8 @@
 approved by the owner 2026-11-13, implemented (`2ae27bd`) and **applied to the runtime DB on
 2026-11-13 16:10Z with owner approval** (evidence in §M2 "Runtime application record"). M3 shared
 connector infrastructure implemented (`4fde588`). M4a Hacker News fetcher implemented,
-fixture/DB-tested and live-verified (owner-approved, disposable DB). Nothing deployed to the running stack.
+fixture/DB-tested and live-verified (owner-approved, disposable DB). M4b arXiv fetcher
+implemented and fixture/DB-tested; live verification pending owner approval. Nothing deployed to the running stack.
 **Date:** 2026-11-13
 **Baseline:** `269b326` (`feat(research): implement phase 5 research ingestion and connector invariants`)
 
@@ -239,7 +240,7 @@ Atom/RSS. No other new dependency.
 | Source | Fetcher | Fixture tests | DB integration | Live verification |
 |---|---|---|---|---|
 | Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Verified live 2026-11-13 16:34:47Z** (owner-approved; disposable DB; `topstories`, 5 items) — see below |
-| arXiv | — (M4b) | — | — | — |
+| arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source ARXIV --owner-approved`) |
 | OpenAI News | — (M4c) | — | — | — |
 | GitHub | — (M4d) | — | — | — |
 | Hugging Face | — (M4e) | — | — | — |
@@ -288,6 +289,44 @@ AI-specific — expected, since relevance is decided per brand in Phase 6, not a
 **M4a verification:** unit 151 passed (24 new HN tests incl. sanitizer); integration 48 passed /
 2 skipped (3 new HN end-to-end: full ingestion with dedupe/provenance/assignments/checkpoint and a
 3-request steady-state second run; partial outage isolation; gate blocks all traffic).
+
+**M4b arXiv (as built):**
+- Official endpoint only: `https://export.arxiv.org/api/query?search_query=cat:<c>&sortBy=submittedDate
+  &sortOrder=descending&start=<n>&max_results=<n>`; allowlist = `export.arxiv.org`; no credentials;
+  2 MiB cap; 30 s read timeout; **≥ 3.1 s between requests** (registry may only tighten).
+- Categories validated against `^[a-z]+(-[a-z]+)?\.[A-Za-z]{2,4}$`, so config cannot inject query
+  operators (e.g. `cs.AI OR all:x` is dropped).
+- Atom parsed with `defusedxml==0.7.1` (new pinned dependency) with `forbid_dtd`, `forbid_entities`,
+  `forbid_external`; billion-laughs, XXE and external-DTD fixtures are all rejected by
+  `DTDForbidden` and recorded as `MALFORMED_DOCUMENT` for that category only. arXiv's error-feed
+  shape raises permanent `ARXIV_API_ERROR`.
+- Metadata only: the stored URL is built from the validated id (`https://arxiv.org/abs/<id>`); PDF
+  links are ignored and never requested; author names are not kept (count only — the
+  `ArxivConnector` now accepts `authors_count`).
+- Checkpoint per category = high-water mark of the newest `published`. First run ingests the newest
+  page only (no backfill); later runs page newest-first until reaching the mark or end of results
+  (≤ 3 pages per run, hard offset cap 500), then advance the mark. Entries at the mark (`>=`) are
+  re-included so same-second submissions are not lost; deduplication absorbs repeats.
+- Revision semantics (by design): arXiv returns the latest version id but keeps the v1 `published`
+  time and sorts by submission date, so a revision is captured only when it sits at/above the mark.
+  When captured it becomes a new `SourceItem` in the **existing** paper cluster with no new brand
+  assignments (verified). `sortBy=lastUpdatedDate` was deliberately not used: it would resurface
+  revisions of old papers as new discoveries.
+- No ETag/Last-Modified on the arXiv API; the high-water mark is the incremental mechanism.
+- **Owner confirmation item:** the sanitised abstract excerpt (≤ 500 chars) is stored in
+  `minimal_permitted_summary`. arXiv metadata is widely redistributed, but the owner should confirm
+  this storage is acceptable under arXiv's API Terms of Use before the source is enabled; setting
+  the excerpt to empty for arXiv is a one-line change if not.
+- Deployment note: the running API image predates `defusedxml`; it is installed when the image is
+  rebuilt from this `pyproject.toml` (M5 deploy step).
+
+**M4b verification:** unit 179 passed (28 new arXiv tests: endpoint/params, rate floor, category
+injection, bootstrap/incremental/paging/cap/empty, PDF never requested, XML attacks, API error
+feed, id validation, old-style ids, version → same cluster); integration 50 passed / 2 skipped
+(2 new arXiv end-to-end: cross-listed paper stored once, revision joins existing cluster with no
+extra assignments, per-category high-water, attack payload isolated to one category, malformed
+entries skipped individually). Smoke script generalised via `SourceFetcher.bounded_config` and
+dry-run offline for both HN and arXiv. **No live arXiv request has been made.**
 
 ### M5 — Source-specific jobs & disabled schedules
 

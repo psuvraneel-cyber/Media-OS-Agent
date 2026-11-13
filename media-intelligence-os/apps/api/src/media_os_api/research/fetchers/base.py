@@ -68,6 +68,12 @@ class SourceFetcher(ABC):
     @abstractmethod
     def to_candidates(self, record: Mapping[str, Any]) -> list[RawDiscoveryCandidate]: ...
 
+    def bounded_config(
+        self, config: Mapping[str, Any], stream: StreamSpec, max_items: int
+    ) -> dict[str, Any]:
+        """Config narrowed to one stream and at most `max_items` items (owner-gated live checks)."""
+        return {**config, "streams": [stream.name], "max_items_per_stream": max_items}
+
     def min_interval_ms(self, config: Mapping[str, Any]) -> int:
         """Registry config may only make spacing *stricter* than the fetcher's floor."""
         try:

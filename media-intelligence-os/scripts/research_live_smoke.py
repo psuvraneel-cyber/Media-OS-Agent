@@ -66,11 +66,11 @@ def _smoke(source: str, stream: str | None, max_items: int) -> dict[str, Any]:
             if row is None:
                 raise SystemExit(f"Source {source} missing from test registry.")
             config = dict(row.config or {})
-            streams = [s.name for s in fetcher.streams(config)]
-            chosen = stream or streams[0]
+            streams = {s.name: s for s in fetcher.streams(config)}
+            chosen = stream or next(iter(streams), "")
             if chosen not in streams:
-                raise SystemExit(f"Stream '{chosen}' not valid for {source}: {streams}")
-            config.update({"streams": [chosen], "max_items_per_stream": max_items})
+                raise SystemExit(f"Stream '{chosen}' not valid for {source}: {sorted(streams)}")
+            config = fetcher.bounded_config(config, streams[chosen], max_items)
             db.execute(
                 update(ResearchSource)
                 .where(ResearchSource.source_code == source)

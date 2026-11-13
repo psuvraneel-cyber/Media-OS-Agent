@@ -192,3 +192,9 @@ def test_sanitizer_decodes_entities_and_restrips_markup() -> None:
     assert sanitize_minimal_summary("&lt;b&gt;bold&lt;/b&gt;") == "bold"
     assert sanitize_minimal_summary("a \x00\x07b") == "a b"
     assert sanitize_minimal_summary("1 &lt; 2") == "1 < 2"
+
+
+def test_bounded_config_narrows_to_one_list_and_n_items() -> None:
+    f = HackerNewsFetcher()
+    cfg = f.bounded_config({"streams": ["topstories", "newstories"]}, StreamSpec("newstories"), 4)
+    assert [s.name for s in f.streams(cfg)] == ["newstories"] and f.max_items(cfg) == 4
