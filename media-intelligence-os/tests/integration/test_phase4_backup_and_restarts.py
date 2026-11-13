@@ -10,6 +10,8 @@ from pathlib import Path
 
 import httpx
 import pytest
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from scripts.backup_db import create_backup
 from scripts.restore_verify import verify_restore_in_temp_db
@@ -18,6 +20,13 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXTERNAL_ENV = Path(r"C:\Media OS Agent\media-os-runtime\.env")
+
+
+def _alembic_head() -> str:
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    assert head is not None
+    return head
 
 
 def _docker_stack_running() -> bool:
@@ -32,6 +41,10 @@ def _docker_stack_running() -> bool:
 
 
 def test_backup_and_isolated_restore_verification() -> None:
+    # Reads the *runtime* database (pg_dump + restore into a temp DB). Read-only, but it is still
+    # the runtime stack, so it only runs when explicitly requested.
+    if os.environ.get("RUN_LIVE_BACKUP_TESTS") != "1":
+        pytest.skip("Set RUN_LIVE_BACKUP_TESTS=1 to back up and restore-verify the runtime DB.")
     if not (_docker_stack_running() and EXTERNAL_ENV.is_file()):
         pytest.skip("Live media-os-postgres container or external .env not present (CI/offline).")
 
@@ -42,8 +55,8 @@ def test_backup_and_isolated_restore_verification() -> None:
         assert dump_path.with_suffix(".dump.sha256").is_file()
 
         result = verify_restore_in_temp_db(dump_path=dump_path, env_file=EXTERNAL_ENV)
-        assert result.source_schema_version == "0003_domain_integrity_hardening"
-        assert result.restored_schema_version == "0003_domain_integrity_hardening"
+        assert result.source_schema_version == _alembic_head()
+        assert result.restored_schema_version == result.source_schema_version
         assert result.brand_checksum_match is True
         assert result.schedule_checksum_match is True
         assert result.job_checksum_match is True

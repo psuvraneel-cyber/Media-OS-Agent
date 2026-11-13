@@ -316,6 +316,7 @@ def test_outbox_crash_recovery_retry_backoff_permanent_failure_and_duplicate_ski
 
 def test_real_celery_worker_executes_outbox_json_task_end_to_end() -> None:
     import subprocess
+    import sys
     import time
 
     db_url = _get_test_db_url()
@@ -357,6 +358,8 @@ def test_real_celery_worker_executes_outbox_json_task_end_to_end() -> None:
 
     worker_proc = subprocess.Popen(
         [
+            sys.executable,
+            "-m",
             "celery",
             "-A",
             "media_os_api.jobs.celery_app:celery_app",
@@ -365,6 +368,8 @@ def test_real_celery_worker_executes_outbox_json_task_end_to_end() -> None:
             "--concurrency=1",
             "-Q",
             "control,maintenance,default",
+            # Celery's default prefork pool is unsupported on Windows hosts.
+            *(["--pool=solo"] if sys.platform == "win32" else []),
         ],
         env=env,
         stdout=subprocess.PIPE,
