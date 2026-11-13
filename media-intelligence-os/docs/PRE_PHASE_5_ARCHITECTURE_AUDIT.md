@@ -263,7 +263,7 @@ def main() -> None:
 
     print(
         f"Error: Executable '{tool}' not found in project .venv or system PATH.\n"
-        f"Did you run: uv venv .venv --python 3.12 && uv pip install -e \".[dev]\"?",
+        f'Did you run: uv venv .venv --python 3.12 && uv pip install -e ".[dev]"?',
         file=sys.stderr,
     )
     sys.exit(1)

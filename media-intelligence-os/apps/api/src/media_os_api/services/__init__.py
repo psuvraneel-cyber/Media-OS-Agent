@@ -41,6 +41,10 @@ from media_os_api.services.fixtures import (
     list_channel_fixtures,
 )
 from media_os_api.services.postiz_probe import probe_postiz_reachability
+from media_os_api.services.research_service import (
+    ingest_candidate_batch,
+    ingest_discovery_candidate,
+)
 
 __all__ = [
     "BrandDomainError",
@@ -63,6 +67,8 @@ __all__ = [
     "get_brand_topic_assignment_scoped",
     "get_content_package_scoped",
     "get_module_boundaries",
+    "ingest_candidate_batch",
+    "ingest_discovery_candidate",
     "list_brand_fixtures",
     "list_brand_topic_assignments_scoped",
     "list_brands",

@@ -66,8 +66,8 @@ Media Intelligence OS supports **multiple independent brand profiles (`BrandProf
 
 | ID | Requirement | Description |
 |---|---|---|
-| **FR-01** | Approved Topic Discovery | Discover candidate stories exclusively from enabled, policy-compliant sources in the Source Registry (official APIs, RSS/Atom feeds, permitted low-frequency official monitoring). |
-| **FR-02** | Normalization & Deduplication | Normalize titles/URLs/summaries and prevent duplicate or near-duplicate topic production across historical runs and queued candidates. |
+| **FR-01** | Approved Topic Discovery | Discover candidate stories exclusively from enabled, policy-compliant sources in the Source Registry using typed resource namespaces (`GITHUB_REPOSITORY`, `GITHUB_RELEASE`, `HUGGINGFACE_MODEL`, `HUGGINGFACE_DATASET`, `HUGGINGFACE_SPACE`, `HACKERNEWS_STORY`, `ARXIV_PAPER`, `OPENAI_NEWS`). Connectors start in `EXPERIMENTAL` mode; Reddit is strictly `BLOCKED`. Automatically spawns `BrandTopicAssignment` (`PENDING_EVALUATION`, `relevance_score=NULL`) for each active brand upon cluster creation. |
+| **FR-02** | Normalization & Deduplication | Deterministic normalization and conservative deduplication preventing duplicate topic production across historical runs and retries. External IDs and canonical URLs drive deduplication without unverified title-similarity merging. ArXiv version revisions associate to the same canonical `TopicCluster`. Summaries are sanitized (`<= 500` chars, HTML stripped) with explicit retention expirations; raw payloads/comments are not retained. |
 | **FR-03** | Topic Ranking | Score and rank topics using source credibility weights, timeliness, niche relevance, and (once statistically valid) historical performance multipliers. |
 | **FR-04** | Primary Source Research & Verification | Fetch primary source artifacts (paper abstract, release notes, repo README/changelog) and construct a structured Research Packet verifying factual claims before scripting. |
 | **FR-05** | Editorial Intelligence Selection | Filter out hype, policy violations, unverified claims, and repetitive angles; select topics aligned with niche, voice, and calendar balance. |

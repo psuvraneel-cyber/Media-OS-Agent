@@ -65,6 +65,24 @@ python scripts/run_in_env.py python scripts/generate_ref_manifests.py --verify
 > [!NOTE]
 > Bypassing Git hooks with `--no-verify` is strictly prohibited. If a check fails, resolve the violation or run `python scripts/run_in_env.py ruff format` to auto-format before committing.
 
+### Migration Safety & Destructive Downgrade Policy (Migration 0004)
+Migration `0004_add_brand_topic_assignments` establishes the multi-brand editorial bridge (`brand_topic_assignments`).
+> [!CAUTION]
+> **Destructive Downgrade Policy:** Once `BrandTopicAssignment` records are created, downgrading migration `0004` (`alembic downgrade 0003_domain_integrity_hardening`) drops the `brand_topic_assignments` table and permanently destroys all brand-specific editorial statuses, relevance scores, and reviewer notes.
+>
+> Downgrading migration `0004` is **strictly prohibited** unless all three mandatory conditions are met:
+> 1. **Explicit Owner Authorization:** Written owner confirmation authorizing data loss.
+> 2. **Verified Database Backup:** Full PostgreSQL dump created via `python scripts/backup_db.py`.
+> 3. **Verified Restoration Procedure:** Recovery verified inside an isolated database via `python scripts/restore_verify.py`.
+
+### Phase 5 Research Ingestion Runbook & Invariants
+- **Connector Ingestion Task:** `media_os.research.ingest` Celery task handles connector runs.
+- **Provider Namespaces:** External resources are strictly partitioned by type (`GITHUB_REPOSITORY`, `GITHUB_RELEASE`, `HUGGINGFACE_MODEL`, `HUGGINGFACE_DATASET`, `HUGGINGFACE_SPACE`, `HACKERNEWS_STORY`, `ARXIV_PAPER`, `OPENAI_NEWS`).
+- **Policy Enforcement:** All newly introduced connectors default to `EXPERIMENTAL` mode. The Reddit connector is strictly `BLOCKED` (`PolicyBlockedError`).
+- **Automated Brand Assignment:** Discovery of any new `TopicCluster` automatically generates one `BrandTopicAssignment` for each active brand with `editorial_status="PENDING_EVALUATION"` and `relevance_score=NULL`.
+- **Global Cluster Isolation:** Shared fields `TopicCluster.status` and `TopicCluster.score_breakdown` represent global discovery lifecycle only; per-brand decisions reside exclusively in `BrandTopicAssignment`.
+- **Minimal Retention & Sanitization:** Ingested payloads are untrusted; summaries are stripped of HTML and truncated to `<= 500` characters (`minimal_permitted_summary`), with `retention_expires_at` populated. Raw source bodies or comments are never persisted.
+
 ### Phase 1 Baseline & Phase 2 Standalone Postiz Commands
 - **Phase 1 Baseline:** `docker compose -f infra/docker/compose.baseline.yml up -d --build` → `http://127.0.0.1:8000/health` → `down`.
 - **Postiz (`C:\Media OS Agent\postiz-runtime`):** `docker compose up -d --wait` → verify `http://localhost:4007/api/auth/can-register` (`{"register":false}`) → `docker compose down` (NEVER `down -v`).

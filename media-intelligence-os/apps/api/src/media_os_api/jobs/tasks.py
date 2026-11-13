@@ -17,6 +17,7 @@ from media_os_api.db.session import create_db_engine_from_settings, create_sessi
 from media_os_api.jobs.celery_app import celery_app
 from media_os_api.jobs.errors import PermanentTaskError
 from media_os_api.jobs.ledger import TaskHandler, execute_durable_job
+from media_os_api.research.tasks import handle_research_ingestion
 
 logger = logging.getLogger("media_os_api.worker")
 
@@ -83,6 +84,7 @@ def handle_retention_dry_run(session: Session, job: JobRun) -> dict[str, Any]:
 PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     "media_os.internal.ping": handle_internal_ping,
     "media_os.internal.retention_dry_run": handle_retention_dry_run,
+    "media_os.research.ingest": handle_research_ingestion,
 }
 
 
