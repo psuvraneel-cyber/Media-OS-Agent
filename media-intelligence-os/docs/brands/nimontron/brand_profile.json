@@ -73,8 +73,8 @@
     "daily_caps": {"INSTAGRAM": 2, "FACEBOOK": 2, "YOUTUBE_SHORT": 1},
     "weekly_caps": {"YOUTUBE_LONG_VIDEO": 1},
     "channels_planned": {
-      "INSTAGRAM": "@com.nimontron.app (professional account created 2026-11-14; owner may rename before launch)",
-      "FACEBOOK": "owner page pending",
+      "INSTAGRAM": "@com.nimontron.app (professional account created 2026-11-14; display name fixed to match the Play listing)",
+      "FACEBOOK": "Facebook Page created by owner 2026-11-14, connected to the Instagram account",
       "YOUTUBE": "owner channel pending"
     },
     "strategy_doc": "docs/brands/nimontron/CONTENT_STRATEGY.md"
