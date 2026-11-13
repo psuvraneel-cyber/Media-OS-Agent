@@ -27,7 +27,9 @@ def test_committed_spec_is_valid_and_safe() -> None:
     prefs = spec.publishing_preferences
     assert prefs["approval_required"] is True
     assert prefs["placeholder_unconfigured"] is True  # owner inputs still pending
-    assert spec.call_to_action_preferences["play_store_url"] is None  # never guessed
+    assert spec.call_to_action_preferences["play_store_url"] == (
+        "https://play.google.com/store/apps/details?id=com.nimontron.app"
+    )  # owner-confirmed, never guessed
     assert spec.visual_identity["palette"]["red"] == "#a3161f"
 
 

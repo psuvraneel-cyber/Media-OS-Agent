@@ -57,7 +57,7 @@ identical cross-account reposts; the same idea is re-cut per format.
 | `SHOWCASE` | One design, close up | "this week's design: শাঁখা-পলা" |
 | `CURIOSITY` | Hold the reveal to the end | final slide reveals the finished card |
 
-Every post ends with one `CallToAction`: `INSTALL` (Play link **[owner]**), `TRY_FREE_DESIGNS`,
+Every post ends with one `CallToAction`: `INSTALL` (Play link confirmed), `TRY_FREE_DESIGNS`,
 `SAVE_FOR_LATER`, `SHARE_WITH_FAMILY` or `COMMENT`.
 
 ## 5. Explore vs exploit
@@ -86,7 +86,7 @@ the slots shifted, so no pillar is tied to a single hook or time.
 
 ## 7. Open items
 
-1. **[owner]** Play Store link and website link for the CTA and bio.
+1. ~~Play Store link~~ confirmed: https://play.google.com/store/apps/details?id=com.nimontron.app (website link optional).
 2. **[owner]** Account handles (Instagram/Facebook page, YouTube channel).
 3. **[owner]** Tone: warm/familial, festive, practical "save time", or a mix by pillar.
 4. **[owner]** Screen recordings for Reels/Shorts (N4).
