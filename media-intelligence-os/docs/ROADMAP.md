@@ -23,7 +23,7 @@ Personal use only.
 | Foundation: Docker stack, PostgreSQL, Redis, jobs/outbox/scheduler, auth, multi-brand schema | Done |
 | Postiz v2.25.3 running separately | Done (no social accounts connected) |
 | Research: source registry, safe HTTP, runner (M1–M3) | Done |
-| Research connectors | Hacker News ✅ live-verified · arXiv ✅ live-verified · OpenAI News, GitHub, Hugging Face — next |
+| Research connectors | Hacker News ✅ · arXiv ✅ · OpenAI News ✅ (all live-verified) · GitHub, Hugging Face — next |
 | Content generation, rendering, QA, scoring, publishing, analytics, learning | Not started |
 
 ## Sequence
@@ -35,7 +35,7 @@ the owner's explicit approval.
 
 | # | Milestone | Done when |
 |---|---|---|
-| A1 | OpenAI News RSS connector (M4c) | fixture + DB tests, owner-approved live check |
+| A1 | OpenAI News RSS connector (M4c) | ✅ done 2026-11-13 (live-verified) |
 | A2 | GitHub connector (M4d) | same |
 | A3 | Hugging Face connector (M4e) | same |
 | A4 | Source-specific jobs, research queue, disabled schedules, admin CLI, image rebuild (M5) | owner approves the deploy |

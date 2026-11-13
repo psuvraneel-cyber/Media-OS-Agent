@@ -241,7 +241,7 @@ Atom/RSS. No other new dependency.
 |---|---|---|---|---|
 | Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Verified live 2026-11-13 16:34:47Z** (owner-approved; disposable DB; `topstories`, 5 items) — see below |
 | arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Verified live 2026-11-13 18:08:30Z** (owner-approved; disposable DB; `cat:cs.AI`, 5 papers) — see below |
-| OpenAI News | `research/fetchers/openai_news.py` (M4c) | 11 unit | 2 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source OPENAI_NEWS --owner-approved`) |
+| OpenAI News | `research/fetchers/openai_news.py` (M4c) | 11 unit | 2 end-to-end | **Verified live 2026-11-13 18:48:27Z** (owner-approved; disposable DB; 5 items) — see below |
 | GitHub | — (M4d) | — | — | — |
 | Hugging Face | — (M4e) | — | — | — |
 
@@ -355,6 +355,23 @@ dry-run offline for both HN and arXiv. **No live arXiv request has been made.**
 - Items must link to `https://openai.com/...`; the stable id is the link path (e.g.
   `index/introducing-x`); the stored URL is rebuilt from that path. Description → sanitised ≤ 500-char
   summary; category kept as topic metadata.
+
+**M4c live verification (owner-approved, 2026-11-13):**
+`python scripts/research_live_smoke.py --source OPENAI_NEWS --owner-approved --max-items 5`
+(evidence: `docs/evidence/phase5_live_smoke_openai_news_20261113T184827Z.json`).
+
+| Check | Result |
+|---|---|
+| Window | 18:48:27.45Z → 18:48:28.19Z (< 1 s) |
+| Upstream traffic | 1 request to `https://openai.com/news/rss.xml`; real RSS returned (no bot challenge) |
+| Outcome | `SUCCEEDED`; records 5, new sources 5, new clusters 5, assignments 10, malformed 0 |
+| Health | `HEALTHY` (test DB) |
+| Data | 5 real `OPENAI_NEWS` items with openai.com URLs rebuilt from validated paths, publication times parsed, summaries 134–172 chars |
+| Isolation | disposable stack created and removed; runtime DB afterwards: `0005`, 7 source items, 0 OpenAI items, `OPENAI_NEWS` still `OFF`/not approved/no attempt, 0 checkpoints |
+
+Observation for Phase 6: the feed mixes product/research announcements (`index/...`) with customer case
+studies (`business/customer-stories/...`). Both are ingested; brand relevance scoring should usually
+de-prioritise case studies for the tech page.
 
 **M4c verification:** unit 190 passed (11 new); integration 52 passed / 2 skipped (2 new: end-to-end
 with a 1-request 304 second run; bot challenge → `SOURCE_FETCH_FAILED`, health `DEGRADED` with
