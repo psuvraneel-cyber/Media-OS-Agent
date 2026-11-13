@@ -4,7 +4,7 @@
   "niche": "Bengali invitation cards and marriage biodata (weddings, annaprashan, birthdays, puja, shraddha and more).",
   "target_audience": "Bengali families planning ceremonies in West Bengal and Bangladesh, and Bengali families abroad (USA, UK, Canada, UAE, Australia).",
   "language": "bn",
-  "tone_of_voice": "PROVISIONAL (owner to confirm): warm and familial, festive around occasions, practical about saving time; never pushy; always correct Bengali.",
+  "tone_of_voice": "Warm and festive (owner-confirmed 2026-11-14): celebratory and family-centred, like a relative helping with the invitations; joyful around weddings and festivals, gentle and respectful for shraddha and memorial cards; never pushy or salesy; always correct Bengali.",
   "content_pillars": ["wedding_season", "how_it_works", "wording_help", "design_showcase", "other_occasions"],
   "timezone": "Asia/Kolkata",
   "visual_identity": {
@@ -63,8 +63,12 @@
     "free_tier_wording": "Classic wording and basic designs cost nothing; shraddha, milad and memorial cards are entirely free."
   },
   "publishing_preferences": {
-    "placeholder_unconfigured": true,
-    "onboarding_status": "draft_pending_owner_inputs",
+    "approval_policy": "human_required",
+    "instagram_mode": "draft_review",
+    "youtube_mode": "explicit_human_approval",
+    "language_provisional": false,
+    "placeholder_unconfigured": false,
+    "onboarding_status": "configured_pending_channels",
     "approval_required": true,
     "daily_caps": {"INSTAGRAM": 2, "FACEBOOK": 2, "YOUTUBE_SHORT": 1},
     "weekly_caps": {"YOUTUBE_LONG_VIDEO": 1},

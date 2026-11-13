@@ -107,7 +107,7 @@ stay pixel-accurate. The app has a screenshot generator: `scripts/store-assets.m
    checked; 34 installs). "Get it on Google Play" calls to action are allowed.
 2. ~~Play Store link~~ **Answered 2026-11-14:** https://play.google.com/store/apps/details?id=com.nimontron.app. Website/landing link still optional.
 3. Handles: **Instagram `@com.nimontron.app`** (professional account created 2026-11-14; display name to match the Play listing "Nimontron: Bengali Invitations"). Facebook Page and YouTube channel still to be created.
-4. Tone preference: warm and familial, festive, or practical "save time" — or a mix by format.
+4. ~~Tone~~ **Answered 2026-11-14: warm and festive** (gentle and respectful for shraddha/memorial cards).
 5. Screen recordings of the app in use (needed for Reels/Shorts quality).
 6. Any real user feedback the owner is willing to quote (with consent).
 
