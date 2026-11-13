@@ -146,9 +146,9 @@ Rollback for either option: restore `media_os_20261113T154338Z.dump`.
 
 ## 7. Verification evidence for Milestone 1
 
-- Unit: `55 passed, 2 failed` — the 2 failures are pre-existing and location-specific
-  (`test_precommit_dispatcher` expects the repo checkout to sit beside the reference archives; they
-  fail only from a git worktree path).
+- Unit: `57 passed` with `MEDIA_OS_WORKSPACE_ROOT` pointing at the workspace (without it, 2
+  `test_precommit_dispatcher` tests fail when run from a git worktree because the reference archives
+  are not beside the checkout — location-specific, not a code defect).
 - Integration (disposable stack via `scripts/run_integration_tests.py`): `22 passed, 2 skipped`
   (skips: opt-in live backup test, opt-in live restart test).
 - Runtime DB row counts before/after the integration run: identical

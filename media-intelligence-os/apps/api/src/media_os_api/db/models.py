@@ -21,6 +21,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -195,6 +196,75 @@ class SourceItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     terms_checked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class ResearchSource(TimestampMixin, Base):
+    """Global research source registry row: policy mode, owner approval, config and health."""
+
+    __tablename__ = "research_sources"
+    __table_args__ = (
+        CheckConstraint("source_code ~ '^[A-Z][A-Z0-9_]{1,31}$'", name="source_code_format"),
+        CheckConstraint(
+            "policy_mode IN ('OFF', 'EXPERIMENTAL', 'ENABLED', 'BLOCKED')",
+            name="policy_mode_valid",
+        ),
+        CheckConstraint(
+            "source_code <> 'REDDIT' OR policy_mode = 'BLOCKED'", name="reddit_blocked"
+        ),
+        CheckConstraint(
+            "NOT live_fetch_approved OR policy_mode IN ('EXPERIMENTAL', 'ENABLED')",
+            name="live_fetch_requires_active_mode",
+        ),
+        CheckConstraint(
+            "NOT live_fetch_approved OR (approved_by IS NOT NULL AND approved_at IS NOT NULL)",
+            name="live_fetch_approval_recorded",
+        ),
+        CheckConstraint(
+            "health_status IN ('UNKNOWN', 'HEALTHY', 'DEGRADED', 'FAILING', 'DISABLED', 'BLOCKED')",
+            name="health_status_valid",
+        ),
+        CheckConstraint("consecutive_failures >= 0", name="consecutive_failures_nonnegative"),
+    )
+
+    source_code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    policy_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="OFF")
+    live_fetch_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    approved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    health_status: Mapped[str] = mapped_column(String(16), nullable=False, default="UNKNOWN")
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    last_run_stats: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    backoff_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ResearchSourceCheckpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Per-stream fetch cursor and HTTP conditional-request validators for a research source."""
+
+    __tablename__ = "research_source_checkpoints"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_code", "stream_name", name="uq_research_source_checkpoints_source_stream"
+        ),
+    )
+
+    source_code: Mapped[str] = mapped_column(
+        String(32),
+        ForeignKey("research_sources.source_code", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    stream_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    cursor: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    etag: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    last_modified: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class TopicCluster(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -751,13 +821,24 @@ class ScheduleDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "name",
             name="uq_schedule_definitions_brand_name",
         ),
+        CheckConstraint(
+            "brand_profile_id IS NOT NULL OR channel_account_id IS NULL",
+            name="global_has_no_channel",
+        ),
         Index("ix_schedule_definitions_due", "is_enabled", "next_run_at"),
+        Index(
+            "uq_schedule_definitions_global_name",
+            "name",
+            unique=True,
+            postgresql_where=text("brand_profile_id IS NULL"),
+        ),
     )
 
-    brand_profile_id: Mapped[uuid.UUID] = mapped_column(
+    # NULL = global schedule (shared research); brand-scoped otherwise (migration 0005).
+    brand_profile_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("brand_profiles.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     channel_account_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), nullable=True

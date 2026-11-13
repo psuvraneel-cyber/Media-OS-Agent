@@ -71,7 +71,7 @@ def test_alembic_empty_upgrade_downgrade_and_schema_inventory() -> None:
     _reset_schema_empty(db_url)
     cfg = _make_alembic_cfg(db_url)
 
-    # 1. Stepwise upgrade from empty -> 0001 -> 0002 -> 0003 (head)
+    # 1. Stepwise upgrade from empty -> 0001 -> ... -> 0005 (head)
     command.upgrade(cfg, "0001_initial_phase4_schema")
     engine = create_db_engine(db_url, pool_size=4, max_overflow=2)
     try:
@@ -131,20 +131,34 @@ def test_alembic_empty_upgrade_downgrade_and_schema_inventory() -> None:
         assert ok3 is True
         assert ver3 == "0003_domain_integrity_hardening"
 
-        command.upgrade(cfg, "head")
-        ok, _detail, ver = check_database_health(engine)
-        assert ok is True
-        assert ver == "0004_add_brand_topic_assignments"
+        command.upgrade(cfg, "0004_add_brand_topic_assignments")
+        ok4, _detail4, ver4 = check_database_health(engine)
+        assert ok4 is True
+        assert ver4 == "0004_add_brand_topic_assignments"
 
         inspector4 = inspect(engine)
         assert "brand_topic_assignments" in set(inspector4.get_table_names())
+
+        command.upgrade(cfg, "head")
+        ok, _detail, ver = check_database_health(engine)
+        assert ok is True
+        assert ver == "0005_research_source_registry"
+        inspector5 = inspect(engine)
+        assert {"research_sources", "research_source_checkpoints"}.issubset(
+            set(inspector5.get_table_names())
+        )
 
         factory = create_session_factory(engine)
         with session_scope(factory) as db:
             slugs = set(db.execute(select(BrandProfile.slug)).scalars().all())
             assert slugs == {"brand-tech-ai", "brand-app-promo"}
 
-        # 3. Rollback 0004 -> 0003 -> 0002 -> 0001 and re-upgrade to head cleanly
+        # 3. Rollback 0005 -> 0004 -> 0003 -> 0002 -> 0001 and re-upgrade to head cleanly
+        command.downgrade(cfg, "0004_add_brand_topic_assignments")
+        ok_down4, _, ver_down4 = check_database_health(engine)
+        assert ok_down4 is True and ver_down4 == "0004_add_brand_topic_assignments"
+        assert "research_sources" not in set(inspect(engine).get_table_names())
+
         command.downgrade(cfg, "0003_domain_integrity_hardening")
         ok_down3, _, ver_down3 = check_database_health(engine)
         assert ok_down3 is True and ver_down3 == "0003_domain_integrity_hardening"

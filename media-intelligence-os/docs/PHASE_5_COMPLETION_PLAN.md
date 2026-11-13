@@ -1,7 +1,7 @@
 # Phase 5 Completion Plan — Real Research Ingestion
 
-**Status:** Plan accepted for execution milestone-by-milestone. Milestone 1 implemented; Milestone 2
-(migration `0005`) awaits owner approval of the schema below before it is written or applied.
+**Status:** Plan accepted for execution milestone-by-milestone. M1 implemented (`849cf94`). M2 schema
+approved by the owner 2026-11-13 and implemented; **not applied to the runtime DB** (separate approval).
 **Date:** 2026-11-13
 **Baseline:** `269b326` (`feat(research): implement phase 5 research ingestion and connector invariants`)
 
@@ -95,6 +95,33 @@ Applying to the **runtime** DB requires: owner approval, fresh `backup_db.py`, `
 Files: `migrations/versions/0005_research_source_registry.py`, `db/models.py` (`ResearchSource`,
 `ResearchSourceCheckpoint`), `research/registry.py` (read/update helpers, health transitions),
 `tests/integration/test_phase5_migration_0005.py`, extension of the migration inventory test.
+
+**Implementation notes (M2, as built):**
+- Column names are `source_code` / `stream_name` instead of `source_key` / `stream_key`: the existing
+  job-payload secret guard (`validate_safe_task_payload`) and log redaction treat every `*_key` field
+  as a credential, so `*_key` names would be rejected in payloads and masked in logs. Schedule
+  payloads use `{"source": ..., "trigger": "schedule"}` for the same reason.
+- Added beyond the approved sketch (stricter, no behavioural change): `source_code` format check,
+  `approved_by`/`approved_at` required when `live_fetch_approved`, non-negative failure counter, and
+  `CHECK (brand_profile_id IS NOT NULL OR channel_account_id IS NULL)` on `schedule_definitions`.
+- Seed: health `DISABLED` for the five `OFF` sources, `BLOCKED` for Reddit. Schedule IDs are
+  deterministic (uuid5) so downgrade/upgrade is repeatable. Cadences (all disabled): HN 1 h,
+  GitHub 6 h, Hugging Face 6 h, arXiv daily 07:00 Asia/Kolkata, OpenAI News 3 h.
+- Live gate = `policy_mode ∈ {EXPERIMENTAL, ENABLED}` ∧ `live_fetch_approved` ∧
+  `RESEARCH_LIVE_FETCH_ENABLED=true`; refusals are permanent `PolicyRefusalError`s with specific
+  codes; an active per-source backoff is a retryable `SOURCE_BACKOFF_ACTIVE`.
+- Health: success → `HEALTHY`; failures → `DEGRADED`, then `FAILING` at 3 consecutive; backoff
+  60 s · 2ⁿ⁻¹ capped at 6 h, or the server's `Retry-After` (capped 6 h). Error text is redacted and
+  truncated to 500 chars.
+- Known follow-up for M5: `run_scheduler_tick` hard-codes `queue_name="control"`; research jobs must
+  be routed to the `research` queue and the worker must consume it.
+
+**Runtime apply procedure (when approved):**
+1. `python scripts/backup_db.py --env-file "C:\Media OS Agent\media-os-runtime\.env"`
+2. `python scripts/restore_verify.py --env-file "C:\Media OS Agent\media-os-runtime\.env"`
+3. Deploy the new image (rebuild `media-os-api`, restart api/worker/scheduler) or run
+   `docker exec media-os-api alembic upgrade head` from an image that contains 0005.
+4. Verify: `alembic_version = 0005_research_source_registry`, 6 registry rows, 5 disabled schedules.
 
 ### M3 — Shared connector infrastructure
 
