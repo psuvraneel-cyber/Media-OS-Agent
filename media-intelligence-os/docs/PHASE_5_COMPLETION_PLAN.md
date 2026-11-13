@@ -487,6 +487,24 @@ datasets and returns to `HEALTHY` without re-ingesting models). **No live reques
   deploy until the owner runs `set-mode` / `approve-live` / `schedule --enable` **and** sets
   `RESEARCH_LIVE_FETCH_ENABLED=true` in the runtime `.env`.
 
+**M5 deployment record (owner-approved, 2026-11-13 19:15–19:17Z):**
+
+| Step | Evidence |
+|---|---|
+| PR | psuvraneel-cyber/Media-OS-Agent#1 opened from `claude/media-os-onboarding-c6ab8f` (deployed from the PR head; `main` not yet merged) |
+| Pre-state 19:15:47Z | `0005`; brands 2, source items 7, clusters 8, assignments 14, schedules 5 (0 enabled), jobs 1, audit 3, approved sources 0 |
+| Backup | `media_os_20261113T191548Z.dump`, restore-verified (`media_os_restore_verify_20261113191549_d605c4`, schema `0005`, brands_sha_match=True) |
+| Rollback image | old image `db51dca9aeb6` tagged `media-intelligence-os-api:rollback-pre-phase5` |
+| Build | `docker compose ... build media-os-api` → `10bc640ceb08`; verified offline (`--network none`): migrations 0001–0005, `defusedxml 0.7.1`, 5 fetchers, `media_os.execute_research_job_run` |
+| Recreate | `docker compose ... up -d --no-deps --no-build --wait media-os-api media-os-worker media-os-scheduler` 19:16:55Z → all healthy 19:17:06Z; postgres, redis, web and Postiz untouched |
+| Worker | consumes `control, default, maintenance, research`; tasks `execute_job_run`, `execute_research_job_run`; `RESEARCH_LIVE_FETCH_ENABLED=false`; no `GITHUB_TOKEN` |
+| Health | `/health/ready` database ready (schema `0005`); web 200; 0 error lines in worker/scheduler; API "error" matches were only the empty `error_category` field of INFO logs |
+| Admin CLI | `docker exec media-os-api python -m media_os_api.research.admin status` → all five sources `OFF`/not approved/schedule disabled; Reddit `BLOCKED` |
+| Post-state 19:17:30Z | identical counts except audit 3 → 4: `OWNER_BOOTSTRAPPED` by `system:bootstrap` on API start (the owner row lost in the 2026-11-13 test-suite reset was re-created from the runtime `.env`) |
+
+Rollback: `docker tag media-intelligence-os-api:rollback-pre-phase5 media-intelligence-os-api:phase4` then the
+same `up -d --no-deps --no-build` command (schema 0005 is compatible with the old image).
+
 ### M6 — Read-only API + dashboard
 
 - `GET /api/v1/research/sources` — registry, policy mode, approval flag, health, checkpoints.
