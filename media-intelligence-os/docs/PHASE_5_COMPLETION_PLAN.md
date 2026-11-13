@@ -539,6 +539,22 @@ state is returned. Replace `ResearchView`/`TopicsView` stubs; Vitest coverage.
   Dockerfile.
 - Deploy: needs rebuilding both the API and web images (owner approval), same procedure as M5.
 
+**M6 deployment record (owner-approved, 2026-11-13 19:41–19:43Z):**
+
+| Step | Evidence |
+|---|---|
+| Merge | psuvraneel-cyber/Media-OS-Agent#3 merged as `2a00d0a`; images built from that `main` commit |
+| Pre-state 19:41:02Z | `0005`; source items 7, clusters 8, assignments 14, enabled schedules 0, jobs 1, audit 4, approved sources 0, owners 1 |
+| Backup | `media_os_20261113T194103Z.dump`, restore-verified (`media_os_restore_verify_20261113194104_51634e`, brands_sha_match=True) |
+| Rollback images | `media-intelligence-os-api:rollback-pre-m6` (`10bc640ceb08`), `media-intelligence-os-web:rollback-pre-m6` (`a2903fc83c48`) |
+| Build | api `11e312b78ded`, web `a8e085636260`; verified offline: web bundle contains `ResearchViews` and no "Trigger Discovery Scan"; API exposes `/research/items`, `/research/sources`, `/topics`, `/topics/{topic_id}` |
+| Recreate | `up -d --no-deps --no-build --wait media-os-api media-os-worker media-os-scheduler media-os-web` 19:42:01Z → all healthy 19:42:16Z; postgres, redis, Postiz untouched |
+| Live checks | new endpoints → 401 unauthenticated; `POST /research/sources` → 405; `/research` and `/topics` pages → 307 to `/login` when signed out; `/health/ready` database ready (schema `0005`); web health 200; 0 error lines in api/worker/scheduler/web; worker still consumes `research`; admin status: 5 sources OFF, 0 approved, 0 schedules on |
+| Post-state 19:42:44Z | identical counts |
+| Not verified | the signed-in page rendering on the live stack (requires the owner's login) |
+
+Rollback: re-tag both `rollback-pre-m6` images to `phase4`, then the same `up -d --no-deps --no-build` command.
+
 ### M7 — Documentation reconciliation
 
 Authoritative `docs/PHASE_5_IMPLEMENTATION.md`; correct both READMEs (Phase 5 status, Postiz
