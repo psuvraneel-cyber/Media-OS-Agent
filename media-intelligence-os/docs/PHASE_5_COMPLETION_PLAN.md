@@ -515,6 +515,30 @@ same `up -d --no-deps --no-build` command (schema 0005 is compatible with the ol
 All authenticated, read-only, brand-scoped where brand data is involved; no other brand's editorial
 state is returned. Replace `ResearchView`/`TopicsView` stubs; Vitest coverage.
 
+**M6 (as built, 2026-11-14) — code complete, not yet deployed:**
+- API (`api/routes/research.py`, `schemas/research.py`), all `require_session`, read-only (other
+  methods → 405), 503 when storage is unavailable:
+  - `GET /api/v1/research/sources` — mode, approval, health, error code, backoff, run totals,
+    schedule (enabled, next run, cadence), checkpoints, worker kill-switch state. Never returns
+    `config`, `approved_by`, error messages, ETags or cursors.
+  - `GET /api/v1/research/items?provider=&limit=&before=` — shared items newest first with their
+    clusters; keyset pagination on `fetched_at`; provider and limit validated.
+  - `GET /api/v1/topics?brand=&editorial_status=&limit=` and `GET /api/v1/topics/{id}?brand=` —
+    clusters joined to **the requested brand's** assignment only, with source count, providers and
+    provenance. Unknown brand → 404; a topic not assigned to the brand → 404.
+- Dashboard (`components/views/ResearchViews.tsx`): Research page (source table with mode/health/
+  schedule badges, kill-switch state, refresh; recently discovered items with "Load more"); Topics page
+  (active-brand topics, status filter, provenance panel). External links render only for http(s) URLs,
+  with `rel="noopener noreferrer nofollow"`. Honest empty and error states. The old stub views and
+  their fake "Trigger Discovery Scan" button were removed.
+- Tests: 6 API integration (auth required; no secret fields; pagination, filter, validation; brand
+  isolation, with brand 1's rejection never visible to brand 2 and the global discovery status
+  untouched; provenance; read-only) + 3 Vitest (sources/links/pagination; empty and error states;
+  brand-scoped topic requests, filter, provenance). The existing dashboard test no longer covers the
+  removed stubs. Web: typecheck, lint, Vitest, and a production build verified via the real web
+  Dockerfile.
+- Deploy: needs rebuilding both the API and web images (owner approval), same procedure as M5.
+
 ### M7 — Documentation reconciliation
 
 Authoritative `docs/PHASE_5_IMPLEMENTATION.md`; correct both READMEs (Phase 5 status, Postiz

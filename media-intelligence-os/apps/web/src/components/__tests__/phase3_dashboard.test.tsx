@@ -39,9 +39,7 @@ import {
   ApprovalsView,
   AssetsView,
   CalendarView,
-  ResearchView,
   StudioView,
-  TopicsView,
 } from "@/components/views/PipelineStubViews";
 import { BrandProvider } from "@/lib/brand-context";
 import { NAV_ROUTES } from "@/lib/navigation";
@@ -279,7 +277,7 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
     expect(actInit?.body).toBe(JSON.stringify({ is_active: true }));
   });
 
-  it("renders all 12 domain views honestly with empty/disabled/policy states, persisted audit logs, and zero fake analytics", async () => {
+  it("renders all non-research domain views honestly with empty/disabled/policy states, persisted audit logs, and zero fake analytics", async () => {
     const user = userEvent.setup();
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
@@ -299,8 +297,6 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
     const { unmount } = renderInShell(
       <>
         <DashboardOverviewView systemStatus={SYSTEM_STATUS} />
-        <ResearchView />
-        <TopicsView />
         <StudioView />
         <AssetsView />
         <CalendarView />
@@ -313,11 +309,8 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
       </>,
     );
 
-    expect(screen.getByText("Reddit API / Feeds")).toBeInTheDocument();
-    expect(screen.getAllByText("BLOCKED BY POLICY").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("No performance records collected for Technology & AI")).toBeInTheDocument();
     expect(screen.getByText(/App Promotion/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Trigger Discovery Scan/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Generate with Gemini/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Queue in Postiz/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Bind Postiz Channel/i })).toBeDisabled();

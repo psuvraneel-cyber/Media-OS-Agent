@@ -7,8 +7,6 @@ import {
   Clapperboard,
   FolderKanban,
   LineChart,
-  ListFilter,
-  Radar,
   ShieldCheck,
 } from "lucide-react";
 
@@ -17,89 +15,6 @@ import { DisabledActionButton } from "@/components/ui/DisabledActionButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
 import { useBrandContext } from "@/lib/brand-context";
-
-const APPROVED_SOURCES = [
-  { name: "Official AI Lab & Engineering Blogs (RSS)", policy: "Allowed (Phase 5)", tone: "disabled" as const },
-  { name: "GitHub Trending & Release Feeds", policy: "Allowed (Phase 5)", tone: "disabled" as const },
-  { name: "arXiv CS.AI / CS.SE Papers", policy: "Allowed (Phase 5)", tone: "disabled" as const },
-  { name: "Google Trends Signals", policy: "Experimental (Phase 5)", tone: "prototype" as const },
-  { name: "Reddit API / Feeds", policy: "BLOCKED BY POLICY", tone: "blocked" as const },
-];
-
-export function ResearchView() {
-  const { activeBrand } = useBrandContext();
-  return (
-    <div className="space-y-6">
-      <SurfaceCard
-        title="Source Policy Registry"
-        subtitle="Global research source guardrails prior to Phase 5 connector execution."
-        badge={
-          <DisabledActionButton label="Trigger Discovery Scan" reason="Phase 5" />
-        }
-      >
-        <div className="space-y-2">
-          {APPROVED_SOURCES.map((src) => (
-            <div
-              key={src.name}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-[#090b10] px-3.5 py-2.5 text-xs"
-            >
-              <span className="font-medium text-slate-200">{src.name}</span>
-              <Badge tone={src.tone}>{src.policy}</Badge>
-            </div>
-          ))}
-        </div>
-      </SurfaceCard>
-
-      <EmptyState
-        icon={<Radar className="h-5 w-5" aria-hidden="true" />}
-        title={`No discovered stories for ${activeBrand.name}`}
-        description="Automated RSS, GitHub, and research ingestion workers are deferred to Phase 5. Zero fabricated story items are rendered here."
-        phaseBadge="Not Implemented — Phase 5"
-        brandLabel={activeBrand.name}
-      />
-    </div>
-  );
-}
-
-const RANKING_DIMENSIONS = [
-  { name: "Primary-Source Verifiability", weight: "Configurable (Phase 6)" },
-  { name: "Technical Novelty & Signal", weight: "Configurable (Phase 6)" },
-  { name: "Brand Pillar Alignment", weight: "Configurable (Phase 6)" },
-  { name: "Editorial Timeliness", weight: "Configurable (Phase 6)" },
-];
-
-export function TopicsView() {
-  const { activeBrand } = useBrandContext();
-  return (
-    <div className="space-y-6">
-      <SurfaceCard
-        title={`Editorial Scoring Rubric — ${activeBrand.name}`}
-        subtitle="Conceptual multi-factor story qualification dimensions before content production."
-        badge={<DisabledActionButton label="Promote Selected Topic" reason="Phase 6" />}
-      >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {RANKING_DIMENSIONS.map((dim) => (
-            <div
-              key={dim.name}
-              className="rounded-lg border border-slate-800 bg-[#090b10] p-3.5 text-xs"
-            >
-              <p className="font-semibold text-slate-200">{dim.name}</p>
-              <p className="mt-1 text-slate-500">{dim.weight}</p>
-            </div>
-          ))}
-        </div>
-      </SurfaceCard>
-
-      <EmptyState
-        icon={<ListFilter className="h-5 w-5" aria-hidden="true" />}
-        title={`Topic queue is empty for ${activeBrand.name}`}
-        description="Deduplication, story normalization, and ranking arrive across Phases 5 and 6 with PostgreSQL persistence."
-        phaseBadge="Not Implemented — Phase 5-6"
-        brandLabel={activeBrand.name}
-      />
-    </div>
-  );
-}
 
 const STUDIO_FORMATS = [
   { id: "script", label: "Structured Script Draft", summary: "Evidence-backed hook, technical breakdown & source attribution." },
