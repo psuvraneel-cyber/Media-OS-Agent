@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from media_os_api.db.models import (
@@ -82,26 +84,17 @@ def ingest_discovery_candidate(
     )
     minimal_summary = sanitize_minimal_summary(candidate.summary, max_length=500)
 
-    # 3. SourceItem ingestion / deduplication
-    source_item = (
-        session.execute(
-            select(SourceItem).where(
-                SourceItem.source_provider == candidate.source_provider,
-                SourceItem.external_id == candidate.external_id,
-            )
-        )
-        .scalars()
-        .first()
-    )
-
-    is_new_source = False
-    if source_item is None:
-        source_item = SourceItem(
+    # 3. SourceItem ingestion / deduplication. INSERT ... ON CONFLICT DO NOTHING makes concurrent
+    #    workers safe: the loser blocks on the winner's uncommitted row, then reads it.
+    inserted_source_id = session.execute(
+        pg_insert(SourceItem)
+        .values(
+            id=uuid.uuid4(),
             source_provider=candidate.source_provider,
             external_id=candidate.external_id,
             canonical_url=canonical_url,
             title=candidate.title[:512],
-            source_label=candidate.source_label,
+            source_label=candidate.source_label[:128],
             published_at=candidate.published_at,
             event_at=candidate.event_at,
             fetched_at=now,
@@ -110,102 +103,88 @@ def ingest_discovery_candidate(
             source_policy_mode=SourcePolicyMode.EXPERIMENTAL,
             retention_expires_at=now + timedelta(days=retention_days),
             terms_checked_at=now,
+            created_at=now,
+            updated_at=now,
         )
-        session.add(source_item)
-        session.flush()
-        is_new_source = True
-    else:
+        .on_conflict_do_nothing(index_elements=["source_provider", "external_id"])
+        .returning(SourceItem.id)
+    ).scalar_one_or_none()
+
+    is_new_source = inserted_source_id is not None
+    source_item = session.execute(
+        select(SourceItem).where(
+            SourceItem.source_provider == candidate.source_provider,
+            SourceItem.external_id == candidate.external_id,
+        )
+    ).scalar_one()
+    if not is_new_source:
         source_item.terms_checked_at = now
 
-    # 4. TopicCluster clustering / deduplication
-    topic_cluster = (
-        session.execute(select(TopicCluster).where(TopicCluster.dedupe_key == dedupe_key))
-        .scalars()
-        .first()
-    )
-
-    is_new_cluster = False
-    assignments_created = 0
-
-    if topic_cluster is None:
-        topic_cluster = TopicCluster(
+    # 4. TopicCluster clustering / deduplication (global; never carries brand-specific state)
+    inserted_cluster_id = session.execute(
+        pg_insert(TopicCluster)
+        .values(
+            id=uuid.uuid4(),
             normalized_title=candidate.title[:512],
             dedupe_key=dedupe_key,
-            category=candidate.category,
+            category=candidate.category[:128],
             status="DISCOVERED",
             score_breakdown={},
             scoring_version="v0",
             evidence_grade="UNGRADED",
             first_seen_at=now,
             last_seen_at=now,
+            created_at=now,
+            updated_at=now,
         )
-        session.add(topic_cluster)
-        session.flush()
-        is_new_cluster = True
+        .on_conflict_do_nothing(index_elements=["dedupe_key"])
+        .returning(TopicCluster.id)
+    ).scalar_one_or_none()
 
-        # Link provenance
-        provenance_link = TopicClusterSource(
-            topic_cluster_id=topic_cluster.id,
-            source_item_id=source_item.id,
-        )
-        session.add(provenance_link)
-        session.flush()
+    is_new_cluster = inserted_cluster_id is not None
+    topic_cluster = session.execute(
+        select(TopicCluster).where(TopicCluster.dedupe_key == dedupe_key)
+    ).scalar_one()
+    if not is_new_cluster:
+        # Existing cluster: refresh last_seen_at only; status/score_breakdown stay untouched.
+        topic_cluster.last_seen_at = now
 
-        # 5. Automatic BrandTopicAssignment creation for ALL active brands
-        active_brands = (
-            session.execute(select(BrandProfile).where(BrandProfile.is_active.is_(True)))
+    # Provenance link (idempotent)
+    session.execute(
+        pg_insert(TopicClusterSource)
+        .values(topic_cluster_id=topic_cluster.id, source_item_id=source_item.id, created_at=now)
+        .on_conflict_do_nothing(index_elements=["topic_cluster_id", "source_item_id"])
+    )
+
+    # 5. Exactly one PENDING_EVALUATION assignment per active brand, only for new clusters
+    assignments_created = 0
+    if is_new_cluster:
+        active_brand_ids = (
+            session.execute(select(BrandProfile.id).where(BrandProfile.is_active.is_(True)))
             .scalars()
             .all()
         )
-
-        for brand in active_brands:
-            existing_assignment = (
-                session.execute(
-                    select(BrandTopicAssignment).where(
-                        BrandTopicAssignment.brand_profile_id == brand.id,
-                        BrandTopicAssignment.topic_cluster_id == topic_cluster.id,
-                    )
-                )
-                .scalars()
-                .first()
-            )
-            if existing_assignment is None:
-                assignment = BrandTopicAssignment(
-                    brand_profile_id=brand.id,
+        for brand_id in active_brand_ids:
+            created = session.execute(
+                pg_insert(BrandTopicAssignment)
+                .values(
+                    id=uuid.uuid4(),
+                    brand_profile_id=brand_id,
                     topic_cluster_id=topic_cluster.id,
                     editorial_status="PENDING_EVALUATION",
                     relevance_score=None,
                     score_breakdown={},
                     priority=0,
                     assigned_at=now,
+                    created_at=now,
+                    updated_at=now,
                 )
-                session.add(assignment)
-                assignments_created += 1
+                .on_conflict_do_nothing(index_elements=["brand_profile_id", "topic_cluster_id"])
+                .returning(BrandTopicAssignment.id)
+            ).scalar_one_or_none()
+            assignments_created += int(created is not None)
 
-        session.flush()
-    else:
-        # Existing cluster: refresh last_seen_at; preserve status and brand assignments
-        topic_cluster.last_seen_at = now
-
-        # Ensure provenance link exists
-        existing_link = (
-            session.execute(
-                select(TopicClusterSource).where(
-                    TopicClusterSource.topic_cluster_id == topic_cluster.id,
-                    TopicClusterSource.source_item_id == source_item.id,
-                )
-            )
-            .scalars()
-            .first()
-        )
-        if existing_link is None:
-            session.add(
-                TopicClusterSource(
-                    topic_cluster_id=topic_cluster.id,
-                    source_item_id=source_item.id,
-                )
-            )
-            session.flush()
+    session.flush()
 
     return IngestionResult(
         source_item_id=source_item.id,

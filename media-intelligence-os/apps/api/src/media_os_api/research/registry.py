@@ -143,15 +143,32 @@ def save_checkpoint(
 
 
 def record_fetch_success(
-    session: Session, source_code: str, *, stats: Mapping[str, Any], now: datetime
+    session: Session,
+    source_code: str,
+    *,
+    stats: Mapping[str, Any],
+    now: datetime,
+    degraded_error: tuple[str, str] | None = None,
 ) -> ResearchSource:
+    """Record a run in which at least one stream succeeded.
+
+    `degraded_error=(code, message)` marks a partial run (some streams failed): health becomes
+    DEGRADED and the error is kept for visibility, but no backoff is applied because the source
+    itself is reachable.
+    """
     source = get_research_source(session, source_code, for_update=True)
-    source.health_status = "HEALTHY"
     source.consecutive_failures = 0
     source.last_attempt_at = now
     source.last_success_at = now
     source.last_run_stats = dict(stats)
     source.backoff_until = None
+    if degraded_error is None:
+        source.health_status = "HEALTHY"
+    else:
+        source.health_status = "DEGRADED"
+        source.last_failure_at = now
+        source.last_error_code = degraded_error[0][:64]
+        source.last_error_message = redact_text(degraded_error[1])[:500]
     session.flush()
     return source
 

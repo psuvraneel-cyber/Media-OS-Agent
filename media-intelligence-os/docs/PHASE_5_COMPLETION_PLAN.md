@@ -2,7 +2,8 @@
 
 **Status:** Plan accepted for execution milestone-by-milestone. M1 implemented (`849cf94`). M2 schema
 approved by the owner 2026-11-13, implemented (`2ae27bd`) and **applied to the runtime DB on
-2026-11-13 16:10Z with owner approval** (evidence in §M2 "Runtime application record").
+2026-11-13 16:10Z with owner approval** (evidence in §M2 "Runtime application record"). M3 shared
+connector infrastructure implemented (offline-tested only; not deployed to the running stack).
 **Date:** 2026-11-13
 **Baseline:** `269b326` (`feat(research): implement phase 5 research ingestion and connector invariants`)
 
@@ -190,6 +191,34 @@ class SourceFetcher(Protocol):
 `services/research_service.py` hardening: `INSERT … ON CONFLICT DO NOTHING` for SourceItem,
 TopicCluster, TopicClusterSource and BrandTopicAssignment so concurrent workers cannot raise
 `IntegrityError`; invariants (NULL score, PENDING_EVALUATION, global-field protection) unchanged.
+
+**Implementation notes (M3, as built):**
+- Package `research/http/` (`policy.py`, `ssrf.py`, `retry.py`, `ratelimit.py`, `client.py`,
+  `errors.py`); `research/fetchers/base.py`; `research/runner.py`. No new dependency (`httpx` and
+  `redis` were already pinned).
+- Fetch errors subclass the ledger's `RetryableTaskError` / `PermanentTaskError`, so the existing
+  job classification applies unchanged. Codes: `HTTP_<status>`, `HTTP_403_RATE_LIMITED`,
+  `HTTP_TIMEOUT`, `HTTP_NETWORK`, `UNSAFE_URL`, `RESPONSE_TOO_LARGE`, `TOO_MANY_REDIRECTS`,
+  `DNS_RESOLUTION_FAILED`, `RATE_LIMITER_UNAVAILABLE`, `RATE_LIMIT_WAIT_EXCEEDED`,
+  `MALFORMED_DOCUMENT`, `SOURCE_FETCH_FAILED`.
+- Client extras beyond the plan: `trust_env=False` (ambient proxy variables ignored); connected-peer
+  address re-checked when the transport exposes it (DNS-rebinding defence in depth); Authorization
+  only sent to `auth_hosts` and therefore dropped on cross-host redirects.
+- In-run retries: 3 attempts, full-jitter exponential backoff (cap 30 s); `Retry-After` ≤ 60 s is
+  slept exactly, longer waits are raised so the registry records a per-source backoff instead of
+  holding the single worker slot.
+- Fetchers declare `allowed_namespaces`; any other emitted namespace (e.g. `REDDIT_POST`) is
+  rejected as malformed before reaching ingestion. Registry `min_interval_ms` can only make spacing
+  stricter than the fetcher's floor.
+- Partial runs (some streams failed) record `DEGRADED` without backoff; all-streams-failed records
+  backoff and raises permanent `SOURCE_FETCH_FAILED` — the next scheduled slot is the retry.
+- Known limitation: two concurrent runs of the same source are *safe* (ON CONFLICT, verified) but
+  not serialised; scheduled runs are already de-duplicated per slot by the JobRun idempotency key.
+
+**M3 verification:** unit 127 passed (55 new HTTP-layer tests); integration (disposable stack)
+45 passed / 2 skipped (8 new runner tests). Mutation check: the two concurrency tests fail against
+the pre-M3 ingestion code with `UniqueViolation` on `uq_source_items_provider_external_id`, and pass
+with the ON CONFLICT version. No live external request was made.
 
 ### M4a–M4e — Five connectors, one commit each
 
