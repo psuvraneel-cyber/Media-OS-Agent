@@ -79,6 +79,12 @@ def test_dry_run_apply_audit_idempotency_and_isolation(factory: sessionmaker[Ses
         assert "content_pillars" in planned and "name" in planned
         assert promo.name != "Nimontron (নিমন্ত্রণ)"  # dry run wrote nothing
 
+    with session_scope(factory) as db:  # a pre-existing key the spec omits must survive
+        promo = db.execute(
+            select(BrandProfile).where(BrandProfile.slug == "brand-app-promo")
+        ).scalar_one()
+        promo.publishing_preferences = {**promo.publishing_preferences, "legacy_flag": "keep"}
+
     with session_scope(factory) as db:
         changes = apply_spec(db, "brand-app-promo", _spec(), actor_id="test:n0", now=now)
         assert set(changes) == set(planned)
@@ -89,7 +95,12 @@ def test_dry_run_apply_audit_idempotency_and_isolation(factory: sessionmaker[Ses
         ).scalar_one()
         assert promo.name == "Nimontron (নিমন্ত্রণ)" and promo.slug == "brand-app-promo"
         assert promo.content_pillars[0] == "wedding_season"
-        assert promo.publishing_preferences["approval_required"] is True
+        prefs = promo.publishing_preferences
+        assert prefs["approval_required"] is True
+        assert prefs["instagram_mode"] == "draft_review"
+        assert prefs["youtube_mode"] == "explicit_human_approval"
+        assert prefs["approval_policy"] == "human_required"
+        assert prefs["legacy_flag"] == "keep"  # merged, not replaced
         assert promo.is_active is True
         event = db.execute(
             select(AuditEvent).where(

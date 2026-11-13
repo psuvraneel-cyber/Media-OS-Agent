@@ -16,6 +16,7 @@ import json
 import re
 import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -29,6 +30,15 @@ from media_os_api.services.brand_service import get_brand
 
 _PILLAR = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _PLAY_URL = re.compile(r"^https://play\.google\.com/store/apps/details\?id=[A-Za-z0-9._]+$")
+# Seeded publishing safety policy (ADR-009). Onboarding may restate it but never change or drop it.
+REQUIRED_PUBLISHING_POLICY: dict[str, object] = {
+    "approval_required": True,
+    "approval_policy": "human_required",
+    "instagram_mode": "draft_review",
+    "youtube_mode": "explicit_human_approval",
+}
+# JSON fields merged key-by-key (existing keys absent from the spec are preserved).
+MERGED_FIELDS = frozenset({"publishing_preferences"})
 FIELDS = (
     "name",
     "description",
@@ -91,10 +101,12 @@ class BrandOnboardingSpec(BaseModel):
     @field_validator("publishing_preferences")
     @classmethod
     def _publishing(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if value.get("approval_required") is not True:
-            raise ValueError(
-                "approval_required must stay true (ADR-009) until the owner changes it."
-            )
+        for key, required in REQUIRED_PUBLISHING_POLICY.items():
+            if value.get(key) != required:
+                raise ValueError(
+                    f"publishing_preferences.{key} must be {required!r} (ADR-009 safety policy); "
+                    "changing it is a separate owner decision."
+                )
         for key in ("daily_caps", "weekly_caps"):
             caps = value.get(key, {})
             if not isinstance(caps, dict) or not all(
@@ -112,6 +124,8 @@ def diff(brand: BrandProfile, spec: BrandOnboardingSpec) -> dict[str, dict[str, 
     """Fields whose value would change: {field: {"before": ..., "after": ...}}."""
     target = spec.model_dump()
     current = _current(brand)
+    for field in MERGED_FIELDS:
+        target[field] = {**dict(current[field] or {}), **target[field]}
     return {
         f: {"before": current[f], "after": target[f]} for f in FIELDS if current[f] != target[f]
     }
@@ -154,7 +168,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("spec", help="Path to the JSON spec, or '-' for stdin.")
     args = parser.parse_args(argv)
 
-    raw = sys.stdin.read() if args.spec == "-" else open(args.spec, encoding="utf-8").read()  # noqa: SIM115
+    raw = sys.stdin.read() if args.spec == "-" else Path(args.spec).read_text(encoding="utf-8")
+    raw = raw.lstrip("\ufeff")  # tolerate a BOM (e.g. PowerShell pipes)
     try:
         spec = BrandOnboardingSpec.model_validate(json.loads(raw))
     except (ValueError, ValidationError) as exc:

@@ -88,6 +88,6 @@ the slots shifted, so no pillar is tied to a single hook or time.
 
 1. ~~Play Store link~~ confirmed: https://play.google.com/store/apps/details?id=com.nimontron.app (website link optional).
 2. **[owner]** Account handles (Instagram/Facebook page, YouTube channel).
-3. **[owner]** Tone: warm/familial, festive, practical "save time", or a mix by pillar.
+3. ~~Tone~~ confirmed: **warm and festive**; gentle and respectful for shraddha/memorial posts.
 4. **[owner]** Screen recordings for Reels/Shorts (N4).
 5. Sample-data only: no real person's name ever appears on a showcased card.

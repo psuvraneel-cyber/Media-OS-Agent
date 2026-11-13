@@ -26,7 +26,8 @@ def test_committed_spec_is_valid_and_safe() -> None:
     spec = BrandOnboardingSpec.model_validate(_spec())
     prefs = spec.publishing_preferences
     assert prefs["approval_required"] is True
-    assert prefs["placeholder_unconfigured"] is True  # owner inputs still pending
+    assert prefs["placeholder_unconfigured"] is False  # Play link, tone and Instagram confirmed
+    assert spec.tone_of_voice.startswith("Warm and festive")
     assert spec.call_to_action_preferences["play_store_url"] == (
         "https://play.google.com/store/apps/details?id=com.nimontron.app"
     )  # owner-confirmed, never guessed
@@ -54,6 +55,29 @@ def test_pillars_match_strategy_doc() -> None:
             {
                 "publishing_preferences": {
                     "approval_required": True,
+                    "approval_policy": "human_required",
+                    "instagram_mode": "auto_publish",
+                    "youtube_mode": "explicit_human_approval",
+                }
+            },
+            "instagram_mode",
+        ),
+        (
+            {
+                "publishing_preferences": {
+                    "approval_required": True,
+                    "approval_policy": "human_required",
+                }
+            },
+            "instagram_mode",
+        ),
+        (
+            {
+                "publishing_preferences": {
+                    "approval_required": True,
+                    "approval_policy": "human_required",
+                    "instagram_mode": "draft_review",
+                    "youtube_mode": "explicit_human_approval",
                     "daily_caps": {"INSTAGRAM": 50},
                 }
             },
@@ -74,3 +98,16 @@ def test_valid_play_url_is_accepted() -> None:
         "play_store_url": "https://play.google.com/store/apps/details?id=com.nimontron.app",
     }
     assert BrandOnboardingSpec.model_validate(data).call_to_action_preferences["play_store_url"]
+
+
+def test_cli_dry_run_rejects_invalid_spec_and_tolerates_bom(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import io
+
+    from media_os_api import brand_onboarding
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("\ufeff" + json.dumps({"name": "x"})))
+    assert brand_onboarding.main(["--brand", "brand-app-promo", "-"]) == 2
+    err = capsys.readouterr().err
+    assert "INVALID SPEC" in err and "BOM" not in err  # BOM stripped; field validation ran
