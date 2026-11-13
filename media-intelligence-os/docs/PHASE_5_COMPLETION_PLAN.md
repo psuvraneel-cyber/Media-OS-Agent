@@ -243,7 +243,7 @@ Atom/RSS. No other new dependency.
 | arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Verified live 2026-11-13 18:08:30Z** (owner-approved; disposable DB; `cat:cs.AI`, 5 papers) — see below |
 | OpenAI News | `research/fetchers/openai_news.py` (M4c) | 11 unit | 2 end-to-end | **Verified live 2026-11-13 18:48:27Z** (owner-approved; disposable DB; 5 items) — see below |
 | GitHub | `research/fetchers/github.py` (M4d) | 13 unit | 1 end-to-end | **Verified live 2026-11-13 19:00:33Z** (owner-approved; disposable DB; `search:topic:llm`, 5 repos, no token) — see below |
-| Hugging Face | `research/fetchers/huggingface.py` (M4e) | 8 unit | 1 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source HUGGINGFACE --owner-approved`) |
+| Hugging Face | `research/fetchers/huggingface.py` (M4e) | 8 unit | 1 end-to-end | **Verified live 2026-11-13 19:06:40Z** (owner-approved; disposable DB; `models`, 5 items) — see below |
 
 **M4a Hacker News (as built):**
 - Official endpoints only: `https://hacker-news.firebaseio.com/v0/{topstories,newstories,beststories}.json`
@@ -427,6 +427,23 @@ search + releases, one missing repo isolated, second run ingests nothing and sen
   malformed; bounded `seen` window per stream; ≤ 30 per stream per run.
 - The listing API exposes no reliable change validators, so the seen window is the incremental
   mechanism.
+
+**M4e live verification (owner-approved, 2026-11-13):**
+`python scripts/research_live_smoke.py --source HUGGINGFACE --stream models --owner-approved --max-items 5`
+(evidence: `docs/evidence/phase5_live_smoke_huggingface_20261113T190640Z.json`).
+
+| Check | Result |
+|---|---|
+| Window | 19:06:40.42Z → 19:06:41.35Z (< 1 s) |
+| Upstream traffic | 1 request to `huggingface.co/api/models` (trendingScore, limit 5); no files requested |
+| Outcome | `SUCCEEDED`; records 5, new sources 5, new clusters 5, assignments 10, malformed 0 |
+| Health | `HEALTHY` (test DB) |
+| Data | 5 real trending `HUGGINGFACE_MODEL` items with `https://huggingface.co/<id>` URLs and creation times |
+| Isolation | disposable stack created and removed; runtime DB afterwards: `0005`, 7 source items, 0 Hugging Face items, all five sources still `OFF`, Reddit `BLOCKED`, 0 checkpoints |
+
+**Brand-safety observation:** trending models included an "UNCENSORED" community fine-tune. Ingestion
+is deliberately neutral; the tech page's Phase 6 editorial scoring must include a brand-safety filter
+(e.g. uncensored/jailbreak/NSFW terms) before any topic reaches content generation.
 
 **M4e verification:** unit 211 passed (8 new); integration 54 passed / 2 skipped (1 new end-to-end:
 models + spaces ingested while datasets returns 503 → `PARTIAL`/`DEGRADED`; the next run recovers

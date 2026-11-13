@@ -26,7 +26,7 @@ accounts on one provider to evade its limits). Nimontron is live on Google Play 
 | Foundation: Docker stack, PostgreSQL, Redis, jobs/outbox/scheduler, auth, multi-brand schema | Done |
 | Postiz v2.25.3 running separately | Done (no social accounts connected) |
 | Research: source registry, safe HTTP, runner (M1–M3) | Done |
-| Research connectors | Hacker News ✅ · arXiv ✅ · OpenAI News ✅ · GitHub ✅ (all live-verified) · Hugging Face — next |
+| Research connectors | Hacker News ✅ · arXiv ✅ · OpenAI News ✅ · GitHub ✅ · Hugging Face ✅ — **all five live-verified** |
 | Content generation, rendering, QA, scoring, publishing, analytics, learning | Not started |
 
 ## Sequence
@@ -40,7 +40,7 @@ the owner's explicit approval.
 |---|---|---|
 | A1 | OpenAI News RSS connector (M4c) | ✅ done 2026-11-13 (live-verified) |
 | A2 | GitHub connector (M4d) | ✅ done (live-verified); follow-up: add a `created:>` new-repo query mode for the tech page |
-| A3 | Hugging Face connector (M4e) | built and tested 2026-11-14; live check pending owner approval |
+| A3 | Hugging Face connector (M4e) | ✅ done (live-verified) |
 | A4 | Source-specific jobs, research queue, disabled schedules, admin CLI, image rebuild (M5) | owner approves the deploy |
 | A5 | Read-only Research/Topics API + dashboard (M6) and doc reconciliation (M7) | Phase 5 report |
 
@@ -61,7 +61,7 @@ the owner's explicit approval.
 
 | # | Milestone | Delivers |
 |---|---|---|
-| T1 | Topic scoring for `brand-tech-ai` (Phase 6) | Per-brand relevance scores on research assignments; editorial shortlist |
+| T1 | Topic scoring for `brand-tech-ai` (Phase 6) | Per-brand relevance scores on research assignments; editorial shortlist; **brand-safety filter** (uncensored/jailbreak/NSFW), case-study de-prioritisation, GitHub new-repo query mode |
 | T2 | Research packets and claim verification | Primary-source citations for every factual claim |
 | T3 | Tech carousels and Reels | Reuses the N2/N4 pipelines with the tech brand's identity |
 | T4 | Tech page analytics | Reuses N5 |
