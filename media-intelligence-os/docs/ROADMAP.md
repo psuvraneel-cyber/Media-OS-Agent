@@ -42,7 +42,7 @@ the owner's explicit approval.
 | A2 | GitHub connector (M4d) | ✅ done (live-verified); follow-up: add a `created:>` new-repo query mode for the tech page |
 | A3 | Hugging Face connector (M4e) | ✅ done (live-verified) |
 | A4 | Source-specific jobs, research queue, disabled schedules, admin CLI, image rebuild (M5) | ✅ deployed 2026-11-13 19:17Z (sources still OFF) |
-| A5 | Read-only Research/Topics API + dashboard (M6) and doc reconciliation (M7) | M6 code done 2026-11-14 (deploy pending); M7 next |
+| A5 | Read-only Research/Topics API + dashboard (M6) and doc reconciliation (M7) | M6 ✅ deployed 2026-11-13 19:42Z; M7 next |
 
 ### Track N — Nimontron marketing (the priority after A1–A3)
 
