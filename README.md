@@ -15,7 +15,7 @@ A personal, local-first autonomous AI research, content-production, and social-m
 | Phase 2 | Standalone Postiz v2.25.3 Integration | ✅ Complete |
 | Phase 3 | Next.js Dashboard + FastAPI Control-Plane Skeleton | ✅ Complete |
 | Phase 4 | PostgreSQL, Redis, Multi-Brand Schema, Durable Jobs, Outbox, Scheduler & Workflow State Machine | ✅ Complete |
-| Phase 5 | Research Ingestion & Normalization Connectors | 🔜 Pending Authorization |
+| Phase 5 | Research Ingestion: 5 live-verified connectors, scheduling, Research/Topics UI | ✅ Complete & deployed (sources OFF until enabled) |
 | Phase 6+ | Content Generation, QA, Approval Gates, Publishing | 🔜 Planned |
 
 ---
@@ -29,7 +29,7 @@ Media OS Agent/
 │   │   ├── web/             # Next.js 16 + TypeScript dark-first control plane & BFF proxy
 │   │   └── api/             # Python 3.12 FastAPI + SQLAlchemy 2.x + Alembic + Celery
 │   ├── workers/
-│   │   ├── research/        # Research ingestion workers (Phase 5)
+│   │   ├── research/        # Research worker entry point (Phase 5)
 │   │   └── creative/        # Carousel & FFmpeg Shorts workers (Phase 7)
 │   ├── services/
 │   │   └── mcp/             # Controlled external MCP server (Phase 10)

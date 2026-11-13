@@ -122,15 +122,15 @@ Every source connector in Media Intelligence OS must explicitly carry one of fou
 
 | Source | Planned Tier | Initial Runtime Status | Permitted Access Mechanism | Governance Notes |
 |---|---|---|---|---|
-| **Hacker News** | Planned | `OFF` (until Phase 5) | Official Firebase Hacker News API / Algolia HN Search API | High-signal AI/dev discussions |
-| **GitHub** | Planned | `OFF` (until Phase 5) | Official GitHub REST/GraphQL API (releases, repos) | Authenticated/rate-limited official API only |
-| **Hugging Face** | Planned | `OFF` (until Phase 5) | Official Hugging Face Hub API / Daily Papers API | Models, datasets, papers |
-| **arXiv** | Planned | `OFF` (until Phase 5) | Official arXiv API / RSS (`cs.AI`, `cs.LG`, `cs.CL`, `cs.SE`) | Respect arXiv rate limits (≥3s spacing) |
-| **OpenAI News** | Planned | `OFF` (until Phase 5) | Official RSS/Atom feed or permitted low-frequency official page check | Primary vendor announcements |
-| **Anthropic News** | Planned | `OFF` (until Phase 5) | Official RSS/Atom or permitted low-frequency official page check | Primary vendor announcements |
-| **Meta AI Blog** | Planned | `OFF` (until Phase 5) | Official RSS/Atom or permitted low-frequency official page check | Open-weights & research releases |
-| **Google Trends** | Experimental | `EXPERIMENTAL` (until Phase 5 validation) | Official RSS feed (`trends.google.com/trending/rss`) | Broad consumer pulse; noisy for dev niche |
-| **YouTube Public Metadata** | Planned | `OFF` (until Phase 5) | Official YouTube Data API v3 (metadata/captions) or permitted metadata checks | Comply strictly with YouTube API ToS |
+| **Hacker News** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official Firebase Hacker News API / Algolia HN Search API | High-signal AI/dev discussions |
+| **GitHub** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official GitHub REST/GraphQL API (releases, repos) | Authenticated/rate-limited official API only |
+| **Hugging Face** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official Hugging Face Hub API / Daily Papers API | Models, datasets, papers |
+| **arXiv** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official arXiv API / RSS (`cs.AI`, `cs.LG`, `cs.CL`, `cs.SE`) | Respect arXiv rate limits (≥3s spacing) |
+| **OpenAI News** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official RSS/Atom feed or permitted low-frequency official page check | Primary vendor announcements |
+| **Anthropic News** | Planned (later cohort) | `OFF` | Official RSS/Atom or permitted low-frequency official page check | Primary vendor announcements |
+| **Meta AI Blog** | Planned (later cohort) | `OFF` | Official RSS/Atom or permitted low-frequency official page check | Open-weights & research releases |
+| **Google Trends** | Planned (later cohort) | `OFF` (not implemented) | Official RSS feed (`trends.google.com/trending/rss`) | Broad consumer pulse; noisy for dev niche |
+| **YouTube Public Metadata** | Planned (later cohort) | `OFF` | Official YouTube Data API v3 (metadata/captions) or permitted metadata checks | Comply strictly with YouTube API ToS |
 | **Reddit** | **BLOCKED** | **`BLOCKED`** | None permitted | **Must remain BLOCKED** until current Reddit Data API Terms and our exact non-commercial/personal use case are formally reviewed and approved by owner. |
 
 ### 7.3 Anti-Scraping & Untrusted Input Rules

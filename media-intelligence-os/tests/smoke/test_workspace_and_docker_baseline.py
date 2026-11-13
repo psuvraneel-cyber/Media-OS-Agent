@@ -64,7 +64,7 @@ def test_workspace_structure_and_docs_exist() -> None:
         "CONTRIBUTING.md",
         "pyproject.toml",
         ".pre-commit-config.yaml",
-        ".github/workflows/ci.yml",
+        "../.github/workflows/ci.yml",  # CI lives at the repository root
         "apps/web",
         "apps/api",
         "workers/research",
