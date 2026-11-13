@@ -1,0 +1,47 @@
+[
+ {
+  "_id": "a1",
+  "id": "fixture-lab/tiny-coder-1b",
+  "likes": 512,
+  "downloads": 12000,
+  "trendingScore": 80,
+  "pipeline_tag": "text-generation",
+  "tags": [
+   "transformers"
+  ],
+  "createdAt": "2026-11-10T08:00:00.000Z",
+  "private": false
+ },
+ {
+  "_id": "a2",
+  "id": "fixture-lab/vision-small",
+  "likes": 90,
+  "downloads": 800,
+  "trendingScore": 40,
+  "pipeline_tag": "image-classification",
+  "createdAt": "2026-11-09T08:00:00.000Z",
+  "private": false
+ },
+ {
+  "_id": "a3",
+  "id": "gpt2-fixture",
+  "likes": 5,
+  "downloads": 10,
+  "createdAt": "2026-11-08T08:00:00.000Z"
+ },
+ {
+  "_id": "a4",
+  "id": "fixture-lab/secret",
+  "private": true,
+  "createdAt": "2026-11-08T08:00:00.000Z"
+ },
+ {
+  "_id": "a5",
+  "id": "../../etc/passwd",
+  "createdAt": "2026-11-08T08:00:00.000Z"
+ },
+ {
+  "_id": "a6",
+  "id": "fixture-lab/no-date"
+ }
+]

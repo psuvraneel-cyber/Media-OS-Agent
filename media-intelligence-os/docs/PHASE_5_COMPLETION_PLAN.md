@@ -243,7 +243,7 @@ Atom/RSS. No other new dependency.
 | arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Verified live 2026-11-13 18:08:30Z** (owner-approved; disposable DB; `cat:cs.AI`, 5 papers) — see below |
 | OpenAI News | `research/fetchers/openai_news.py` (M4c) | 11 unit | 2 end-to-end | **Verified live 2026-11-13 18:48:27Z** (owner-approved; disposable DB; 5 items) — see below |
 | GitHub | `research/fetchers/github.py` (M4d) | 13 unit | 1 end-to-end | **Verified live 2026-11-13 19:00:33Z** (owner-approved; disposable DB; `search:topic:llm`, 5 repos, no token) — see below |
-| Hugging Face | — (M4e) | — | — | — |
+| Hugging Face | `research/fetchers/huggingface.py` (M4e) | 8 unit | 1 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source HUGGINGFACE --owner-approved`) |
 
 **M4a Hacker News (as built):**
 - Official endpoints only: `https://hacker-news.firebaseio.com/v0/{topstories,newstories,beststories}.json`
@@ -415,6 +415,22 @@ validation, filtering, URL rebuilding, releases ETag/pre-release/seen, repo isol
 with reset, malformed documents, bounded config); integration 53 passed / 2 skipped (1 new end-to-end:
 search + releases, one missing repo isolated, second run ingests nothing and sends the ETag).
 **No live request has been made.**
+
+**M4e Hugging Face (as built):**
+- Official Hub listing API only (`https://huggingface.co/api/{models,datasets,spaces}`), public
+  metadata; allowlist `huggingface.co`; no token; ≥ 1 s spacing; one stream per resource type.
+- Default sort `trendingScore` (what is gaining attention now); allowed alternatives `lastModified`,
+  `likes`, `downloads`, `createdAt`; anything else falls back to the default.
+- **No weights, dataset files or Space code are ever requested** (listing endpoints only; URLs are
+  rebuilt from validated ids: `/<id>`, `/datasets/<id>`, `/spaces/<id>`).
+- Private/disabled entries filtered; invalid ids (e.g. path traversal) and missing timestamps are
+  malformed; bounded `seen` window per stream; ≤ 30 per stream per run.
+- The listing API exposes no reliable change validators, so the seen window is the incremental
+  mechanism.
+
+**M4e verification:** unit 211 passed (8 new); integration 54 passed / 2 skipped (1 new end-to-end:
+models + spaces ingested while datasets returns 503 → `PARTIAL`/`DEGRADED`; the next run recovers
+datasets and returns to `HEALTHY` without re-ingesting models). **No live request has been made.**
 
 ### M5 — Source-specific jobs & disabled schedules
 

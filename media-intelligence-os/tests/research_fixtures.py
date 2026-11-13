@@ -243,3 +243,42 @@ def make_github_http(
         bearer_token=token,
         sleep=lambda _s: None,
     )
+
+
+# --------------------------------------------------------------------------- Hugging Face
+
+HF_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research" / "huggingface"
+
+
+class HuggingFaceFixtureUpstream:
+    def __init__(self) -> None:
+        self.bodies = {
+            n: (HF_FIXTURES / f"{n}.json").read_bytes() for n in ("models", "datasets", "spaces")
+        }
+        self.status_override: dict[str, int] = {}
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "huggingface.co" and request.url.scheme == "https"
+        self.requests.append(request)
+        kind = request.url.path.removeprefix("/api/")
+        if kind in self.status_override:
+            return httpx.Response(self.status_override[kind])
+        if kind not in self.bodies:
+            return httpx.Response(404)
+        return httpx.Response(200, content=self.bodies[kind])
+
+
+def make_hf_http(upstream: Callable[[httpx.Request], httpx.Response]) -> SafeHttpClient:
+    from media_os_api.research.fetchers.huggingface import HuggingFaceFetcher
+
+    return SafeHttpClient(
+        source_code=HuggingFaceFetcher.source_code,
+        policy=HuggingFaceFetcher.host_policy,
+        rate_limiter=InMemoryMinIntervalLimiter(sleep=lambda _s: None),
+        min_interval_ms=HuggingFaceFetcher.default_min_interval_ms,
+        transport=httpx.MockTransport(upstream),
+        resolver=lambda _h, _p: ["18.154.227.67"],
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
+        sleep=lambda _s: None,
+    )
