@@ -1,0 +1,78 @@
+{
+  "name": "Nimontron (নিমন্ত্রণ)",
+  "description": "Bengali ceremony invitation cards and marriage biodata in correct, graceful Bengali, made in a few minutes on the phone. Enter names, date and place; the app writes the whole card; pick a design and send it on WhatsApp, save it, or print a PDF. Live on Google Play (com.nimontron.app).",
+  "niche": "Bengali invitation cards and marriage biodata (weddings, annaprashan, birthdays, puja, shraddha and more).",
+  "target_audience": "Bengali families planning ceremonies in West Bengal and Bangladesh, and Bengali families abroad (USA, UK, Canada, UAE, Australia).",
+  "language": "bn",
+  "tone_of_voice": "PROVISIONAL (owner to confirm): warm and familial, festive around occasions, practical about saving time; never pushy; always correct Bengali.",
+  "content_pillars": ["wedding_season", "how_it_works", "wording_help", "design_showcase", "other_occasions"],
+  "timezone": "Asia/Kolkata",
+  "visual_identity": {
+    "configured": true,
+    "palette": {
+      "red": "#a3161f",
+      "red_deep": "#7c0f17",
+      "gold": "#b9821a",
+      "gold_soft": "#f6e3b4",
+      "tint": "#fbf1ec",
+      "ink": "#231b1b",
+      "green": "#0f5a3a",
+      "share": "#1f8a4c"
+    },
+    "style": "Deep red and gold on warm cream, ornate traditional card borders, bold Bengali display type.",
+    "asset_library": {
+      "icon_1024": "C:\\nimontron\\store\\icon-1024.png",
+      "play_icon_512": "C:\\nimontron\\store\\play-icon-512.png",
+      "feature_graphic": "C:\\nimontron\\store\\feature-graphic.png",
+      "screenshots_dir": "C:\\nimontron\\store\\screenshots",
+      "raw_renders_dir": "C:\\nimontron\\store\\raw"
+    },
+    "source": "docs/brands/nimontron/BRAND_BRIEF.md"
+  },
+  "caption_preferences": {
+    "languages": ["BN_EN", "BN", "EN"],
+    "default_language": "BN_EN",
+    "max_caption_chars": 1800,
+    "emoji_policy": "sparing",
+    "approved_claims_source": "docs/brands/nimontron/BRAND_BRIEF.md#2-approved-claims-safe-to-use-in-content",
+    "forbidden": [
+      "best", "#1", "top", "rankings or download numbers",
+      "the default wedding verse attributed to Tagore",
+      "Christian or Buddhist card wording (draft until reviewed)",
+      "testimonials that are not real and consented",
+      "real people's names on sample cards"
+    ]
+  },
+  "hashtag_preferences": {
+    "status": "draft",
+    "max_per_post": 8,
+    "base": ["#Nimontron", "#নিমন্ত্রণ", "#BengaliWedding", "#বিয়েরকার্ড", "#WeddingInvitation"],
+    "by_pillar": {
+      "wedding_season": ["#বিয়ে", "#BengaliWeddingCard"],
+      "how_it_works": ["#InvitationMaker"],
+      "wording_help": ["#বাংলা"],
+      "design_showcase": ["#WeddingCardDesign"],
+      "other_occasions": ["#অন্নপ্রাশন", "#Annaprashan"]
+    }
+  },
+  "call_to_action_preferences": {
+    "primary": "INSTALL",
+    "play_store_url": "https://play.google.com/store/apps/details?id=com.nimontron.app",
+    "play_store_url_status": "confirmed by owner 2026-11-14",
+    "price_wording": "In India: one premium card ₹49, wedding pack ₹99. Elsewhere: 'price shown on Google Play'.",
+    "free_tier_wording": "Classic wording and basic designs cost nothing; shraddha, milad and memorial cards are entirely free."
+  },
+  "publishing_preferences": {
+    "placeholder_unconfigured": true,
+    "onboarding_status": "draft_pending_owner_inputs",
+    "approval_required": true,
+    "daily_caps": {"INSTAGRAM": 2, "FACEBOOK": 2, "YOUTUBE_SHORT": 1},
+    "weekly_caps": {"YOUTUBE_LONG_VIDEO": 1},
+    "channels_planned": {
+      "INSTAGRAM": "@com.nimontron.app (professional account created 2026-11-14; owner may rename before launch)",
+      "FACEBOOK": "owner page pending",
+      "YOUTUBE": "owner channel pending"
+    },
+    "strategy_doc": "docs/brands/nimontron/CONTENT_STRATEGY.md"
+  }
+}
