@@ -1,7 +1,8 @@
 # Phase 5 Completion Plan — Real Research Ingestion
 
 **Status:** Plan accepted for execution milestone-by-milestone. M1 implemented (`849cf94`). M2 schema
-approved by the owner 2026-11-13 and implemented; **not applied to the runtime DB** (separate approval).
+approved by the owner 2026-11-13, implemented (`2ae27bd`) and **applied to the runtime DB on
+2026-11-13 16:10Z with owner approval** (evidence in §M2 "Runtime application record").
 **Date:** 2026-11-13
 **Baseline:** `269b326` (`feat(research): implement phase 5 research ingestion and connector invariants`)
 
@@ -122,6 +123,25 @@ Files: `migrations/versions/0005_research_source_registry.py`, `db/models.py` (`
 3. Deploy the new image (rebuild `media-os-api`, restart api/worker/scheduler) or run
    `docker exec media-os-api alembic upgrade head` from an image that contains 0005.
 4. Verify: `alembic_version = 0005_research_source_registry`, 6 registry rows, 5 disabled schedules.
+
+**Runtime application record (2026-11-13, owner-approved):**
+
+| Step | Evidence |
+|---|---|
+| Pre-state 16:09:35Z | `0004`; brands 2, source_items 7, topic_clusters 8, links 6, assignments 14, research_packets 4, content_packages 4, channels 2, schedules 0, job_runs 1, outbox 1, audit 3, in-flight jobs 0 |
+| Pre-backup | `media_os_20261113T160936Z.dump` — TOC-verified; restore-verified in `media_os_restore_verify_20261113160936_fbe398` (schema `0004`, brands_sha_match=True) |
+| Image check | Running `media-intelligence-os-api:phase4` (built 2026-11-10) has `env.py` and 0001–0003 byte-identical (CRLF-normalised) to this branch, **no 0004/0005 files and no `research` package** — the deployed app is Phase 4 code. |
+| Apply | `docker stop media-os-scheduler` (16:09:59Z) → `docker compose --env-file …\media-os-runtime\.env -f …\media-intelligence-os\infra\docker\compose.app.yml run --rm --no-deps -T -v <branch>\apps\api\migrations:/app/apps/api/migrations:ro media-os-api alembic upgrade head` → `Running upgrade 0004 -> 0005`, exit 0 → `docker start media-os-scheduler` (16:10:01Z). No app image rebuilt; no other container touched. |
+| Post-state 16:10:11Z | `0005`; every pre-existing count identical; schedules 5 (all `is_enabled=false`, global); 6 registry rows (5 `OFF`/`DISABLED`, Reddit `BLOCKED`); 0 checkpoints; `brand_profile_id` nullable; live `UPDATE … REDDIT → ENABLED` rejected by `ck_…_reddit_blocked` (rolled back) |
+| Health | scheduler `healthy`, 0 error lines since restart; `/health/ready` database `ready (schema=0005_research_source_registry)`; web `/api/health` 200 |
+| Post-backup | `media_os_20261113T161037Z.dump` — restore-verified in `media_os_restore_verify_20261113161038_1f8bf0` (schema `0005`, schedule_definitions 5, brands_sha_match=True) |
+| Rollback | `alembic downgrade 0004_add_brand_topic_assignments` (refuses if foreign global schedules exist) or restore `media_os_20261113T160936Z.dump` |
+
+Pre-existing quirk observed (not introduced by 0005): `env.py` passes the naming-convention metadata
+to Alembic, so explicitly named CHECK constraints are double-prefixed in every migration
+(e.g. `ck_source_items_ck_source_items_source_policy_mode_valid`, `ck_research_sources_ck_research_
+sources_reddit_blocked`), with long names truncated + hashed. Functionally correct and consistent
+between upgrade and downgrade; tracked as tech debt (fixing it requires a rename migration).
 
 ### M3 — Shared connector infrastructure
 
