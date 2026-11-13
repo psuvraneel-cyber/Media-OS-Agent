@@ -1,0 +1,96 @@
+{
+  "live_smoke": true,
+  "database": "disposable media-os-test (tmpfs) \u2014 runtime DB untouched",
+  "source": "ARXIV",
+  "stream": "cat:cs.AI",
+  "max_items": 5,
+  "started_at_utc": "2026-11-13T18:08:30.828428+00:00",
+  "finished_at_utc": "2026-11-13T18:08:32.364729+00:00",
+  "outcome": {
+    "status": "SUCCEEDED",
+    "started_at": "2026-11-13T18:08:30.946435+00:00",
+    "http_requests": 1,
+    "totals": {
+      "records_seen": 5,
+      "candidates_ingested": 5,
+      "new_sources": 5,
+      "new_clusters": 5,
+      "assignments_created": 10,
+      "malformed": 0,
+      "pages": 1
+    },
+    "streams": {
+      "cat:cs.AI": {
+        "status": "ok",
+        "error_code": null,
+        "pages": 1,
+        "new_sources": 5,
+        "malformed": 0,
+        "fetch_errors": {}
+      }
+    },
+    "stream_details": [
+      {
+        "name": "cat:cs.AI",
+        "status": "ok",
+        "pages": 1,
+        "records_seen": 5,
+        "candidates_ingested": 5,
+        "new_sources": 5,
+        "new_clusters": 5,
+        "assignments_created": 10,
+        "malformed": 0,
+        "malformed_codes": {},
+        "fetch_errors": {},
+        "error_code": null,
+        "retry_after_seconds": null
+      }
+    ]
+  },
+  "health": {
+    "health_status": "HEALTHY",
+    "last_error_code": null
+  },
+  "sample_items": [
+    {
+      "provider": "ARXIV_PAPER",
+      "external_id": "2611.17298v1",
+      "title": "Consistent Video-to-Video Translation via Explicit Correspondences",
+      "canonical_url": "https://arxiv.org/abs/2611.17298v1",
+      "published_at": "2026-11-12T18:55:09+00:00",
+      "summary_chars": 500
+    },
+    {
+      "provider": "ARXIV_PAPER",
+      "external_id": "2611.17309v1",
+      "title": "Classical Energies Learn to Reason 1,000x Faster than Looped Models",
+      "canonical_url": "https://arxiv.org/abs/2611.17309v1",
+      "published_at": "2026-11-12T18:56:56+00:00",
+      "summary_chars": 500
+    },
+    {
+      "provider": "ARXIV_PAPER",
+      "external_id": "2611.17313v1",
+      "title": "Sketching Language Models for Context Attribution",
+      "canonical_url": "https://arxiv.org/abs/2611.17313v1",
+      "published_at": "2026-11-12T18:57:48+00:00",
+      "summary_chars": 500
+    },
+    {
+      "provider": "ARXIV_PAPER",
+      "external_id": "2611.17316v1",
+      "title": "CoReMem: Cost-Internalizing Memory for Successive Coding Tasks with Prospective Valuation",
+      "canonical_url": "https://arxiv.org/abs/2611.17316v1",
+      "published_at": "2026-11-12T18:58:22+00:00",
+      "summary_chars": 499
+    },
+    {
+      "provider": "ARXIV_PAPER",
+      "external_id": "2611.17323v1",
+      "title": "AgentSSL: Can MLE Agents Leverage Unlabeled Data?",
+      "canonical_url": "https://arxiv.org/abs/2611.17323v1",
+      "published_at": "2026-11-12T18:59:06+00:00",
+      "summary_chars": 500
+    }
+  ]
+}

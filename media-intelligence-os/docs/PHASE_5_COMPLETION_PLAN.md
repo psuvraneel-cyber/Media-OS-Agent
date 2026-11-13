@@ -5,7 +5,7 @@ approved by the owner 2026-11-13, implemented (`2ae27bd`) and **applied to the r
 2026-11-13 16:10Z with owner approval** (evidence in §M2 "Runtime application record"). M3 shared
 connector infrastructure implemented (`4fde588`). M4a Hacker News fetcher implemented,
 fixture/DB-tested and live-verified (owner-approved, disposable DB). M4b arXiv fetcher
-implemented and fixture/DB-tested; live verification pending owner approval. Nothing deployed to the running stack.
+implemented, fixture/DB-tested and live-verified (owner-approved, disposable DB). Nothing deployed to the running stack.
 **Date:** 2026-11-13
 **Baseline:** `269b326` (`feat(research): implement phase 5 research ingestion and connector invariants`)
 
@@ -240,7 +240,7 @@ Atom/RSS. No other new dependency.
 | Source | Fetcher | Fixture tests | DB integration | Live verification |
 |---|---|---|---|---|
 | Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Verified live 2026-11-13 16:34:47Z** (owner-approved; disposable DB; `topstories`, 5 items) — see below |
-| arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source ARXIV --owner-approved`) |
+| arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Verified live 2026-11-13 18:08:30Z** (owner-approved; disposable DB; `cat:cs.AI`, 5 papers) — see below |
 | OpenAI News | — (M4c) | — | — | — |
 | GitHub | — (M4d) | — | — | — |
 | Hugging Face | — (M4e) | — | — | — |
@@ -319,6 +319,22 @@ AI-specific — expected, since relevance is decided per brand in Phase 6, not a
   the excerpt to empty for arXiv is a one-line change if not.
 - Deployment note: the running API image predates `defusedxml`; it is installed when the image is
   rebuilt from this `pyproject.toml` (M5 deploy step).
+
+**M4b live verification (owner-approved, 2026-11-13):**
+`python scripts/research_live_smoke.py --source ARXIV --owner-approved --max-items 5`
+(evidence: `docs/evidence/phase5_live_smoke_arxiv_20261113T180830Z.json`).
+
+| Check | Result |
+|---|---|
+| Window | 18:08:30.83Z → 18:08:32.36Z (≈1.5 s) |
+| Upstream traffic | 1 request to `export.arxiv.org/api/query` (`cat:cs.AI`, `max_results=5`); no PDF or abs-page requests |
+| Outcome | `SUCCEEDED`; records 5, new sources 5, new clusters 5, assignments 10, malformed 0, fetch errors 0 |
+| Health | `HEALTHY` (test DB) |
+| Data | 5 real `ARXIV_PAPER` items (`2611.17298v1` …), `https://arxiv.org/abs/<id>` URLs built from validated ids, publication times parsed, sanitised abstract excerpts 499–500 chars |
+| Isolation | disposable stack created and removed; runtime DB afterwards: `0005`, 7 source items (the 2 `ARXIV_PAPER` rows are the pre-existing `2403.*` test fixtures), `ARXIV` still `OFF`/not approved/no attempt, 0 checkpoints |
+
+The real Atom response parsed cleanly under `forbid_dtd` (arXiv sends no DTD). Abstract-excerpt
+storage remains an owner-confirmation item before enabling the source.
 
 **M4b verification:** unit 179 passed (28 new arXiv tests: endpoint/params, rate floor, category
 injection, bootstrap/incremental/paging/cap/empty, PDF never requested, XML attacks, API error
