@@ -128,3 +128,100 @@ export interface AuditLogResponse {
   persistent: true;
   items: AuditEventItem[];
 }
+
+// ---------------------------------------------------------------- Research (Phase 5, M6)
+
+export interface ResearchCheckpointSummary {
+  stream: string;
+  last_fetched_at_utc: string | null;
+  last_success_at_utc: string | null;
+  conditional_request_ready: boolean;
+}
+
+export interface ResearchScheduleSummary {
+  enabled: boolean;
+  next_run_at_utc: string | null;
+  cadence: Record<string, unknown>;
+}
+
+export interface ResearchSourceSummary {
+  source: string;
+  display_name: string;
+  policy_mode: "OFF" | "EXPERIMENTAL" | "ENABLED" | "BLOCKED" | string;
+  live_fetch_approved: boolean;
+  approved_at_utc: string | null;
+  health_status: string;
+  consecutive_failures: number;
+  last_attempt_at_utc: string | null;
+  last_success_at_utc: string | null;
+  last_failure_at_utc: string | null;
+  last_error_code: string | null;
+  backoff_until_utc: string | null;
+  last_run_totals: Record<string, number>;
+  schedule: ResearchScheduleSummary | null;
+  checkpoints: ResearchCheckpointSummary[];
+}
+
+export interface ResearchSourceListResponse {
+  live_fetch_kill_switch_enabled: boolean;
+  items: ResearchSourceSummary[];
+}
+
+export interface ResearchClusterRef {
+  topic_cluster_id: string;
+  dedupe_key: string;
+  discovery_status: string;
+}
+
+export interface ResearchSourceItem {
+  source_item_id: string;
+  provider: string;
+  external_id: string;
+  title: string;
+  source_label: string;
+  canonical_url: string;
+  published_at_utc: string | null;
+  fetched_at_utc: string;
+  summary: string | null;
+  source_policy_mode: string;
+  clusters: ResearchClusterRef[];
+}
+
+export interface ResearchItemListResponse {
+  total: number;
+  next_before_utc: string | null;
+  items: ResearchSourceItem[];
+}
+
+export interface BrandAssignmentSummary {
+  brand_id: string;
+  editorial_status: string;
+  relevance_score: number | null;
+  priority: number;
+  assigned_at_utc: string;
+  evaluated_at_utc: string | null;
+}
+
+export interface TopicSummary {
+  topic_cluster_id: string;
+  title: string;
+  category: string;
+  dedupe_key: string;
+  discovery_status: string;
+  first_seen_at_utc: string;
+  last_seen_at_utc: string;
+  source_count: number;
+  providers: string[];
+  assignment: BrandAssignmentSummary;
+}
+
+export interface TopicListResponse {
+  brand_id: string;
+  total: number;
+  items: TopicSummary[];
+}
+
+export interface TopicDetailResponse {
+  topic: TopicSummary;
+  sources: ResearchSourceItem[];
+}

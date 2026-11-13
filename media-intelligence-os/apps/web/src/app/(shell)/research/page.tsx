@@ -1,6 +1,6 @@
 import React from "react";
 
-import { ResearchView } from "@/components/views/PipelineStubViews";
+import { ResearchView } from "@/components/views/ResearchViews";
 
 export default function ResearchPage() {
   return <ResearchView />;
