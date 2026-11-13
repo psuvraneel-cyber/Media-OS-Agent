@@ -124,7 +124,7 @@ Every source connector in Media Intelligence OS must explicitly carry one of fou
 |---|---|---|---|---|
 | **Hacker News** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official Firebase Hacker News API / Algolia HN Search API | High-signal AI/dev discussions |
 | **GitHub** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official GitHub REST/GraphQL API (releases, repos) | Authenticated/rate-limited official API only |
-| **Hugging Face** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official Hugging Face Hub API / Daily Papers API | Models, datasets, papers |
+| **Hugging Face** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official Hugging Face Hub listing API (`/api/models`, `/api/datasets`, `/api/spaces`), metadata only | Models, datasets and Spaces; Daily Papers is **not** ingested (possible later addition) |
 | **arXiv** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official arXiv API / RSS (`cs.AI`, `cs.LG`, `cs.CL`, `cs.SE`) | Respect arXiv rate limits (≥3s spacing) |
 | **OpenAI News** | Implemented (Phase 5, live-verified) | `OFF` (owner enables) | Official RSS/Atom feed or permitted low-frequency official page check | Primary vendor announcements |
 | **Anthropic News** | Planned (later cohort) | `OFF` | Official RSS/Atom or permitted low-frequency official page check | Primary vendor announcements |

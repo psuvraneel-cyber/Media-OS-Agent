@@ -39,7 +39,7 @@ media-intelligence-os/
 │   └── smoke/            # Live workspace, secret-hygiene, and Docker baseline lifecycle tests
 ├── references/           # Read-only reference repository notes & SHA-256 provenance manifests
 ├── scripts/              # Utility scripts (secret scanner, reference manifests, DB backup & restore verify)
-└── (CI lives at the repository root: .github/workflows/ci.yml, PostgreSQL 17 & Redis 7.2 services)
+└── (CI is not in this folder: see ../.github/workflows/ci.yml at the repository root; PostgreSQL 17 & Redis 7.2 services)
 ```
 
 ---
