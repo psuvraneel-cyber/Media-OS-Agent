@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <link href="http://arxiv.org/api/query?search_query%3Dcat%3Acs.AI" rel="self" type="application/atom+xml"/>
+  <title type="html">ArXiv Query: search_query=cat:cs.AI</title>
+  <id>http://arxiv.org/api/fixture-feed-id</id>
+  <updated>2026-11-13T00:00:00-05:00</updated>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <opensearch:itemsPerPage>50</opensearch:itemsPerPage>
+  <entry>
+    <id>http://arxiv.org/api/errors#incorrect_id_format_for_fixture</id>
+    <title>Error</title>
+    <summary>incorrect id format for fixture</summary>
+    <updated>2026-11-13T00:00:00-05:00</updated>
+    <link href="http://arxiv.org/api/errors#incorrect_id_format_for_fixture" rel="alternate" type="text/html"/>
+    <author><name>arXiv api core</name></author>
+  </entry>
+</feed>

@@ -37,8 +37,8 @@ class PermanentTaskError(TaskExecutionError):
 class PolicyRefusalError(PermanentTaskError):
     """Policy violation that must never be retried or bypassed."""
 
-    def __init__(self, message: str) -> None:
-        super().__init__(message, code="POLICY_REFUSAL")
+    def __init__(self, message: str, *, code: str = "POLICY_REFUSAL") -> None:
+        super().__init__(message, code=code)
 
 
 class AuthenticationTaskError(PermanentTaskError):

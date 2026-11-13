@@ -58,7 +58,7 @@ flowchart LR
 |---|---|---|---|
 | **Web Dashboard** | `apps/web/` | Next.js 16 + TypeScript + Tailwind CSS (standalone BFF shell, persisted Brand switcher & channel views) | Phase 3 & Phase 4 (live brands) |
 | **Backend API** | `apps/api/` | Python 3.12 + FastAPI (`media-os-api`), sync SQLAlchemy 2.x + `psycopg`, persistent owner auth/session revocation, workflow & brand APIs | Phase 3 & Phase 4 |
-| **Database & Migrations** | `apps/api/src/media_os_api/db/`, `apps/api/migrations/` | PostgreSQL 17 Alpine + Alembic (`0001_initial_phase4_schema`, `0002_seed_initial_brands`, `0003_domain_integrity_hardening`) | **Active in Phase 4** |
+| **Database & Migrations** | `apps/api/src/media_os_api/db/`, `apps/api/migrations/` | PostgreSQL 17 Alpine + Alembic (`0001_initial_phase4_schema`, `0002_seed_initial_brands`, `0003_domain_integrity_hardening`, `0004_add_brand_topic_assignments`) | **Active in Phase 4 / Pre-Phase 5** |
 | **Broker / Cache** | `infra/docker/compose.app.yml` | Redis 7.2 (`requirepass`, `appendonly`, `noeviction`) | **Active in Phase 4** |
 | **Durable Job Worker & Dispatcher** | `apps/api/src/media_os_api/jobs/` | Celery (`concurrency=1`, JSON-only) + `FOR UPDATE SKIP LOCKED` Outbox & DST-aware Scheduler (`media-os-scheduler`) | **Active in Phase 4** |
 | **Research Worker** | `workers/research/` | Python 3.12 + Celery | Phase 5 |
@@ -88,11 +88,15 @@ All ports verified against live host listeners, `C:\Media OS Agent\postiz-runtim
 
 - **`BrandProfile` (Independent Content Identity):** Defines `brand_id`, `brand_name`, `description`, `niche`, `audience`, `language`, `tone_of_voice`, `content_pillars`, `visual_identity`, `logo_and_asset_references`, `caption_conventions`, `hashtag_preferences`, `cta_preferences`, `publishing_cadence`, `approval_policy`, and `active` flag. Initial target identities: **Brand Profile 1 (Technology and AI)** and **Brand Profile 2 (App Promotion — app details configured later)**.
 - **`ChannelAccount` (External Destination Binding):** Maps a `BrandProfile` to a specific Postiz integration ID / platform account (multiple Instagram accounts, optional multiple YouTube channels), carrying independent integration pointers, schedules, calendars, analytics, and approval settings.
+- **`BrandTopicAssignment` (Brand-Specific Editorial Bridge):** Persists brand-specific screening, priority, and relevance scoring for a shared `TopicCluster`. Maintains `(brand_profile_id, topic_cluster_id)` uniqueness and enforces editorial status (`PENDING_EVALUATION`, `CONSIDERED`, `SHORTLISTED`, `APPROVED_FOR_RESEARCH`, `REJECTED`, `EXPIRED`) with bounded relevance scores (`0.0000 <= score <= 1.0000`).
 - **Shared Intelligence, Brand-Specific Execution:**
-  1. Shared `workers/research` discovers and verifies primary-source `ResearchPacket` records once.
-  2. Editorial routing evaluates relevance per active `BrandProfile` independently; a shared topic never auto-clones identical content across brands.
-  3. Generation, visual rendering, QA, and scheduling bind every `ContentPackage`, `Asset`, `Schedule`, and `Post` to an explicit `(brand_id, channel_account_id)` pair.
-  4. **Account-Level Publish Safeguards:** Before invoking Postiz `/public/v1/posts`, the API adapter must verify that `ContentPackage.brand_id == ChannelAccount.brand_id` and that `ChannelAccount.postiz_integration_id` matches the target destination account, blocking accidental cross-account publishing.
+  1. **Global Source Ingestion:** `source_items` and `topic_clusters` are globally deduplicated across external providers (no `brand_profile_id`). Discovery runs once globally.
+  2. **Namespaced Resource Identities:** External resources are strictly partitioned by resource type (`GITHUB_REPOSITORY`, `GITHUB_RELEASE`, `HUGGINGFACE_MODEL`, `HUGGINGFACE_DATASET`, `HUGGINGFACE_SPACE`, `HACKERNEWS_STORY`, `ARXIV_PAPER`, `OPENAI_NEWS`) using the existing `(source_provider, external_id)` unique constraint. Versioned resources (e.g., arXiv papers) normalize version suffixes (`2403.12345v1` → `2403.12345`) for deduplication so version revisions associate with the same parent `TopicCluster` while preserving granular `SourceItem` provenance.
+  3. **Automatic Brand Topic Assignment:** Upon discovery of any new `TopicCluster`, one `BrandTopicAssignment` record is created for each active `BrandProfile` with `editorial_status="PENDING_EVALUATION"` and `relevance_score=NULL`. Idempotency is enforced by the `(brand_profile_id, topic_cluster_id)` unique constraint.
+  4. **Decoupled Editorial Routing & Global Cluster Protection:** `TopicCluster.status` and `TopicCluster.score_breakdown` describe discovery lifecycle only and must never be altered for brand-specific editorial decisions. Per-brand screening, relevance scoring, and rejection reasons are stored strictly on `BrandTopicAssignment`. Brand 1's decisions cannot modify Brand 2's editorial state.
+  5. **Strict Research Gating:** `ResearchPacket` requires an existing `BrandTopicAssignment` via PostgreSQL composite foreign key `fk_research_packets_brand_topic (brand_profile_id, topic_cluster_id)`. The service layer enforces that packets can only be initialized from `APPROVED_FOR_RESEARCH` or `SHORTLISTED` assignments.
+  6. **Downstream Production Scoping:** Generation, visual rendering, QA, and scheduling bind every `ContentPackage`, `Asset`, `Schedule`, and `Post` to an explicit `(brand_id, channel_account_id)` pair.
+  7. **Account-Level Publish Safeguards:** Before invoking Postiz `/public/v1/posts`, the API adapter verifies that `ContentPackage.brand_id == ChannelAccount.brand_id` and that `ChannelAccount.postiz_integration_id` matches the target destination account, blocking accidental cross-account publishing.
 
 ---
 

@@ -1,0 +1,13 @@
+{
+  "by": "fixture_user",
+  "descendants": 42,
+  "id": 9001,
+  "kids": [
+    9006
+  ],
+  "score": 311,
+  "time": 1763035200,
+  "title": "Fixture: an open-source agent framework reaches 1.0",
+  "type": "story",
+  "url": "https://example.org/agent-framework-1-0"
+}

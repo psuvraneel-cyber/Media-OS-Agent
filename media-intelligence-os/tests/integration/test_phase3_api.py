@@ -21,6 +21,11 @@ TEST_SESSION_SECRET = "phase3-test-session-secret-0123456789abcdef0123456789abcd
 
 
 def _build_test_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    # Phase 3 contract: no persistence configured. The integration runner exports DATABASE_URL for
+    # Alembic, so strip DB settings to keep this test hermetic.
+    for key in ("DATABASE_URL", "POSTGRES_HOST", "POSTGRES_PASSWORD"):
+        monkeypatch.delenv(key, raising=False)
+
     async def _fake_probe(
         base_url: str, *, timeout_seconds: float = 2.0
     ) -> PostizReachabilitySummary:

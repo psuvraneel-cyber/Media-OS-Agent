@@ -1,0 +1,9 @@
+[
+ {
+  "_id": "s1",
+  "id": "fixture-lab/demo-space",
+  "likes": 40,
+  "createdAt": "2026-11-12T08:00:00.000Z",
+  "sdk": "gradio"
+ }
+]

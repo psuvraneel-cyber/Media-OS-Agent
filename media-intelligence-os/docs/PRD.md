@@ -52,10 +52,13 @@ Media Intelligence OS supports **multiple independent brand profiles (`BrandProf
 | **Release Philosophy** | Quality and reliability strictly prioritized over posting volume | Accepted baseline |
 | **Budget Constraint** | Zero paid APIs and zero paid hosting unless explicitly approved by owner | Accepted baseline |
 
-### 4.3 Multi-Brand Domain Entities (Persisted in PostgreSQL in Phase 4)
+### 4.3 Multi-Brand Domain Entities (Persisted in PostgreSQL in Phase 4 & Pre-Phase 5)
 - **`BrandProfile` (`brand_profiles`):** `id`, `name`, `slug`, `description`, `niche`, `target_audience`, `language`, `tone_of_voice`, `content_pillars`, `visual_identity` (JSONB), `logo_asset_id` (nullable, constrained to same brand), `caption_preferences`, `hashtag_preferences`, `call_to_action_preferences`, `timezone`, `publishing_preferences` (JSONB), `is_active`.
 - **`ChannelAccount` (`channel_accounts`):** Links a `BrandProfile` to an external Postiz integration/platform account (`INSTAGRAM`, `YOUTUBE`) storing only non-secret connection metadata; Postiz retains OAuth/refresh credentials.
-- **Attribution Rule:** Every `ContentPackage`, `Asset`, `PublishSchedule`, and `MetricsSnapshot` is enforced by both PostgreSQL composite foreign keys `(id, brand_profile_id)` and service-layer guards to belong strictly to one `BrandProfile`.
+- **`BrandTopicAssignment` (`brand_topic_assignments`):** Bridges globally discovered `TopicCluster` candidates to specific `BrandProfile` identities, persisting `editorial_status` (`PENDING_EVALUATION`, `CONSIDERED`, `SHORTLISTED`, `APPROVED_FOR_RESEARCH`, `REJECTED`, `EXPIRED`), bounded `relevance_score` (`0.0000 <= score <= 1.0000`, NULL default for unranked items), `score_breakdown` (JSONB), and review timestamps.
+- **Attribution & Gating Rules:**
+  - Every `ContentPackage`, `Asset`, `PublishSchedule`, and `MetricsSnapshot` is enforced by PostgreSQL composite foreign keys `(id, brand_profile_id)` and service-layer guards to belong strictly to one `BrandProfile`.
+  - Every `ResearchPacket` is bound to an active `BrandTopicAssignment` via composite foreign key `fk_research_packets_brand_topic (brand_profile_id, topic_cluster_id)` and requires `APPROVED_FOR_RESEARCH` or `SHORTLISTED` editorial status.
 
 ---
 
@@ -63,8 +66,8 @@ Media Intelligence OS supports **multiple independent brand profiles (`BrandProf
 
 | ID | Requirement | Description |
 |---|---|---|
-| **FR-01** | Approved Topic Discovery | Discover candidate stories exclusively from enabled, policy-compliant sources in the Source Registry (official APIs, RSS/Atom feeds, permitted low-frequency official monitoring). |
-| **FR-02** | Normalization & Deduplication | Normalize titles/URLs/summaries and prevent duplicate or near-duplicate topic production across historical runs and queued candidates. |
+| **FR-01** | Approved Topic Discovery | Discover candidate stories exclusively from enabled, policy-compliant sources in the Source Registry using typed resource namespaces (`GITHUB_REPOSITORY`, `GITHUB_RELEASE`, `HUGGINGFACE_MODEL`, `HUGGINGFACE_DATASET`, `HUGGINGFACE_SPACE`, `HACKERNEWS_STORY`, `ARXIV_PAPER`, `OPENAI_NEWS`). Connectors start in `EXPERIMENTAL` mode; Reddit is strictly `BLOCKED`. Automatically spawns `BrandTopicAssignment` (`PENDING_EVALUATION`, `relevance_score=NULL`) for each active brand upon cluster creation. |
+| **FR-02** | Normalization & Deduplication | Deterministic normalization and conservative deduplication preventing duplicate topic production across historical runs and retries. External IDs and canonical URLs drive deduplication without unverified title-similarity merging. ArXiv version revisions associate to the same canonical `TopicCluster`. Summaries are sanitized (`<= 500` chars, HTML stripped) with explicit retention expirations; raw payloads/comments are not retained. |
 | **FR-03** | Topic Ranking | Score and rank topics using source credibility weights, timeliness, niche relevance, and (once statistically valid) historical performance multipliers. |
 | **FR-04** | Primary Source Research & Verification | Fetch primary source artifacts (paper abstract, release notes, repo README/changelog) and construct a structured Research Packet verifying factual claims before scripting. |
 | **FR-05** | Editorial Intelligence Selection | Filter out hype, policy violations, unverified claims, and repetitive angles; select topics aligned with niche, voice, and calendar balance. |

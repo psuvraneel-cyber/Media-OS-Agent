@@ -338,3 +338,34 @@ Statuses used in this log:
 - **Reason:** Zero host DB port exposure, consistent transactional snapshots without stopping the DB, and automated end-to-end backup integrity verification.
 - **Consequences:** Requires `docker exec` access for host operators and storing `.dump`/`.sha256` files in an external host folder outside the repository.
 - **Status:** `ACCEPTED`
+
+---
+
+## ADR-023: Cross-Platform Pre-Commit Tooling Parity via Python-Standard-Library Dispatcher
+- **Decision ID:** ADR-023
+- **Decision Title:** Route Pre-Commit Python Tool Invocations Through Standard-Library Dispatcher (`scripts/run_in_env.py`)
+- **Date:** 2026-11-11
+- **Context:** Developers and Git commit hooks on Windows environments frequently experienced hook failures (`ruff` or `mypy` not found) because tool binaries were installed exclusively inside the project's Python 3.12 `.venv` and not exposed on the system global `PATH`. This led to manual bypasses (`git commit --no-verify`), breaking local quality-gate parity with CI.
+- **Options Considered:**
+  1. Isolated pre-commit virtual environments (`repo: https://github.com/...`). Rejected because MyPy requires access to installed project site-packages and dependency types (`fastapi`, `sqlalchemy`, `pydantic`), resulting in 160+ false-positive type check failures when isolated.
+  2. Mandate Windows global system `PATH` modifications for every developer workstation. Rejected as fragile, machine-dependent, and prone to version drift.
+  3. Implement a standard-library-only executable dispatcher (`scripts/run_in_env.py`) that strictly resolves executables from `.venv/Scripts` (Windows) or `.venv/bin` (Unix), falling back to CI PATH when `CI=true`.
+- **Selected Approach:** Option 3 — Standard-library dispatcher in `.pre-commit-config.yaml`.
+- **Reason:** Guarantees deterministic, reproducible tool execution under Windows PowerShell, bash, IDE Git clients, and GitHub Actions CI without requiring global tool installation or `--no-verify` workarounds.
+- **Consequences:** All developers must maintain an active project `.venv` (`uv venv .venv --python 3.12 && uv pip install -e ".[dev]"`). Pre-commit hooks execute reliably across platforms.
+- **Status:** `ACCEPTED`
+
+---
+
+## ADR-024: Multi-Brand Shared Research Decoupling via `BrandTopicAssignment` Bridge Entity
+- **Decision ID:** ADR-024
+- **Decision Title:** Decouple Globally Shared Ingestion from Brand-Specific Editorial Screening Using `BrandTopicAssignment`
+- **Date:** 2026-11-11
+- **Context:** In Phase 4, `source_items` and `topic_clusters` were designed as global, shared research assets to prevent redundant fetching, network hammering, and duplicate scraping across brands. However, `research_packets` and downstream content require strict brand isolation. Directly scoping `topic_clusters` to `brand_profile_id` would destroy global deduplication and multiply crawler load.
+- **Options Considered:**
+  1. Add `brand_profile_id` directly to `source_items` and `topic_clusters`. Rejected because it duplicates ingestion pipelines per brand and creates data synchronization nightmares.
+  2. Maintain globally shared `source_items` and `topic_clusters`, while introducing `BrandTopicAssignment` (`brand_topic_assignments`) as an explicit bridge entity storing per-brand editorial status, priority, and relevance scores. Enforce integrity via composite foreign key `fk_research_packets_brand_topic (brand_profile_id, topic_cluster_id)` and service-layer eligibility guards.
+- **Selected Approach:** Option 2 — Explicit `BrandTopicAssignment` bridge table with composite foreign keys.
+- **Reason:** Preserves global content discovery and deduplication while providing total brand isolation for editorial decisions, scoring, and research dossier scoping.
+- **Consequences:** Migration `0004_add_brand_topic_assignments` creates `brand_topic_assignments` table with lock timeouts (`5s`) and adds composite FK on `research_packets`. Creating a `ResearchPacket` requires an existing assignment in `APPROVED_FOR_RESEARCH` or `SHORTLISTED` status.
+- **Status:** `ACCEPTED`

@@ -1,0 +1,62 @@
+# Disposable integration-test stack for Media Intelligence OS.
+#
+# - Separate Compose project (`media-os-test`), separate network, NO named volumes.
+# - PostgreSQL data lives on tmpfs: `docker compose ... down` discards everything.
+# - Loopback-only ports that do not collide with the runtime stack or Postiz.
+# - Credentials below are throwaway, test-only values (same pattern as CI); they protect nothing.
+#
+# Normally driven by:  python scripts/run_integration_tests.py
+name: media-os-test
+
+services:
+  media-os-test-postgres:
+    image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+    container_name: media-os-test-postgres
+    environment:
+      POSTGRES_USER: media_os_it
+      POSTGRES_PASSWORD: it_only_disposable_password
+      POSTGRES_DB: media_os_it_test
+      TZ: UTC
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - max_connections=40
+    tmpfs:
+      - /var/lib/postgresql/data:rw,size=512m
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U media_os_it -d media_os_it_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 256m
+    networks:
+      - media-os-test-net
+
+  media-os-test-redis:
+    image: redis:7.2@sha256:5b816bb37d9707a70f10ef5002ecf8ee431750d397010fc4314c93dca887962f
+    container_name: media-os-test-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb"]
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    mem_limit: 64m
+    networks:
+      - media-os-test-net
+
+networks:
+  media-os-test-net:
+    name: media-os-test-net

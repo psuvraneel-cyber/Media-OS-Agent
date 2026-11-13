@@ -2,12 +2,12 @@
 
 from media_os_api.services.audit_service import list_recent_audit_events, record_audit_event
 from media_os_api.services.brand_service import (
+    VALID_EDITORIAL_STATUSES,
     BrandDomainError,
     BrandIsolationError,
     BrandNotFoundError,
     BrandPolicyError,
     ClaimVerificationError,
-    VALID_EDITORIAL_STATUSES,
     attach_claim_source,
     create_asset_scoped,
     create_brand,
@@ -41,6 +41,10 @@ from media_os_api.services.fixtures import (
     list_channel_fixtures,
 )
 from media_os_api.services.postiz_probe import probe_postiz_reachability
+from media_os_api.services.research_service import (
+    ingest_candidate_batch,
+    ingest_discovery_candidate,
+)
 
 __all__ = [
     "BrandDomainError",
@@ -63,6 +67,8 @@ __all__ = [
     "get_brand_topic_assignment_scoped",
     "get_content_package_scoped",
     "get_module_boundaries",
+    "ingest_candidate_batch",
+    "ingest_discovery_candidate",
     "list_brand_fixtures",
     "list_brand_topic_assignments_scoped",
     "list_brands",

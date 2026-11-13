@@ -40,7 +40,15 @@ def resolve_tool_path(repo_root: Path, tool: str) -> Path | str:
         sys.exit(1)
 
     custom_venv = os.environ.get("MEDIA_OS_VENV_PATH") or os.environ.get("VIRTUAL_ENV")
-    venv_dir = Path(custom_venv).resolve() if custom_venv else (repo_root / ".venv")
+    if custom_venv:
+        venv_dir = Path(custom_venv).resolve()
+    elif (repo_root / ".venv").is_dir():
+        venv_dir = repo_root / ".venv"
+    elif (repo_root / "media-intelligence-os" / ".venv").is_dir():
+        venv_dir = repo_root / "media-intelligence-os" / ".venv"
+    else:
+        venv_dir = repo_root / ".venv"
+
     is_windows = sys.platform == "win32"
     bin_dir = venv_dir / ("Scripts" if is_windows else "bin")
 
@@ -124,10 +132,24 @@ def main() -> None:
     args = sys.argv[2:]
 
     repo_root = Path(__file__).resolve().parent.parent
+    project_dir = (
+        (repo_root / "media-intelligence-os")
+        if (repo_root / "media-intelligence-os" / "pyproject.toml").is_file()
+        else repo_root
+    )
     tool_exec = resolve_tool_path(repo_root, tool)
 
+    run_cwd: str | None = None
+    if tool == "mypy" and not any(a.startswith("--config-file") for a in args):
+        run_cwd = str(project_dir)
+
+    if tool == "python" and args and args[0].endswith(".py"):
+        cand = Path(args[0])
+        if not cand.is_file() and (project_dir / args[0]).is_file():
+            args[0] = str(project_dir / args[0])
+
     try:
-        proc = subprocess.run([str(tool_exec), *args], check=False)
+        proc = subprocess.run([str(tool_exec), *args], check=False, cwd=run_cwd)
         sys.exit(proc.returncode)
     except OSError as exc:
         print(f"Error executing '{tool_exec}': {exc}", file=sys.stderr)

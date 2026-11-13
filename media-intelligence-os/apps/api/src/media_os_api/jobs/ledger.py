@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -23,6 +25,38 @@ from media_os_api.jobs.errors import (
 )
 
 TERMINAL_JOB_STATUSES = frozenset({"SUCCEEDED", "FAILED_FINAL", "CANCELLED"})
+
+ITEMS_REDACTED_MARKER = "items_redacted"
+
+
+def items_digest(items: Any) -> str:
+    """Stable SHA-256 over a JSON-serialisable item list (used to identify scrubbed payloads)."""
+    canonical = json.dumps(items, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def redact_items_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return `payload` with bulk `items` replaced by a count + digest.
+
+    Used to remove untrusted third-party content from the durable job ledger once it is no longer
+    needed for retries. Idempotent: an already-redacted payload is returned unchanged.
+    """
+    if payload.get(ITEMS_REDACTED_MARKER) is True:
+        return dict(payload)
+    items = payload.get("items") or []
+    redacted = {k: v for k, v in payload.items() if k != "items"}
+    redacted["item_count"] = len(items) if isinstance(items, list) else 0
+    redacted["items_sha256"] = str(payload.get("items_sha256") or items_digest(items))
+    redacted[ITEMS_REDACTED_MARKER] = True
+    return redacted
+
+
+def _payloads_equivalent(existing: Mapping[str, Any] | None, new: Mapping[str, Any]) -> bool:
+    """Exact match, or `existing` is the redacted form of `new` (same items digest)."""
+    current = dict(existing or {})
+    if current == dict(new):
+        return True
+    return current.get(ITEMS_REDACTED_MARKER) is True and current == redact_items_payload(new)
 
 
 @dataclass(frozen=True)
@@ -72,7 +106,7 @@ def enqueue_durable_job(
         if (
             existing.task_name != task_name
             or existing.task_type != task_type
-            or existing.payload != safe_payload
+            or not _payloads_equivalent(existing.payload, safe_payload)
         ):
             raise JobIdempotencyConflictError(
                 f"Idempotency key '{idempotency_key}' already bound to a different job."
@@ -127,7 +161,7 @@ def enqueue_durable_job(
         if (
             existing_after_race.task_name != task_name
             or existing_after_race.task_type != task_type
-            or existing_after_race.payload != safe_payload
+            or not _payloads_equivalent(existing_after_race.payload, safe_payload)
         ):
             raise JobIdempotencyConflictError(
                 f"Idempotency key '{idempotency_key}' already bound to a different job."

@@ -31,6 +31,7 @@ KEY_TABLES: tuple[str, ...] = (
     "outbox_events",
     "audit_events",
     "content_packages",
+    "brand_topic_assignments",
 )
 
 

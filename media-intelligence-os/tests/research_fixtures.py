@@ -1,0 +1,284 @@
+"""Shared fixture-backed upstreams for research fetcher tests (no network)."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+
+import httpx
+
+from media_os_api.research.fetchers.hackernews import HackerNewsFetcher
+from media_os_api.research.http import (
+    InMemoryMinIntervalLimiter,
+    RateLimiter,
+    RetryPolicy,
+    SafeHttpClient,
+)
+
+HN_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research" / "hackernews"
+
+
+class HackerNewsFixtureUpstream:
+    def __init__(self) -> None:
+        self.paths: list[str] = []
+        self.status_override: dict[str, int] = {}
+        self.body_override: dict[str, bytes] = {}
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "hacker-news.firebaseio.com"
+        assert request.url.scheme == "https"
+        path = request.url.path
+        self.paths.append(path)
+        if path in self.status_override:
+            return httpx.Response(self.status_override[path])
+        if path in self.body_override:
+            return httpx.Response(200, content=self.body_override[path])
+        rel = path.removeprefix("/v0/").replace("item/", "items/", 1)
+        file = HN_FIXTURES / rel
+        if not file.is_file():
+            return httpx.Response(404)
+        return httpx.Response(
+            200, content=file.read_bytes(), headers={"content-type": "application/json"}
+        )
+
+    def item_requests(self) -> list[str]:
+        return [p for p in self.paths if p.startswith("/v0/item/")]
+
+
+def make_hn_http(upstream: Callable[[httpx.Request], httpx.Response]) -> SafeHttpClient:
+    fetcher = HackerNewsFetcher
+    return SafeHttpClient(
+        source_code=fetcher.source_code,
+        policy=fetcher.host_policy,
+        rate_limiter=InMemoryMinIntervalLimiter(sleep=lambda _s: None),
+        min_interval_ms=fetcher.default_min_interval_ms,
+        transport=httpx.MockTransport(upstream),
+        resolver=lambda _h, _p: ["151.101.1.1"],
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
+        sleep=lambda _s: None,
+    )
+
+
+# --------------------------------------------------------------------------- arXiv
+
+ARXIV_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research" / "arxiv"
+
+
+def atom_feed(entries: list[tuple[str, str, str]], total: int | None = None) -> bytes:
+    """Build a synthetic arXiv-shaped Atom feed from (paper_id, published_iso, title)."""
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<feed xmlns="http://www.w3.org/2005/Atom" '
+        'xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" '
+        'xmlns:arxiv="http://arxiv.org/schemas/atom">',
+        "<id>http://arxiv.org/api/fixture</id>",
+        f"<opensearch:totalResults>{total if total is not None else len(entries)}"
+        "</opensearch:totalResults>",
+    ]
+    for paper_id, published, title in entries:
+        parts.append(
+            f"<entry><id>http://arxiv.org/abs/{paper_id}</id>"
+            f"<published>{published}</published><updated>{published}</updated>"
+            f"<title>{title}</title><summary>Synthetic abstract for {paper_id}.</summary>"
+            "<author><name>Fixture Author</name></author>"
+            f'<link title="pdf" href="http://arxiv.org/pdf/{paper_id}" rel="related"/>'
+            '<arxiv:primary_category term="cs.AI"/></entry>'
+        )
+    parts.append("</feed>")
+    return "\n".join(parts).encode("utf-8")
+
+
+class ArxivFixtureUpstream:
+    """Serves `export.arxiv.org/api/query` from per-category entry lists (newest first)."""
+
+    def __init__(self, entries_by_category: dict[str, list[tuple[str, str, str]]]) -> None:
+        self.entries = entries_by_category
+        self.requests: list[httpx.Request] = []
+        self.raw_override: dict[str, bytes] = {}  # category -> raw body
+        self.status_override: dict[str, int] = {}
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "export.arxiv.org"
+        assert request.url.scheme == "https"
+        assert request.url.path == "/api/query"
+        self.requests.append(request)
+        query = request.url.params["search_query"]
+        assert query.startswith("cat:")
+        category = query.removeprefix("cat:")
+        if category in self.status_override:
+            return httpx.Response(self.status_override[category])
+        if category in self.raw_override:
+            return httpx.Response(200, content=self.raw_override[category])
+        start = int(request.url.params["start"])
+        size = int(request.url.params["max_results"])
+        all_entries = self.entries.get(category, [])
+        body = atom_feed(all_entries[start : start + size], total=len(all_entries))
+        return httpx.Response(200, content=body, headers={"content-type": "application/atom+xml"})
+
+    def starts_for(self, category: str) -> list[int]:
+        return [
+            int(r.url.params["start"])
+            for r in self.requests
+            if r.url.params["search_query"] == f"cat:{category}"
+        ]
+
+
+def make_arxiv_http(
+    upstream: Callable[[httpx.Request], httpx.Response], limiter: RateLimiter | None = None
+) -> SafeHttpClient:
+    from media_os_api.research.fetchers.arxiv import ArxivFetcher
+
+    return SafeHttpClient(
+        source_code=ArxivFetcher.source_code,
+        policy=ArxivFetcher.host_policy,
+        rate_limiter=limiter or InMemoryMinIntervalLimiter(sleep=lambda _s: None),
+        min_interval_ms=ArxivFetcher.default_min_interval_ms,
+        transport=httpx.MockTransport(upstream),
+        resolver=lambda _h, _p: ["128.84.21.199"],
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
+        sleep=lambda _s: None,
+    )
+
+
+# --------------------------------------------------------------------------- OpenAI News
+
+OPENAI_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research" / "openai_news"
+
+
+class OpenAINewsFixtureUpstream:
+    """Serves the OpenAI News feed with ETag / Last-Modified support."""
+
+    def __init__(self, fixture: str = "rss_sample.xml") -> None:
+        self.body = (OPENAI_FIXTURES / fixture).read_bytes()
+        self.content_type = "application/rss+xml; charset=utf-8"
+        self.etag: str | None = '"rss-v1"'
+        self.last_modified: str | None = "Thu, 12 Nov 2026 17:05:00 GMT"
+        self.status: int | None = None
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://openai.com/news/rss.xml"
+        self.requests.append(request)
+        if self.status is not None:
+            return httpx.Response(self.status)
+        if self.etag and request.headers.get("if-none-match") == self.etag:
+            return httpx.Response(304, headers={"etag": self.etag})
+        headers = {"content-type": self.content_type}
+        if self.etag:
+            headers["etag"] = self.etag
+        if self.last_modified:
+            headers["last-modified"] = self.last_modified
+        return httpx.Response(200, content=self.body, headers=headers)
+
+
+def make_openai_http(upstream: Callable[[httpx.Request], httpx.Response]) -> SafeHttpClient:
+    from media_os_api.research.fetchers.openai_news import OpenAINewsFetcher
+
+    return SafeHttpClient(
+        source_code=OpenAINewsFetcher.source_code,
+        policy=OpenAINewsFetcher.host_policy,
+        rate_limiter=InMemoryMinIntervalLimiter(sleep=lambda _s: None),
+        min_interval_ms=OpenAINewsFetcher.default_min_interval_ms,
+        transport=httpx.MockTransport(upstream),
+        resolver=lambda _h, _p: ["104.18.33.45"],
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
+        sleep=lambda _s: None,
+    )
+
+
+# --------------------------------------------------------------------------- GitHub
+
+GITHUB_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research" / "github"
+
+
+class GitHubFixtureUpstream:
+    """Serves GitHub search and releases endpoints with per-repository ETags."""
+
+    def __init__(self) -> None:
+        self.search_body = (GITHUB_FIXTURES / "search_llm.json").read_bytes()
+        self.releases: dict[str, bytes] = {
+            "fixture-org/agent-kit": (GITHUB_FIXTURES / "releases_agent-kit.json").read_bytes()
+        }
+        self.release_etags: dict[str, str] = {"fixture-org/agent-kit": '"rel-v1"'}
+        self.status_override: dict[str, int] = {}  # path -> status
+        self.extra_headers: dict[str, dict[str, str]] = {}
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.github.com" and request.url.scheme == "https"
+        self.requests.append(request)
+        path = request.url.path
+        if path in self.status_override:
+            return httpx.Response(
+                self.status_override[path], headers=self.extra_headers.get(path, {})
+            )
+        if path == "/search/repositories":
+            return httpx.Response(200, content=self.search_body)
+        if path.startswith("/repos/") and path.endswith("/releases"):
+            repo = path.removeprefix("/repos/").removesuffix("/releases")
+            if repo not in self.releases:
+                return httpx.Response(404)
+            etag = self.release_etags.get(repo)
+            if etag and request.headers.get("if-none-match") == etag:
+                return httpx.Response(304, headers={"etag": etag})
+            return httpx.Response(
+                200, content=self.releases[repo], headers={"etag": etag} if etag else {}
+            )
+        return httpx.Response(404)
+
+
+def make_github_http(
+    upstream: Callable[[httpx.Request], httpx.Response], token: str | None = None
+) -> SafeHttpClient:
+    from media_os_api.research.fetchers.github import GitHubFetcher
+
+    return SafeHttpClient(
+        source_code=GitHubFetcher.source_code,
+        policy=GitHubFetcher.host_policy,
+        rate_limiter=InMemoryMinIntervalLimiter(sleep=lambda _s: None),
+        min_interval_ms=GitHubFetcher.default_min_interval_ms,
+        transport=httpx.MockTransport(upstream),
+        resolver=lambda _h, _p: ["140.82.112.6"],
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
+        bearer_token=token,
+        sleep=lambda _s: None,
+    )
+
+
+# --------------------------------------------------------------------------- Hugging Face
+
+HF_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research" / "huggingface"
+
+
+class HuggingFaceFixtureUpstream:
+    def __init__(self) -> None:
+        self.bodies = {
+            n: (HF_FIXTURES / f"{n}.json").read_bytes() for n in ("models", "datasets", "spaces")
+        }
+        self.status_override: dict[str, int] = {}
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "huggingface.co" and request.url.scheme == "https"
+        self.requests.append(request)
+        kind = request.url.path.removeprefix("/api/")
+        if kind in self.status_override:
+            return httpx.Response(self.status_override[kind])
+        if kind not in self.bodies:
+            return httpx.Response(404)
+        return httpx.Response(200, content=self.bodies[kind])
+
+
+def make_hf_http(upstream: Callable[[httpx.Request], httpx.Response]) -> SafeHttpClient:
+    from media_os_api.research.fetchers.huggingface import HuggingFaceFetcher
+
+    return SafeHttpClient(
+        source_code=HuggingFaceFetcher.source_code,
+        policy=HuggingFaceFetcher.host_policy,
+        rate_limiter=InMemoryMinIntervalLimiter(sleep=lambda _s: None),
+        min_interval_ms=HuggingFaceFetcher.default_min_interval_ms,
+        transport=httpx.MockTransport(upstream),
+        resolver=lambda _h, _p: ["18.154.227.67"],
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
+        sleep=lambda _s: None,
+    )

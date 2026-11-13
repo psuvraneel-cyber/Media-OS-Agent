@@ -1,0 +1,96 @@
+{
+  "live_smoke": true,
+  "database": "disposable media-os-test (tmpfs) \u2014 runtime DB untouched",
+  "source": "HUGGINGFACE",
+  "stream": "models",
+  "max_items": 5,
+  "started_at_utc": "2026-11-13T19:06:40.418726+00:00",
+  "finished_at_utc": "2026-11-13T19:06:41.349173+00:00",
+  "outcome": {
+    "status": "SUCCEEDED",
+    "started_at": "2026-11-13T19:06:40.497370+00:00",
+    "http_requests": 1,
+    "totals": {
+      "records_seen": 5,
+      "candidates_ingested": 5,
+      "new_sources": 5,
+      "new_clusters": 5,
+      "assignments_created": 10,
+      "malformed": 0,
+      "pages": 1
+    },
+    "streams": {
+      "models": {
+        "status": "ok",
+        "error_code": null,
+        "pages": 1,
+        "new_sources": 5,
+        "malformed": 0,
+        "fetch_errors": {}
+      }
+    },
+    "stream_details": [
+      {
+        "name": "models",
+        "status": "ok",
+        "pages": 1,
+        "records_seen": 5,
+        "candidates_ingested": 5,
+        "new_sources": 5,
+        "new_clusters": 5,
+        "assignments_created": 10,
+        "malformed": 0,
+        "malformed_codes": {},
+        "fetch_errors": {},
+        "error_code": null,
+        "retry_after_seconds": null
+      }
+    ]
+  },
+  "health": {
+    "health_status": "HEALTHY",
+    "last_error_code": null
+  },
+  "sample_items": [
+    {
+      "provider": "HUGGINGFACE_MODEL",
+      "external_id": "speridlabs/idol",
+      "title": "speridlabs/idol (Hugging Face Model)",
+      "canonical_url": "https://huggingface.co/speridlabs/idol",
+      "published_at": "2026-10-28T15:55:17+00:00",
+      "summary_chars": 11
+    },
+    {
+      "provider": "HUGGINGFACE_MODEL",
+      "external_id": "Lightricks/LTX-2.5",
+      "title": "Lightricks/LTX-2.5 (Hugging Face Model)",
+      "canonical_url": "https://huggingface.co/Lightricks/LTX-2.5",
+      "published_at": "2026-07-23T07:55:24+00:00",
+      "summary_chars": 14
+    },
+    {
+      "provider": "HUGGINGFACE_MODEL",
+      "external_id": "NousResearch/Arete-27B",
+      "title": "NousResearch/Arete-27B (Hugging Face Model)",
+      "canonical_url": "https://huggingface.co/NousResearch/Arete-27B",
+      "published_at": "2026-11-06T19:31:28+00:00",
+      "summary_chars": 15
+    },
+    {
+      "provider": "HUGGINGFACE_MODEL",
+      "external_id": "MiniMaxAI/MiniMax-H3-Image",
+      "title": "MiniMaxAI/MiniMax-H3-Image (Hugging Face Model)",
+      "canonical_url": "https://huggingface.co/MiniMaxAI/MiniMax-H3-Image",
+      "published_at": "2026-11-03T06:34:36+00:00",
+      "summary_chars": 13
+    },
+    {
+      "provider": "HUGGINGFACE_MODEL",
+      "external_id": "xtools-at/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic",
+      "title": "xtools-at/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic (Hugging Face Model)",
+      "canonical_url": "https://huggingface.co/xtools-at/DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic",
+      "published_at": "2026-10-30T10:21:29+00:00",
+      "summary_chars": 15
+    }
+  ]
+}

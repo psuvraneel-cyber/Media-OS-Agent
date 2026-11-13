@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+<title>OpenAI News (fixture)</title>
+<link>https://openai.com/news</link>
+<description>Synthetic fixture feed</description>
+<item><title><![CDATA[Valid item]]></title><link>https://openai.com/index/fixture-ok/</link><guid isPermaLink="false">fixture-ok</guid><pubDate>Mon, 09 Nov 2026 10:00:00 GMT</pubDate><description><![CDATA[Synthetic summary.]]></description><category><![CDATA[Product]]></category></item>
+<item><title>Foreign link</title><link>https://evil.example.org/index/x</link><pubDate>Mon, 09 Nov 2026 09:00:00 GMT</pubDate></item>
+<item><title>Plain http</title><link>http://openai.com/index/insecure</link><pubDate>Mon, 09 Nov 2026 08:00:00 GMT</pubDate></item>
+<item><title></title><link>https://openai.com/index/no-title</link><pubDate>Mon, 09 Nov 2026 07:00:00 GMT</pubDate></item>
+<item><title>Bad date</title><link>https://openai.com/index/bad-date</link><pubDate>someday</pubDate></item>
+</channel>
+</rss>

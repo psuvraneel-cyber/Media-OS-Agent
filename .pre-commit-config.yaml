@@ -1,0 +1,39 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format check
+        entry: python scripts/run_in_env.py ruff format --check
+        language: system
+        types: [python]
+      - id: ruff-lint
+        name: ruff lint
+        entry: python scripts/run_in_env.py ruff check
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy type check
+        entry: python scripts/run_in_env.py mypy
+        language: system
+        pass_filenames: false
+      - id: scan-secrets
+        name: scan repository for secrets
+        entry: python scripts/run_in_env.py python scripts/scan_secrets.py
+        language: system
+        pass_filenames: false
+      - id: verify-ref-manifests
+        name: verify reference repository manifests
+        entry: python scripts/run_in_env.py python scripts/generate_ref_manifests.py --verify
+        language: system
+        pass_filenames: false

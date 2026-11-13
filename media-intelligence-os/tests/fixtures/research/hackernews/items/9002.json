@@ -1,0 +1,10 @@
+{
+  "by": "fixture_user2",
+  "descendants": 5,
+  "id": 9002,
+  "score": 57,
+  "text": "I&#x27;m curious how people evaluate <i>tool-use</i> &amp; agents.<p>&lt;script&gt;alert(1)&lt;/script&gt; should never survive.",
+  "time": 1763035260,
+  "title": "Ask HN: How do you evaluate LLM tool use?",
+  "type": "story"
+}

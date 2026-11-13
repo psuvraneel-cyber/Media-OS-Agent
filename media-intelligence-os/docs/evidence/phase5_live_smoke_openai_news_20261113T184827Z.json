@@ -1,0 +1,96 @@
+{
+  "live_smoke": true,
+  "database": "disposable media-os-test (tmpfs) \u2014 runtime DB untouched",
+  "source": "OPENAI_NEWS",
+  "stream": "news",
+  "max_items": 5,
+  "started_at_utc": "2026-11-13T18:48:27.447598+00:00",
+  "finished_at_utc": "2026-11-13T18:48:28.189423+00:00",
+  "outcome": {
+    "status": "SUCCEEDED",
+    "started_at": "2026-11-13T18:48:27.516851+00:00",
+    "http_requests": 1,
+    "totals": {
+      "records_seen": 5,
+      "candidates_ingested": 5,
+      "new_sources": 5,
+      "new_clusters": 5,
+      "assignments_created": 10,
+      "malformed": 0,
+      "pages": 1
+    },
+    "streams": {
+      "news": {
+        "status": "ok",
+        "error_code": null,
+        "pages": 1,
+        "new_sources": 5,
+        "malformed": 0,
+        "fetch_errors": {}
+      }
+    },
+    "stream_details": [
+      {
+        "name": "news",
+        "status": "ok",
+        "pages": 1,
+        "records_seen": 5,
+        "candidates_ingested": 5,
+        "new_sources": 5,
+        "new_clusters": 5,
+        "assignments_created": 10,
+        "malformed": 0,
+        "malformed_codes": {},
+        "fetch_errors": {},
+        "error_code": null,
+        "retry_after_seconds": null
+      }
+    ]
+  },
+  "health": {
+    "health_status": "HEALTHY",
+    "last_error_code": null
+  },
+  "sample_items": [
+    {
+      "provider": "OPENAI_NEWS",
+      "external_id": "index/children-first-declaration",
+      "title": "Supporting research on AI and children\u2019s safety",
+      "canonical_url": "https://openai.com/index/children-first-declaration",
+      "published_at": "2026-11-12T00:00:00+00:00",
+      "summary_chars": 150
+    },
+    {
+      "provider": "OPENAI_NEWS",
+      "external_id": "business/customer-stories/holidays-extras-codex",
+      "title": "Holiday Extras is rethinking what it can build with Codex",
+      "canonical_url": "https://openai.com/business/customer-stories/holidays-extras-codex",
+      "published_at": "2026-11-12T09:30:00+00:00",
+      "summary_chars": 134
+    },
+    {
+      "provider": "OPENAI_NEWS",
+      "external_id": "business/customer-stories/gondola",
+      "title": "Gondola doubles revenue as its team builds more with Codex",
+      "canonical_url": "https://openai.com/business/customer-stories/gondola",
+      "published_at": "2026-11-12T12:00:00+00:00",
+      "summary_chars": 138
+    },
+    {
+      "provider": "OPENAI_NEWS",
+      "external_id": "business/customer-stories/amplitude",
+      "title": "How Amplitude ships product improvements in 1\u20132 days with OpenAI",
+      "canonical_url": "https://openai.com/business/customer-stories/amplitude",
+      "published_at": "2026-11-12T20:00:00+00:00",
+      "summary_chars": 172
+    },
+    {
+      "provider": "OPENAI_NEWS",
+      "external_id": "index/introducing-chatgpt-wallet",
+      "title": "Introducing ChatGPT Wallet",
+      "canonical_url": "https://openai.com/index/introducing-chatgpt-wallet",
+      "published_at": "2026-11-13T15:00:00+00:00",
+      "summary_chars": 156
+    }
+  ]
+}
