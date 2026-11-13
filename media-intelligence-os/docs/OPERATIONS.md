@@ -49,6 +49,22 @@ Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health"
 docker compose --env-file "C:\Media OS Agent\media-os-runtime\.env" -f infra/docker/compose.app.yml down
 ```
 
+### Pre-Commit Quality Gates & Tool Dispatcher
+All Git commits automatically execute the project's pre-commit suite without requiring tools to be in system PATH:
+```powershell
+# Run all pre-commit hooks manually across the entire repository
+.\media-intelligence-os\.venv\Scripts\pre-commit.exe run --all-files
+
+# Or using the cross-platform dispatcher directly
+python scripts/run_in_env.py ruff format --check
+python scripts/run_in_env.py ruff check
+python scripts/run_in_env.py mypy
+python scripts/run_in_env.py python scripts/scan_secrets.py
+python scripts/run_in_env.py python scripts/generate_ref_manifests.py --verify
+```
+> [!NOTE]
+> Bypassing Git hooks with `--no-verify` is strictly prohibited. If a check fails, resolve the violation or run `python scripts/run_in_env.py ruff format` to auto-format before committing.
+
 ### Phase 1 Baseline & Phase 2 Standalone Postiz Commands
 - **Phase 1 Baseline:** `docker compose -f infra/docker/compose.baseline.yml up -d --build` → `http://127.0.0.1:8000/health` → `down`.
 - **Postiz (`C:\Media OS Agent\postiz-runtime`):** `docker compose up -d --wait` → verify `http://localhost:4007/api/auth/can-register` (`{"register":false}`) → `docker compose down` (NEVER `down -v`).
@@ -86,7 +102,7 @@ docker compose --env-file "C:\Media OS Agent\media-os-runtime\.env" -f infra/doc
 ## 5. Backup & Recovery Strategy
 
 - **On-Demand / Scheduled Backups:** `python scripts/backup_db.py` creates custom-format PostgreSQL dumps (`pg_dump -Fc`) with `.dump.sha256` sidecars and runs `pg_restore --list` validation.
-- **Isolated Restore Verification:** `python scripts/restore_verify.py` restores the archive into a disposable temporary database inside `media-os-postgres` (`media_os_restore_verify_<timestamp>_<hex>`), checks Alembic revision `0003_domain_integrity_hardening`, compares live vs restored SHA-256 content hashes (brands, schedules, jobs, non-secret owner identity) and table counts, and drops the temporary DB afterward.
+- **Isolated Restore Verification:** `python scripts/restore_verify.py` restores the archive into a disposable temporary database inside `media-os-postgres` (`media_os_restore_verify_<timestamp>_<hex>`), checks Alembic revision `0004_add_brand_topic_assignments`, compares live vs restored SHA-256 content hashes (brands, schedules, jobs, non-secret owner identity) and table counts, and drops the temporary DB afterward.
 - **Postiz Independence:** `postiz-runtime` maintains its own `postiz-postgres` backups and `postiz-uploads` / `postiz-config` volumes separately.
 
 ---

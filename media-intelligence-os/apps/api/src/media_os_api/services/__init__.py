@@ -2,12 +2,12 @@
 
 from media_os_api.services.audit_service import list_recent_audit_events, record_audit_event
 from media_os_api.services.brand_service import (
+    VALID_EDITORIAL_STATUSES,
     BrandDomainError,
     BrandIsolationError,
     BrandNotFoundError,
     BrandPolicyError,
     ClaimVerificationError,
-    VALID_EDITORIAL_STATUSES,
     attach_claim_source,
     create_asset_scoped,
     create_brand,

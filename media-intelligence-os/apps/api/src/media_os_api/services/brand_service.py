@@ -493,7 +493,8 @@ def update_brand_topic_assignment_scoped(
     )
     if assignment is None:
         raise BrandDomainError(
-            f"BrandTopicAssignment not found for brand {brand_profile_id} and topic {topic_cluster_id}."
+            f"BrandTopicAssignment not found for brand {brand_profile_id} "
+            f"and topic {topic_cluster_id}."
         )
 
     if editorial_status is not None:
@@ -550,8 +551,9 @@ def create_research_packet_scoped(
     eligible_statuses = {"APPROVED_FOR_RESEARCH", "SHORTLISTED"}
     if assignment.editorial_status not in eligible_statuses:
         raise BrandPolicyError(
-            f"Cannot create ResearchPacket: Topic assignment status '{assignment.editorial_status}' "
-            f"is not eligible for research (must be in {sorted(eligible_statuses)})."
+            f"Cannot create ResearchPacket: Topic assignment status "
+            f"'{assignment.editorial_status}' is not eligible for research "
+            f"(must be in {sorted(eligible_statuses)})."
         )
 
     packet = ResearchPacket(

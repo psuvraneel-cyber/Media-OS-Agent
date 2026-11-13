@@ -15,7 +15,6 @@ from media_os_api.db import (
     BRAND_TECH_AI_ID,
     Asset,
     BrandProfile,
-    BrandTopicAssignment,
     MetricsSnapshot,
     PublishSchedule,
     SourceItem,

@@ -19,7 +19,8 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _VALID_EDITORIAL_STATUSES_SQL = (
-    "('PENDING_EVALUATION', 'CONSIDERED', 'SHORTLISTED', 'APPROVED_FOR_RESEARCH', 'REJECTED', 'EXPIRED')"
+    "('PENDING_EVALUATION', 'CONSIDERED', 'SHORTLISTED', "
+    "'APPROVED_FOR_RESEARCH', 'REJECTED', 'EXPIRED')"
 )
 
 

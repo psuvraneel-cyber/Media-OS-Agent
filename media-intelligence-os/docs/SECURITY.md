@@ -106,3 +106,16 @@ All external research inputs (Hacker News titles/comments, GitHub READMEs/issues
   - *Postiz API Key leaked:* Rotate API key in Postiz Settings (`http://localhost:4007`) and update local `.env`.
   - *Social OAuth token compromised:* Revoke app authorization directly in Meta Business Integrations / Instagram Settings or Google Account Security (`myaccount.google.com/permissions`), then disconnect in Postiz.
   - *Git history leak:* Immediately revoke/rotate the exposed credential (Git history purge alone is insufficient once pushed or copied).
+
+---
+
+## 10. Multi-Brand Isolation & Cross-Tenant Safeguards
+
+- **Shared Intelligence Decoupling:** Global candidate ingestion (`source_items`, `topic_clusters`) contains zero brand identity. Brand editorial interest is established strictly via `BrandTopicAssignment`.
+- **Database Composite Foreign Keys:** Cross-brand leakage is prevented at the relational engine level:
+  - `fk_research_packets_brand_topic (brand_profile_id, topic_cluster_id)` references `brand_topic_assignments (brand_profile_id, topic_cluster_id) ON DELETE RESTRICT`. A research packet cannot be inserted or reassigned to a brand profile without an explicit, matching brand topic assignment.
+  - `uq_channel_accounts_id_brand (id, brand_profile_id)` and `uq_content_packages_id_brand (id, brand_profile_id)` prevent mixing channel accounts across different brands.
+- **Service-Layer Enforcement:**
+  - `create_research_packet_scoped()` enforces that a topic's `editorial_status` must be `APPROVED_FOR_RESEARCH` or `SHORTLISTED`. Attempting to generate research from `REJECTED`, `EXPIRED`, or `PENDING_EVALUATION` topics raises `BrandPolicyError`.
+  - Reassigning content packages across brands via `reassign_content_package_brand()` is blocked once packages have associated assets or schedules.
+  - Social posting adapters verify that `ContentPackage.brand_profile_id == ChannelAccount.brand_profile_id` before delegating to Postiz, preventing accidental cross-account mis-posting.
