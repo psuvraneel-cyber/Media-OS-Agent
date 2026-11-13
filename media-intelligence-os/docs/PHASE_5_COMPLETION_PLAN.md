@@ -241,7 +241,7 @@ Atom/RSS. No other new dependency.
 |---|---|---|---|---|
 | Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Verified live 2026-11-13 16:34:47Z** (owner-approved; disposable DB; `topstories`, 5 items) — see below |
 | arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Verified live 2026-11-13 18:08:30Z** (owner-approved; disposable DB; `cat:cs.AI`, 5 papers) — see below |
-| OpenAI News | — (M4c) | — | — | — |
+| OpenAI News | `research/fetchers/openai_news.py` (M4c) | 11 unit | 2 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source OPENAI_NEWS --owner-approved`) |
 | GitHub | — (M4d) | — | — | — |
 | Hugging Face | — (M4e) | — | — | — |
 
@@ -343,6 +343,22 @@ feed, id validation, old-style ids, version → same cluster); integration 50 pa
 extra assignments, per-category high-water, attack payload isolated to one category, malformed
 entries skipped individually). Smoke script generalised via `SourceFetcher.bounded_config` and
 dry-run offline for both HN and arXiv. **No live arXiv request has been made.**
+
+**M4c OpenAI News (as built):**
+- Official RSS only: `https://openai.com/news/rss.xml`; allowlist `openai.com`, `www.openai.com`; no
+  credentials; 2 MiB cap; ≥ 1 s spacing. Single `news` stream.
+- Conditional GET with stored ETag / Last-Modified (304 → one request, nothing ingested); a bounded
+  `seen_ids` window (500) skips items already processed when the feed changes; ≤ 30 new items per run.
+- RSS parsed with `defusedxml` (DTD/entities/external forbidden). An **HTML response (bot challenge or
+  error page) is a permanent `FEED_BLOCKED_OR_HTML` failure — recorded in health with backoff and never
+  circumvented** (one request, no retries, no browser emulation or scraping fallback).
+- Items must link to `https://openai.com/...`; the stable id is the link path (e.g.
+  `index/introducing-x`); the stored URL is rebuilt from that path. Description → sanitised ≤ 500-char
+  summary; category kept as topic metadata.
+
+**M4c verification:** unit 190 passed (11 new); integration 52 passed / 2 skipped (2 new: end-to-end
+with a 1-request 304 second run; bot challenge → `SOURCE_FETCH_FAILED`, health `DEGRADED` with
+backoff, checkpoint untouched). **No live request has been made.**
 
 ### M5 — Source-specific jobs & disabled schedules
 

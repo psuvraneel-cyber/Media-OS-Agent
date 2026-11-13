@@ -138,3 +138,49 @@ def make_arxiv_http(
         retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
         sleep=lambda _s: None,
     )
+
+
+# --------------------------------------------------------------------------- OpenAI News
+
+OPENAI_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research" / "openai_news"
+
+
+class OpenAINewsFixtureUpstream:
+    """Serves the OpenAI News feed with ETag / Last-Modified support."""
+
+    def __init__(self, fixture: str = "rss_sample.xml") -> None:
+        self.body = (OPENAI_FIXTURES / fixture).read_bytes()
+        self.content_type = "application/rss+xml; charset=utf-8"
+        self.etag: str | None = '"rss-v1"'
+        self.last_modified: str | None = "Thu, 12 Nov 2026 17:05:00 GMT"
+        self.status: int | None = None
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == "https://openai.com/news/rss.xml"
+        self.requests.append(request)
+        if self.status is not None:
+            return httpx.Response(self.status)
+        if self.etag and request.headers.get("if-none-match") == self.etag:
+            return httpx.Response(304, headers={"etag": self.etag})
+        headers = {"content-type": self.content_type}
+        if self.etag:
+            headers["etag"] = self.etag
+        if self.last_modified:
+            headers["last-modified"] = self.last_modified
+        return httpx.Response(200, content=self.body, headers=headers)
+
+
+def make_openai_http(upstream: Callable[[httpx.Request], httpx.Response]) -> SafeHttpClient:
+    from media_os_api.research.fetchers.openai_news import OpenAINewsFetcher
+
+    return SafeHttpClient(
+        source_code=OpenAINewsFetcher.source_code,
+        policy=OpenAINewsFetcher.host_policy,
+        rate_limiter=InMemoryMinIntervalLimiter(sleep=lambda _s: None),
+        min_interval_ms=OpenAINewsFetcher.default_min_interval_ms,
+        transport=httpx.MockTransport(upstream),
+        resolver=lambda _h, _p: ["104.18.33.45"],
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
+        sleep=lambda _s: None,
+    )
