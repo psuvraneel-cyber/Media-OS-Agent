@@ -14,6 +14,7 @@ errors. Response bodies are returned as bytes for the caller to parse as untrust
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable, Mapping
@@ -42,6 +43,7 @@ from media_os_api.research.http.ssrf import (
 logger = logging.getLogger("media_os_api.research.http")
 
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_RATE_LIMIT_CODES = frozenset({"HTTP_429", "HTTP_403_RATE_LIMITED"})
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,8 @@ class SafeHttpClient:
         resolver: Resolver = system_resolver,
         retry_policy: RetryPolicy | None = None,
         bearer_token: str | None = None,
+        auth_header: str = "Authorization",
+        auth_scheme: str | None = "Bearer",
         user_agent: str = DEFAULT_USER_AGENT,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
@@ -80,6 +84,8 @@ class SafeHttpClient:
         self._resolver = resolver
         self._retry = retry_policy or RetryPolicy()
         self._token = bearer_token.strip() if bearer_token and bearer_token.strip() else None
+        self._auth_header = auth_header
+        self._auth_scheme = auth_scheme
         self._sleep = sleep
         self._now = now
         self._user_agent = user_agent
@@ -115,21 +121,46 @@ class SafeHttpClient:
         accept: str | None = None,
     ) -> HttpResult:
         """GET with retries; raises RetryableFetchError / PermanentFetchError subclasses."""
+        return self._with_retries(
+            lambda attempt: self._get_once(
+                url,
+                params=params,
+                etag=etag,
+                last_modified=last_modified,
+                accept=accept,
+                attempt=attempt,
+            )
+        )
+
+    def post_json(
+        self, url: str, payload: Mapping[str, Any], *, accept: str = "application/json"
+    ) -> HttpResult:
+        """POST a JSON body (no redirects followed) with the same retry/limit/SSRF guarantees."""
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        return self._with_retries(
+            lambda attempt: self._get_once(
+                url,
+                params=None,
+                etag=None,
+                last_modified=None,
+                accept=accept,
+                attempt=attempt,
+                method="POST",
+                content=body,
+            )
+        )
+
+    def _with_retries(self, send: Callable[[int], HttpResult]) -> HttpResult:
         attempt = 0
         while True:
             attempt += 1
             try:
                 self._limiter.acquire(self.source_code, self._min_interval_ms)
-                return self._get_once(
-                    url,
-                    params=params,
-                    etag=etag,
-                    last_modified=last_modified,
-                    accept=accept,
-                    attempt=attempt,
-                )
+                return send(attempt)
             except RetryableFetchError as exc:
                 if exc.code in {"RATE_LIMITER_UNAVAILABLE", "RATE_LIMIT_WAIT_EXCEEDED"}:
+                    raise
+                if not self._retry.retry_on_rate_limit and exc.code in _RATE_LIMIT_CODES:
                     raise
                 if attempt >= self._retry.max_attempts:
                     raise
@@ -159,7 +190,8 @@ class SafeHttpClient:
         if last_modified:
             headers["If-Modified-Since"] = last_modified
         if self._token and host in self.policy.auth_hosts:
-            headers["Authorization"] = f"Bearer {self._token}"
+            value = f"{self._auth_scheme} {self._token}" if self._auth_scheme else self._token
+            headers[self._auth_header] = value
         return headers
 
     def _check_peer(self, response: httpx.Response, host: str) -> None:
@@ -183,18 +215,17 @@ class SafeHttpClient:
         last_modified: str | None,
         accept: str | None,
         attempt: int,
+        method: str = "GET",
+        content: bytes | None = None,
     ) -> HttpResult:
         current = httpx.URL(url, params=dict(params) if params else None)
         for _hop in range(self.policy.max_redirects + 1):
             safe_url = validate_url(current, self.policy, self._resolver)
             host = (safe_url.host or "").lower()
-            request = self._client.build_request(
-                "GET",
-                safe_url,
-                headers=self._headers_for(
-                    host, etag=etag, last_modified=last_modified, accept=accept
-                ),
-            )
+            headers = self._headers_for(host, etag=etag, last_modified=last_modified, accept=accept)
+            if content is not None:
+                headers["Content-Type"] = "application/json"
+            request = self._client.build_request(method, safe_url, headers=headers, content=content)
             self.request_count += 1
             try:
                 response = self._client.send(request, stream=True)
@@ -208,6 +239,10 @@ class SafeHttpClient:
             try:
                 self._check_peer(response, host)
                 status = response.status_code
+                if status in _REDIRECT_STATUSES and method != "GET":
+                    raise PermanentFetchError(
+                        f"Refusing to follow a redirect for {method}.", code="BAD_REDIRECT"
+                    )
                 if status in _REDIRECT_STATUSES:
                     location = response.headers.get("location")
                     if not location:

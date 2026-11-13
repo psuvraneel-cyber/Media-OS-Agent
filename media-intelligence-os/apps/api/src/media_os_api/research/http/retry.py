@@ -23,6 +23,9 @@ class RetryPolicy:
     # A server-requested wait longer than this is not slept in-process; it is raised instead so
     # the source registry records a backoff and the worker is released.
     max_in_run_retry_after_seconds: float = 60.0
+    # AI providers set this False: a quota/rate-limit response is raised at once so the caller
+    # can fail over to another provider instead of sleeping.
+    retry_on_rate_limit: bool = True
 
 
 def parse_retry_after(value: str | None, *, now: datetime) -> timedelta | None:

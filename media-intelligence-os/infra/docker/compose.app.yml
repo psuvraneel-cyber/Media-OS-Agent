@@ -219,6 +219,14 @@ services:
       # AND approves the source in the registry. Optional read-only GitHub token (never logged).
       RESEARCH_LIVE_FETCH_ENABLED: ${RESEARCH_LIVE_FETCH_ENABLED:-false}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # N1 free-tier AI providers: worker only (AI calls run in jobs, never in the API).
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      AI_ROUTES: ${AI_ROUTES:-}
+      AI_QUOTA_LIMITS: ${AI_QUOTA_LIMITS:-}
     depends_on:
       media-os-postgres:
         condition: service_healthy
