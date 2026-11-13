@@ -50,7 +50,8 @@ Taken from the owner-approved store listing:
   (`docs/WORDING_REVIEW.md`). Don't feature those cards in ads until it's approved.
 - **No user testimonials or reviews** unless they are real and the owner provides them with consent.
 - **Never show a real person's name on a sample card.** Use the app's built-in sample data only.
-- **"Available on Google Play" only once the app is in production** (see Open questions).
+- **Install counts:** the owner confirmed 34 installs on 2026-11-14. That is internal context only; don't
+  quote install numbers in content.
 
 ## 4. Audience and languages
 
@@ -102,9 +103,8 @@ stay pixel-accurate. The app has a screenshot generator: `scripts/store-assets.m
 
 ## 8. Open questions for the owner
 
-1. **Is Nimontron in public production on Google Play now?** As of 24 Oct it was in closed testing,
-   waiting on the 12-tester/14-day requirement. Content must not drive people to an install link the
-   public can't use.
+1. ~~Production status~~ **Answered 2026-11-14: Nimontron is live in production on Google Play** (owner
+   checked; 34 installs). "Get it on Google Play" calls to action are allowed.
 2. Public Play Store link and a website/landing link to use in bios and captions.
 3. Handles for the Instagram/Facebook page and the YouTube channel (to be created by the owner).
 4. Tone preference: warm and familial, festive, or practical "save time" — or a mix by format.

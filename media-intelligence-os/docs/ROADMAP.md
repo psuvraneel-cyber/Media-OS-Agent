@@ -14,7 +14,10 @@ Nimontron facts: `docs/brands/nimontron/BRAND_BRIEF.md`.
 3. **Run a standalone tech Instagram page** fed by the research pipeline (AI trends, tech news,
    open-source GitHub repositories).
 
-Personal use only.
+Personal use only. **Zero budget:** no paid billing on any AI provider. Free tiers only, with lawful
+failover across *different* providers when one tier's quota is used up (never multiple keys or
+accounts on one provider to evade its limits). Nimontron is live on Google Play (34 installs as of
+2026-11-14).
 
 ## Where we are
 
@@ -46,9 +49,9 @@ the owner's explicit approval.
 | # | Milestone | What it delivers | Owner prerequisites |
 |---|---|---|---|
 | N0 | **Brand onboarding** | Nimontron facts and asset library loaded into `brand-app-promo` (`BRAND_BRIEF.md`); content pillars and a posting calendar; post-tagging taxonomy (format, hook type, topic, occasion, language, visual style, posting slot) defined *before* the first post so learning works later | Answer the brief's open questions (production status, links, handles, tone) |
-| N1 | **Gemini adapter** | One provider client: model config, structured JSON output with validation, token and cost tracking (`ModelUsage`), daily budget stop, retry and backoff, circuit breaker; never rotates keys | Gemini API key with billing enabled and a daily budget you set |
+| N1 | **Free-tier multi-provider AI adapter** | One interface over several providers (Gemini free tier first, then other providers with free tiers, each verified against its current terms before use); per-provider quota tracking (requests/tokens per minute and day) in `ModelUsage`; automatic failover to the next provider when a quota is used up, and a queue-and-wait when all are exhausted; structured JSON output validated the same way for every provider; retry/backoff and circuit breaker; **never adds billing, never rotates multiple keys of one provider** | A free Gemini API key (no billing); free keys for 1–2 other providers you sign up for |
 | N2 | **Carousel pipeline → review** | Gemini writes the slides (bn + en) from the brief; HTML/CSS rendered with Playwright in Nimontron's palette with real card renders; automated QA (claims checked against the brief's approved list, Bengali text present and legible, slide dimensions, no banned claims); **virality score v0** (rubric-based: hook strength, clarity, CTA, visual contrast — clearly labelled as a heuristic); dashboard approval queue | — |
-| N3 | **Publish carousels to Instagram + Facebook via Postiz** | Postiz Public API client, draft/scheduled posts, per-account rate caps (default ≤ 2 posts/day/platform), idempotent publish jobs, a public media URL | Connect IG/FB in Postiz (Meta Business account); a public media host (e.g. Cloudflare R2, free tier) |
+| N3 | **Publish carousels to Instagram + Facebook via Postiz** | Postiz Public API client, draft/scheduled posts, per-account rate caps (default ≤ 2 posts/day/platform), idempotent publish jobs, a public media URL | Connect IG/FB in Postiz (Meta Business account); a free way to give Instagram a public media URL (options to decide in N3: Cloudflare Tunnel or a free static host; Cloudflare R2 may require a card on file) |
 | N4 | **Reels / Shorts** | Script → Gemini TTS voiceover → FFmpeg 9:16 composition from app screen recordings, card renders and captions; QA (duration, resolution, audio, captions); creative worker at concurrency 1 | Screen recordings of the app; connect YouTube in Postiz |
 | N5 | **Analytics + learning loop** | Pull per-post metrics (Postiz analytics, or platform APIs where Postiz lacks them) into `MetricsSnapshot`; compare within format and account, normalised for account growth; per-tag performance with minimum-sample guards (no "trend" claimed below ~30 posts per format); weekly insight report; generation prompts receive the winning patterns, with 20–30% of posts kept for exploration; virality score v1 trained on the account's own history | Some weeks of posting history |
 | N6 | **Long-form YouTube** | Tutorial and walkthrough videos built mainly from screen recordings plus chapters, thumbnails and descriptions; human approval always required (YouTube's reused-content risk) | Longer recordings or a voice style choice |
