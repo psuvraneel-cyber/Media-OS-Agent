@@ -34,6 +34,8 @@ def test_unauthorized_tool_rejected(
 def test_resolve_local_venv_tools() -> None:
     """Project-local virtual environment tools must resolve accurately."""
     repo_root = Path(__file__).resolve().parents[2]
+    if not (repo_root / ".venv").is_dir():
+        pytest.skip("No project-local .venv (CI installs into the runner's Python).")
     for tool in ("ruff", "mypy", "python"):
         resolved = resolve_tool_path(repo_root, tool)
         path_obj = Path(resolved)

@@ -68,8 +68,8 @@ Auto-format code when needed:
 # Unit tests (fast, no Docker required)
 .\.venv\Scripts\pytest.exe tests/unit
 
-# Integration tests (validates Docker Compose configuration)
-.\.venv\Scripts\pytest.exe tests/integration
+# Integration tests: ONLY against the disposable stack (the suite refuses the runtime DB/Redis)
+.\.venv\Scripts\python.exe scripts/run_integration_tests.py
 
 # Smoke tests (builds, starts, health-checks, stops, and restarts Phase 1 Docker baseline)
 .\.venv\Scripts\pytest.exe tests/smoke

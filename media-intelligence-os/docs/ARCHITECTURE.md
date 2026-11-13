@@ -1,7 +1,7 @@
 # System Architecture — Media Intelligence OS
 
-**Document Status:** Phase 4 Persistence, Multi-Brand Schema, Durable Jobs & Workflow Architecture
-**Last Updated:** 2026-11-10
+**Document Status:** Phase 5 research ingestion added (see `PHASE_5_IMPLEMENTATION.md`); Phases 6+ per `ROADMAP.md`
+**Last Updated:** 2026-11-14
 
 ---
 
@@ -26,7 +26,9 @@ flowchart LR
     AppRedis --> ControlW["Celery Worker (concurrency=1)"]
     ControlW --> AppPG
 
-    ResearchW["Future Research Worker (Phase 5)"] -.-> AppPG
+    AppRedis --> ResearchQ["research queue (same worker, execute_research_job_run)"]
+    ResearchQ --> AppPG
+    ResearchQ --> Sources["Official APIs/feeds: HN, arXiv, OpenAI RSS, GitHub, Hugging Face"]
     CreativeW["Future Creative Worker concurrency=1 (Phase 7)"] -.-> AppPG
 
     API -- "Read-Only Probe (Phase 3-4) / Public API & MCP (Phase 8+)" --> Postiz["Separate Postiz Stack (:4007)"]
@@ -61,7 +63,7 @@ flowchart LR
 | **Database & Migrations** | `apps/api/src/media_os_api/db/`, `apps/api/migrations/` | PostgreSQL 17 Alpine + Alembic (`0001_initial_phase4_schema`, `0002_seed_initial_brands`, `0003_domain_integrity_hardening`, `0004_add_brand_topic_assignments`) | **Active in Phase 4 / Pre-Phase 5** |
 | **Broker / Cache** | `infra/docker/compose.app.yml` | Redis 7.2 (`requirepass`, `appendonly`, `noeviction`) | **Active in Phase 4** |
 | **Durable Job Worker & Dispatcher** | `apps/api/src/media_os_api/jobs/` | Celery (`concurrency=1`, JSON-only) + `FOR UPDATE SKIP LOCKED` Outbox & DST-aware Scheduler (`media-os-scheduler`) | **Active in Phase 4** |
-| **Research Worker** | `workers/research/` | Python 3.12 + Celery | Phase 5 |
+| **Research Ingestion** | `apps/api/src/media_os_api/research/` (`workers/research/` entry point) | Celery `research` queue on `media-os-worker`; httpx + SSRF policy, Redis limiter, defusedxml; registry/checkpoints in PostgreSQL | **Active in Phase 5** (sources OFF until enabled) |
 | **Creative Worker** | `workers/creative/` | Python 3.12 + Celery (`concurrency=1`), HTML/CSS/SVG/Pillow/Playwright, FFmpeg | Phase 7 |
 | **MCP Server** | `services/mcp/` | Controlled Python MCP server calling Backend API | Phase 10 |
 | **AI & Voice Layer** | `apps/api/` adapter | Centralized Gemini Developer API + Gemini TTS client | Phase 7 |
@@ -102,7 +104,7 @@ All ports verified against live host listeners, `C:\Media OS Agent\postiz-runtim
 
 ## 5. End-to-End Data Flow
 
-1. **Discovery (`workers/research`):** Scheduled Celery Beat jobs trigger enabled source connectors (`OFF`/`BLOCKED` connectors cannot run). Raw payloads are sanitized as untrusted text, normalized, and stored in PostgreSQL with canonical source URLs and hashes.
+1. **Discovery (Phase 5, implemented):** The PostgreSQL-backed scheduler enqueues per-source fetch jobs (JobRun + OutboxEvent) on the `research` queue; a fetch runs only when the source is `EXPERIMENTAL`/`ENABLED`, owner-approved and the worker kill switch is on (`OFF`/`BLOCKED` sources cannot run). Raw payloads are sanitized as untrusted text, normalized, and stored in PostgreSQL with canonical source URLs and hashes.
 2. **Deduplication & Ranking:** Keyword/semantic similarity + URL canonicalization reject near-duplicates against previously produced or queued topics. Candidate stories are scored by source weight, freshness, and bounded historical category performance.
 3. **Verification & Editorial Selection:** High-ranking candidates enter deep primary-source inspection (e.g., official paper/release/repo) to produce a structured `ResearchPacket` with cited claims.
 4. **Generation & Rendering (`workers/creative`, concurrency = 1):**

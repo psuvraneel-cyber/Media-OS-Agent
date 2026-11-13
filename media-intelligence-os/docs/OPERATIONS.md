@@ -1,7 +1,7 @@
 # Operations & Reliability Guide — Media Intelligence OS
 
-**Document Status:** Phase 4 Operations & Reliability Runbook
-**Last Updated:** 2026-11-10
+**Document Status:** Phase 4–5 Operations & Reliability Runbook
+**Last Updated:** 2026-11-14
 
 ---
 
@@ -76,9 +76,14 @@ Migration `0004_add_brand_topic_assignments` establishes the multi-brand editori
 > 3. **Verified Restoration Procedure:** Recovery verified inside an isolated database via `python scripts/restore_verify.py`.
 
 ### Phase 5 Research Ingestion Runbook & Invariants
-- **Connector Ingestion Task:** `media_os.research.ingest` Celery task handles connector runs.
+- **Scheduled fetches:** `media_os.research.fetch.<source>` jobs on the `research` queue (Celery task `media_os.execute_research_job_run`, lease 900 s). Five global schedules exist, **disabled** by default.
+- **Owner admin CLI:** `docker exec media-os-api python -m media_os_api.research.admin status|set-mode|approve-live|revoke-live|schedule|run-now` (every change audited; Reddit refused).
+- **Live-fetch gate:** source mode `EXPERIMENTAL`/`ENABLED` **and** `approve-live` **and** `RESEARCH_LIVE_FETCH_ENABLED=true` in the runtime `.env` (worker). Optional read-only `GITHUB_TOKEN`.
+- **Integration tests:** `python scripts/run_integration_tests.py` only (disposable tmpfs stack). The suite refuses the runtime DB/Redis.
+- **Owner-gated live smoke:** `python scripts/research_live_smoke.py --source <CODE> --owner-approved` (at most 10 items, disposable DB).
+- **Manual ingest task:** `media_os.research.ingest` still accepts sanitised caller-supplied records (payload scrubbed after success).
 - **Provider Namespaces:** External resources are strictly partitioned by type (`GITHUB_REPOSITORY`, `GITHUB_RELEASE`, `HUGGINGFACE_MODEL`, `HUGGINGFACE_DATASET`, `HUGGINGFACE_SPACE`, `HACKERNEWS_STORY`, `ARXIV_PAPER`, `OPENAI_NEWS`).
-- **Policy Enforcement:** All newly introduced connectors default to `EXPERIMENTAL` mode. The Reddit connector is strictly `BLOCKED` (`PolicyBlockedError`).
+- **Policy Enforcement:** Sources start `OFF` in `research_sources`; stored items are marked `EXPERIMENTAL`. The Reddit connector is strictly `BLOCKED` (`PolicyBlockedError`).
 - **Automated Brand Assignment:** Discovery of any new `TopicCluster` automatically generates one `BrandTopicAssignment` for each active brand with `editorial_status="PENDING_EVALUATION"` and `relevance_score=NULL`.
 - **Global Cluster Isolation:** Shared fields `TopicCluster.status` and `TopicCluster.score_breakdown` represent global discovery lifecycle only; per-brand decisions reside exclusively in `BrandTopicAssignment`.
 - **Minimal Retention & Sanitization:** Ingested payloads are untrusted; summaries are stripped of HTML and truncated to `<= 500` characters (`minimal_permitted_summary`), with `retention_expires_at` populated. Raw source bodies or comments are never persisted.

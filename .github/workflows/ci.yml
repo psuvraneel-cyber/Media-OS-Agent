@@ -11,6 +11,10 @@ jobs:
     name: Format, Lint, Type Check, Security Scan, DB/Redis Integration & Docker Smoke Tests
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: media-intelligence-os
+
     services:
       postgres:
         image: postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
@@ -89,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/web
+        working-directory: media-intelligence-os/apps/web
 
     steps:
       - name: Checkout repository
@@ -100,7 +104,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: media-intelligence-os/apps/web/package-lock.json
 
       - name: Install locked npm dependencies
         run: npm ci
