@@ -242,7 +242,7 @@ Atom/RSS. No other new dependency.
 | Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Verified live 2026-11-13 16:34:47Z** (owner-approved; disposable DB; `topstories`, 5 items) — see below |
 | arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Verified live 2026-11-13 18:08:30Z** (owner-approved; disposable DB; `cat:cs.AI`, 5 papers) — see below |
 | OpenAI News | `research/fetchers/openai_news.py` (M4c) | 11 unit | 2 end-to-end | **Verified live 2026-11-13 18:48:27Z** (owner-approved; disposable DB; 5 items) — see below |
-| GitHub | — (M4d) | — | — | — |
+| GitHub | `research/fetchers/github.py` (M4d) | 13 unit | 1 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source GITHUB --owner-approved`) |
 | Hugging Face | — (M4e) | — | — | — |
 
 **M4a Hacker News (as built):**
@@ -376,6 +376,27 @@ de-prioritise case studies for the tech page.
 **M4c verification:** unit 190 passed (11 new); integration 52 passed / 2 skipped (2 new: end-to-end
 with a 1-request 304 second run; bot challenge → `SOURCE_FETCH_FAILED`, health `DEGRADED` with
 backoff, checkpoint untouched). **No live request has been made.**
+
+**M4d GitHub (as built):**
+- Official REST API only (`api.github.com`), public metadata. Streams: one `search:<query>` per
+  configured query (`/search/repositories?q=<query> pushed:>D&sort=stars&order=desc`, default 7-day
+  window, ≤ 30 per query) and one `releases` stream over the owner's watch-list (≤ 20 repos,
+  `/repos/{o}/{r}/releases`, per-repo ETag so unchanged repos return 304).
+- **Watch-list starts empty** in the registry; the owner chooses which repositories to follow.
+- Optional read-only token, injected by the job layer from env `GITHUB_TOKEN` and sent only to
+  `api.github.com` (`auth_hosts`); never stored or logged. Unauthenticated limits → ≥ 6.5 s spacing;
+  quota-exhausted 403/429 become retryable with the reset time feeding per-source backoff.
+- Queries validated against `^[A-Za-z0-9 :._+-]{1,100}$` and may not carry their own `pushed:` filter;
+  repo names and tags validated; URLs rebuilt from them. Forks, archived, disabled and private repos
+  filtered; pre-releases skipped unless `include_prereleases`; no archives or assets downloaded.
+- Per-repo isolation for releases (one missing repo → `fetch_errors`, others continue); seen windows
+  for repos and releases.
+
+**M4d verification:** unit 203 passed (13 new: endpoint/params, token scoping, query/watch-list
+validation, filtering, URL rebuilding, releases ETag/pre-release/seen, repo isolation, rate-limit 403
+with reset, malformed documents, bounded config); integration 53 passed / 2 skipped (1 new end-to-end:
+search + releases, one missing repo isolated, second run ingests nothing and sends the ETag).
+**No live request has been made.**
 
 ### M5 — Source-specific jobs & disabled schedules
 

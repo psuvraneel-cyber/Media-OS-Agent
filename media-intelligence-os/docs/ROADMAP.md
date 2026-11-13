@@ -39,7 +39,7 @@ the owner's explicit approval.
 | # | Milestone | Done when |
 |---|---|---|
 | A1 | OpenAI News RSS connector (M4c) | ✅ done 2026-11-13 (live-verified) |
-| A2 | GitHub connector (M4d) | same |
+| A2 | GitHub connector (M4d) | built and tested 2026-11-14; live check pending owner approval |
 | A3 | Hugging Face connector (M4e) | same |
 | A4 | Source-specific jobs, research queue, disabled schedules, admin CLI, image rebuild (M5) | owner approves the deploy |
 | A5 | Read-only Research/Topics API + dashboard (M6) and doc reconciliation (M7) | Phase 5 report |

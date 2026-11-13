@@ -184,3 +184,62 @@ def make_openai_http(upstream: Callable[[httpx.Request], httpx.Response]) -> Saf
         retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
         sleep=lambda _s: None,
     )
+
+
+# --------------------------------------------------------------------------- GitHub
+
+GITHUB_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "research" / "github"
+
+
+class GitHubFixtureUpstream:
+    """Serves GitHub search and releases endpoints with per-repository ETags."""
+
+    def __init__(self) -> None:
+        self.search_body = (GITHUB_FIXTURES / "search_llm.json").read_bytes()
+        self.releases: dict[str, bytes] = {
+            "fixture-org/agent-kit": (GITHUB_FIXTURES / "releases_agent-kit.json").read_bytes()
+        }
+        self.release_etags: dict[str, str] = {"fixture-org/agent-kit": '"rel-v1"'}
+        self.status_override: dict[str, int] = {}  # path -> status
+        self.extra_headers: dict[str, dict[str, str]] = {}
+        self.requests: list[httpx.Request] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "api.github.com" and request.url.scheme == "https"
+        self.requests.append(request)
+        path = request.url.path
+        if path in self.status_override:
+            return httpx.Response(
+                self.status_override[path], headers=self.extra_headers.get(path, {})
+            )
+        if path == "/search/repositories":
+            return httpx.Response(200, content=self.search_body)
+        if path.startswith("/repos/") and path.endswith("/releases"):
+            repo = path.removeprefix("/repos/").removesuffix("/releases")
+            if repo not in self.releases:
+                return httpx.Response(404)
+            etag = self.release_etags.get(repo)
+            if etag and request.headers.get("if-none-match") == etag:
+                return httpx.Response(304, headers={"etag": etag})
+            return httpx.Response(
+                200, content=self.releases[repo], headers={"etag": etag} if etag else {}
+            )
+        return httpx.Response(404)
+
+
+def make_github_http(
+    upstream: Callable[[httpx.Request], httpx.Response], token: str | None = None
+) -> SafeHttpClient:
+    from media_os_api.research.fetchers.github import GitHubFetcher
+
+    return SafeHttpClient(
+        source_code=GitHubFetcher.source_code,
+        policy=GitHubFetcher.host_policy,
+        rate_limiter=InMemoryMinIntervalLimiter(sleep=lambda _s: None),
+        min_interval_ms=GitHubFetcher.default_min_interval_ms,
+        transport=httpx.MockTransport(upstream),
+        resolver=lambda _h, _p: ["140.82.112.6"],
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0.01),
+        bearer_token=token,
+        sleep=lambda _s: None,
+    )
