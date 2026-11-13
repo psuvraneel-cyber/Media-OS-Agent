@@ -3,8 +3,8 @@
 **Status:** Plan accepted for execution milestone-by-milestone. M1 implemented (`849cf94`). M2 schema
 approved by the owner 2026-11-13, implemented (`2ae27bd`) and **applied to the runtime DB on
 2026-11-13 16:10Z with owner approval** (evidence in §M2 "Runtime application record"). M3 shared
-connector infrastructure implemented (`4fde588`). M4a Hacker News fetcher implemented and
-fixture/DB-tested; live verification pending owner approval. Nothing deployed to the running stack.
+connector infrastructure implemented (`4fde588`). M4a Hacker News fetcher implemented,
+fixture/DB-tested and live-verified (owner-approved, disposable DB). Nothing deployed to the running stack.
 **Date:** 2026-11-13
 **Baseline:** `269b326` (`feat(research): implement phase 5 research ingestion and connector invariants`)
 
@@ -238,7 +238,7 @@ Atom/RSS. No other new dependency.
 
 | Source | Fetcher | Fixture tests | DB integration | Live verification |
 |---|---|---|---|---|
-| Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source HACKERNEWS --owner-approved`) |
+| Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Verified live 2026-11-13 16:34:47Z** (owner-approved; disposable DB; `topstories`, 5 items) — see below |
 | arXiv | — (M4b) | — | — | — |
 | OpenAI News | — (M4c) | — | — | — |
 | GitHub | — (M4d) | — | — | — |
@@ -268,6 +268,22 @@ Atom/RSS. No other new dependency.
 - Gap carried forward: HN `score` / `descendants` are parsed into candidate metadata but
   `SourceItem` has no column for source metrics, so they are not persisted. Needed by Phase 6
   ranking (FR-03); decide on storage before M6/Phase 6.
+
+**M4a live verification (owner-approved, 2026-11-13):**
+`python scripts/research_live_smoke.py --source HACKERNEWS --owner-approved --max-items 5`
+(evidence: `docs/evidence/phase5_live_smoke_hackernews_20261113T163447Z.json`).
+
+| Check | Result |
+|---|---|
+| Window | 16:34:47.85Z → 16:34:50.79Z (≈3 s) |
+| Upstream traffic | 6 requests to `hacker-news.firebaseio.com` only (1 list + 5 items), through SSRF policy + Redis limiter |
+| Outcome | `SUCCEEDED`; records 5, new sources 5, new clusters 5, assignments 10 (5 × 2 active brands), malformed 0, fetch errors 0 |
+| Health | `HEALTHY` (test DB) |
+| Data | 5 real `HACKERNEWS_STORY` items with titles, canonical URLs and publication times; link stories carry no text, so `summary_chars = 0` |
+| Isolation | disposable `media-os-test` stack (tmpfs) created and removed; runtime DB afterwards: `0005`, 7 source items, 0 HN items, `HACKERNEWS` still `OFF`/not approved/no attempt, 0 checkpoints |
+
+Observation: the sampled top stories were general technology (Haskell, Zig, a data breach), not
+AI-specific — expected, since relevance is decided per brand in Phase 6, not at ingestion.
 
 **M4a verification:** unit 151 passed (24 new HN tests incl. sanitizer); integration 48 passed /
 2 skipped (3 new HN end-to-end: full ingestion with dedupe/provenance/assignments/checkpoint and a
