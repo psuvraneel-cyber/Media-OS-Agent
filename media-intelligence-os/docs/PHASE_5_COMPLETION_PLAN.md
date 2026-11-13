@@ -460,6 +460,33 @@ datasets and returns to `HEALTHY` without re-ingesting models). **No live reques
 - Owner CLI `python -m media_os_api.research.admin` — `status`, `approve-live --source X`,
   `set-mode --source X --mode EXPERIMENTAL|OFF`; every change writes an `AuditEvent`. Refuses Reddit.
 
+**M5 (as built, 2026-11-14) — code complete, NOT deployed:**
+- `research/jobs.py`: one handler per registered fetcher (`media_os.research.fetch.<source>`),
+  content-free payloads `{"source", "trigger"}`; guards reject unknown sources, Reddit, and task/payload
+  mismatches before building any HTTP or DB resource. Production HTTP factory uses the Redis limiter
+  (fail-closed) and sends `GITHUB_TOKEN` (optional) only to GitHub's `auth_hosts`.
+- `jobs/routing.py`: `media_os.research.fetch.*` → `research` queue → dedicated Celery task
+  `media_os.execute_research_job_run` (soft/hard limits 780/840 s, lease ≥ 900 s) because paced runs
+  outlive the default 90/120 s limits. Scheduler and outbox publisher use the router; all other jobs
+  are unchanged.
+- `research/admin.py` (owner CLI): `status`, `set-mode`, `approve-live`, `revoke-live`,
+  `schedule --enable|--disable`, `run-now`. Every change writes an `AuditEvent`. Refuses Reddit;
+  `set-mode OFF` withdraws approval and disables the schedule; enabling a schedule requires an
+  active, approved source and sets the next future slot (no burst).
+- Compose: worker consumes `control,maintenance,default,research` (still `--concurrency=1`); new
+  worker env `RESEARCH_LIVE_FETCH_ENABLED` (default `false`) and optional `GITHUB_TOKEN`; both added
+  to `.env.example`.
+- Tests: 7 unit (routing, registry has exactly the 5 fetchers, publisher task choice, handler guards,
+  token scoping) + 4 integration (admin flow and refusals with audit events; schedules never fire while
+  disabled; an enabled schedule enqueues on the `research` queue and executes end-to-end through the
+  ledger; kill switch off → `FAILED_FINAL` `LIVE_FETCH_KILL_SWITCH` with zero HTTP).
+- **Deploy (owner approval required):** rebuild `media-intelligence-os-api` from this branch (adds
+  Phase 5 code and `defusedxml`), recreate api/worker/scheduler with
+  `docker compose ... up -d --build media-os-api media-os-worker media-os-scheduler` (never `-v`),
+  then `python -m media_os_api.research.admin status`. Sources stay OFF and schedules disabled after
+  deploy until the owner runs `set-mode` / `approve-live` / `schedule --enable` **and** sets
+  `RESEARCH_LIVE_FETCH_ENABLED=true` in the runtime `.env`.
+
 ### M6 — Read-only API + dashboard
 
 - `GET /api/v1/research/sources` — registry, policy mode, approval flag, health, checkpoints.

@@ -181,7 +181,7 @@ services:
       - --loglevel=INFO
       - --concurrency=1
       - -Q
-      - control,maintenance,default
+      - control,maintenance,default,research
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_PHASE: ${APP_PHASE:-phase-4-persistence}
@@ -215,6 +215,10 @@ services:
       RETENTION_FAILED_TEMP_MEDIA_DAYS: ${RETENTION_FAILED_TEMP_MEDIA_DAYS:-7}
       MEDIA_STORAGE_DIR: ${MEDIA_STORAGE_DIR:-/tmp/media_os_artifacts}
       MEDIA_STORAGE_WARN_PERCENT: ${MEDIA_STORAGE_WARN_PERCENT:-80}
+      # Research ingestion kill switch: live fetches stay impossible unless the owner sets this
+      # AND approves the source in the registry. Optional read-only GitHub token (never logged).
+      RESEARCH_LIVE_FETCH_ENABLED: ${RESEARCH_LIVE_FETCH_ENABLED:-false}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     depends_on:
       media-os-postgres:
         condition: service_healthy

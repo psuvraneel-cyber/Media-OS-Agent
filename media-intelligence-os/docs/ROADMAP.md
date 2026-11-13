@@ -41,7 +41,7 @@ the owner's explicit approval.
 | A1 | OpenAI News RSS connector (M4c) | ✅ done 2026-11-13 (live-verified) |
 | A2 | GitHub connector (M4d) | ✅ done (live-verified); follow-up: add a `created:>` new-repo query mode for the tech page |
 | A3 | Hugging Face connector (M4e) | ✅ done (live-verified) |
-| A4 | Source-specific jobs, research queue, disabled schedules, admin CLI, image rebuild (M5) | owner approves the deploy |
+| A4 | Source-specific jobs, research queue, disabled schedules, admin CLI, image rebuild (M5) | code done 2026-11-14; deploy awaits owner approval |
 | A5 | Read-only Research/Topics API + dashboard (M6) and doc reconciliation (M7) | Phase 5 report |
 
 ### Track N — Nimontron marketing (the priority after A1–A3)

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from media_os_api.db.models import JobRun, OutboxEvent
 from media_os_api.db.session import session_scope
 from media_os_api.jobs.errors import compute_backoff_seconds
+from media_os_api.jobs.routing import celery_task_for_queue
 from media_os_api.observability.redaction import redact_text
 
 logger = logging.getLogger("media_os_api.outbox")
@@ -52,7 +53,7 @@ class CeleryTaskPublisher:
     ) -> str:
         celery_task_id = f"job-{job_run_id}-d{attempt}-{uuid.uuid4().hex[:8]}"
         async_result = self._app.send_task(
-            "media_os.execute_job_run",
+            celery_task_for_queue(queue_name),
             kwargs={"job_run_id": str(job_run_id)},
             queue=queue_name,
             routing_key=queue_name,
