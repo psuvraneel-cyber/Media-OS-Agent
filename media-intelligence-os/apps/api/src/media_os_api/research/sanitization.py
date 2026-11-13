@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import re
 
 from media_os_api.db.normalization import normalize_canonical_url
@@ -19,8 +20,13 @@ def sanitize_minimal_summary(raw: str | None, max_length: int = 500) -> str | No
     """
     if not raw:
         return None
-    # Strip HTML tags
+    # Strip tags, decode entities (e.g. HN's "&#x27;"), then strip again so encoded markup such
+    # as "&lt;script&gt;" cannot survive as a tag after decoding.
     cleaned = _HTML_TAG_PATTERN.sub(" ", raw)
+    cleaned = html.unescape(cleaned)
+    cleaned = _HTML_TAG_PATTERN.sub(" ", cleaned)
+    # Drop control characters (keep normal whitespace, collapsed below)
+    cleaned = "".join(ch for ch in cleaned if ch.isprintable() or ch.isspace())
     # Collapse whitespace
     cleaned = " ".join(cleaned.split())
     if not cleaned:

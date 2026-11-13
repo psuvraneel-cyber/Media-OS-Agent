@@ -60,6 +60,7 @@ class StreamOutcome:
     assignments_created: int = 0
     malformed: int = 0
     malformed_codes: dict[str, int] = field(default_factory=dict)
+    fetch_errors: dict[str, int] = field(default_factory=dict)
     error_code: str | None = None
     retry_after_seconds: float | None = None
 
@@ -98,6 +99,7 @@ class RunOutcome:
                     "pages": s.pages,
                     "new_sources": s.new_sources,
                     "malformed": s.malformed,
+                    "fetch_errors": s.fetch_errors,
                 }
                 for s in self.streams
             },
@@ -148,6 +150,8 @@ def _run_stream(
     for _ in range(max(fetcher.max_pages_per_stream, 1)):
         page = fetcher.fetch_page(http, stream, checkpoint, config)  # network: outside any tx
         outcome.pages += 1
+        for code, count in page.fetch_errors.items():
+            outcome.fetch_errors[code] = outcome.fetch_errors.get(code, 0) + int(count)
         with session_scope(session_factory) as session:
             _ingest_page(session, fetcher, page, outcome)
             save_checkpoint(session, fetcher.source_code, stream.name, page.checkpoint, now=now())

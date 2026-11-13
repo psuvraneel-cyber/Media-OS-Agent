@@ -1,0 +1,10 @@
+{
+  "by": "fixture_user5",
+  "descendants": 0,
+  "id": 9007,
+  "score": 3,
+  "time": 1763035560,
+  "title": "Fixture with unsafe URL scheme",
+  "type": "story",
+  "url": "javascript:alert(1)"
+}

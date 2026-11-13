@@ -41,6 +41,8 @@ class FetchPage:
     checkpoint: CheckpointState
     not_modified: bool = False
     has_more: bool = False
+    # Sub-request failures the fetcher isolated (e.g. one item of a listing), by error code.
+    fetch_errors: Mapping[str, int] = field(default_factory=dict)
 
 
 class SourceFetcher(ABC):

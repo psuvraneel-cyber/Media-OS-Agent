@@ -3,7 +3,8 @@
 **Status:** Plan accepted for execution milestone-by-milestone. M1 implemented (`849cf94`). M2 schema
 approved by the owner 2026-11-13, implemented (`2ae27bd`) and **applied to the runtime DB on
 2026-11-13 16:10Z with owner approval** (evidence in §M2 "Runtime application record"). M3 shared
-connector infrastructure implemented (offline-tested only; not deployed to the running stack).
+connector infrastructure implemented (`4fde588`). M4a Hacker News fetcher implemented and
+fixture/DB-tested; live verification pending owner approval. Nothing deployed to the running stack.
 **Date:** 2026-11-13
 **Baseline:** `269b326` (`feat(research): implement phase 5 research ingestion and connector invariants`)
 
@@ -232,6 +233,45 @@ with the ON CONFLICT version. No live external request was made.
 
 New dependency: **`defusedxml`** (pure Python, ~25 kB) — rejects DTD/entity expansion in untrusted
 Atom/RSS. No other new dependency.
+
+**Connector status**
+
+| Source | Fetcher | Fixture tests | DB integration | Live verification |
+|---|---|---|---|---|
+| Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source HACKERNEWS --owner-approved`) |
+| arXiv | — (M4b) | — | — | — |
+| OpenAI News | — (M4c) | — | — | — |
+| GitHub | — (M4d) | — | — | — |
+| Hugging Face | — (M4e) | — | — | — |
+
+**M4a Hacker News (as built):**
+- Official endpoints only: `https://hacker-news.firebaseio.com/v0/{topstories,newstories,beststories}.json`
+  and `/v0/item/{id}.json`; allowlist = that single host; no credentials; 1 MiB body cap; ≥250 ms
+  spacing (registry may only tighten).
+- First `max_items_per_stream` ids per list (default 30, hard cap 100). Checkpoint keeps a bounded
+  `seen_ids` window (1000) per stream, so steady state is one list request per stream plus new items.
+  Item documents are cached per run across streams.
+- Per-item isolation: transient item failures are skipped and retried next run; permanent ones
+  (404, oversize, malformed JSON) are marked seen; if every item in a stream fails, the stream fails.
+  Isolated sub-request failures are reported per stream as `fetch_errors` (new `FetchPage` field)
+  and stored in `last_run_stats`.
+- Validation: positive integer id, `type == "story"`, not dead/deleted (others filtered, not
+  malformed); non-empty title; integer timestamp; only `http(s)` URLs kept (others fall back to the
+  HN discussion URL). Normalisation reuses the existing `HackerNewsConnector` parser.
+- Firebase exposes no standard ETag/Last-Modified, so HN uses the seen-window instead of conditional
+  requests.
+- `sanitize_minimal_summary` now decodes HTML entities and re-strips tags (so `&lt;script&gt;` cannot
+  survive decoding) and drops control characters — applies to all sources.
+- `scripts/research_live_smoke.py`: owner-gated (`--owner-approved` required), ≤10 items, one stream,
+  disposable test DB only, prints a timestamped JSON evidence record. Plumbing verified offline with
+  the HN fixtures; **no live request has been made**.
+- Gap carried forward: HN `score` / `descendants` are parsed into candidate metadata but
+  `SourceItem` has no column for source metrics, so they are not persisted. Needed by Phase 6
+  ranking (FR-03); decide on storage before M6/Phase 6.
+
+**M4a verification:** unit 151 passed (24 new HN tests incl. sanitizer); integration 48 passed /
+2 skipped (3 new HN end-to-end: full ingestion with dedupe/provenance/assignments/checkpoint and a
+3-request steady-state second run; partial outage isolation; gate blocks all traffic).
 
 ### M5 — Source-specific jobs & disabled schedules
 
