@@ -242,7 +242,7 @@ Atom/RSS. No other new dependency.
 | Hacker News | `research/fetchers/hackernews.py` (M4a) | 24 unit | 3 end-to-end | **Verified live 2026-11-13 16:34:47Z** (owner-approved; disposable DB; `topstories`, 5 items) — see below |
 | arXiv | `research/fetchers/arxiv.py` (M4b) | 28 unit | 2 end-to-end | **Verified live 2026-11-13 18:08:30Z** (owner-approved; disposable DB; `cat:cs.AI`, 5 papers) — see below |
 | OpenAI News | `research/fetchers/openai_news.py` (M4c) | 11 unit | 2 end-to-end | **Verified live 2026-11-13 18:48:27Z** (owner-approved; disposable DB; 5 items) — see below |
-| GitHub | `research/fetchers/github.py` (M4d) | 13 unit | 1 end-to-end | **Not run** — awaiting owner approval (`scripts/research_live_smoke.py --source GITHUB --owner-approved`) |
+| GitHub | `research/fetchers/github.py` (M4d) | 13 unit | 1 end-to-end | **Verified live 2026-11-13 19:00:33Z** (owner-approved; disposable DB; `search:topic:llm`, 5 repos, no token) — see below |
 | Hugging Face | — (M4e) | — | — | — |
 
 **M4a Hacker News (as built):**
@@ -391,6 +391,24 @@ backoff, checkpoint untouched). **No live request has been made.**
   filtered; pre-releases skipped unless `include_prereleases`; no archives or assets downloaded.
 - Per-repo isolation for releases (one missing repo → `fetch_errors`, others continue); seen windows
   for repos and releases.
+
+**M4d live verification (owner-approved, 2026-11-13):**
+`python scripts/research_live_smoke.py --source GITHUB --stream "search:topic:llm" --owner-approved --max-items 5`
+(evidence: `docs/evidence/phase5_live_smoke_github_20261113T190033Z.json`).
+
+| Check | Result |
+|---|---|
+| Window | 19:00:33.86Z → 19:00:35.02Z (≈1.2 s) |
+| Upstream traffic | 1 unauthenticated request to `api.github.com/search/repositories`; no token used |
+| Outcome | `SUCCEEDED`; records 5, new sources 5, new clusters 5, assignments 10, malformed 0 |
+| Health | `HEALTHY` (test DB) |
+| Data | 5 real `GITHUB_REPOSITORY` items (e.g. `ollama/ollama`), `https://github.com/<owner>/<repo>` URLs rebuilt from validated names, descriptions sanitised |
+| Isolation | disposable stack created and removed; runtime DB afterwards: `0005`, 7 source items (the 5 `GITHUB*` rows are the pre-existing test fixtures), `GITHUB` still `OFF`/not approved/no attempt, 0 checkpoints |
+
+**Discovery-quality observation:** `sort=stars` within a `pushed:` window returns long-established,
+very popular repositories (created 2023–2025), not newly emerging ones. For the tech page's
+"fascinating new repos" goal, add a `created:>D` (new repositories, sorted by stars) query mode in
+a follow-up before enabling the source. This is a tuning change, not a correctness defect.
 
 **M4d verification:** unit 203 passed (13 new: endpoint/params, token scoping, query/watch-list
 validation, filtering, URL rebuilding, releases ETag/pre-release/seen, repo isolation, rate-limit 403

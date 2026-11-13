@@ -1,0 +1,96 @@
+{
+  "live_smoke": true,
+  "database": "disposable media-os-test (tmpfs) \u2014 runtime DB untouched",
+  "source": "GITHUB",
+  "stream": "search:topic:llm",
+  "max_items": 5,
+  "started_at_utc": "2026-11-13T19:00:33.863377+00:00",
+  "finished_at_utc": "2026-11-13T19:00:35.015290+00:00",
+  "outcome": {
+    "status": "SUCCEEDED",
+    "started_at": "2026-11-13T19:00:33.940419+00:00",
+    "http_requests": 1,
+    "totals": {
+      "records_seen": 5,
+      "candidates_ingested": 5,
+      "new_sources": 5,
+      "new_clusters": 5,
+      "assignments_created": 10,
+      "malformed": 0,
+      "pages": 1
+    },
+    "streams": {
+      "search:topic:llm": {
+        "status": "ok",
+        "error_code": null,
+        "pages": 1,
+        "new_sources": 5,
+        "malformed": 0,
+        "fetch_errors": {}
+      }
+    },
+    "stream_details": [
+      {
+        "name": "search:topic:llm",
+        "status": "ok",
+        "pages": 1,
+        "records_seen": 5,
+        "candidates_ingested": 5,
+        "new_sources": 5,
+        "new_clusters": 5,
+        "assignments_created": 10,
+        "malformed": 0,
+        "malformed_codes": {},
+        "fetch_errors": {},
+        "error_code": null,
+        "retry_after_seconds": null
+      }
+    ]
+  },
+  "health": {
+    "health_status": "HEALTHY",
+    "last_error_code": null
+  },
+  "sample_items": [
+    {
+      "provider": "GITHUB_REPOSITORY",
+      "external_id": "ollama/ollama",
+      "title": "ollama/ollama: Get up and running with Kimi, GLM, MiniMax, DeepSeek, gpt-oss, Qwen, Gemma and other models.",
+      "canonical_url": "https://github.com/ollama/ollama",
+      "published_at": "2023-06-26T19:39:32+00:00",
+      "summary_chars": 92
+    },
+    {
+      "provider": "GITHUB_REPOSITORY",
+      "external_id": "Significant-Gravitas/AutoGPT",
+      "title": "Significant-Gravitas/AutoGPT: AutoGPT is the vision of accessible AI for everyone, to use and to build on. Our mission is to provide the too",
+      "canonical_url": "https://github.com/Significant-Gravitas/AutoGPT",
+      "published_at": "2023-03-16T09:21:07+00:00",
+      "summary_chars": 152
+    },
+    {
+      "provider": "GITHUB_REPOSITORY",
+      "external_id": "firecrawl/firecrawl",
+      "title": "firecrawl/firecrawl: Supercharge your AI agents with data from the web and beyond. Building the library for superintelligence. \ud83d\udd25",
+      "canonical_url": "https://github.com/firecrawl/firecrawl",
+      "published_at": "2024-04-15T21:02:29+00:00",
+      "summary_chars": 107
+    },
+    {
+      "provider": "GITHUB_REPOSITORY",
+      "external_id": "NousResearch/hermes-agent",
+      "title": "NousResearch/hermes-agent: The agent that grows with you",
+      "canonical_url": "https://github.com/NousResearch/hermes-agent",
+      "published_at": "2025-07-22T22:22:28+00:00",
+      "summary_chars": 29
+    },
+    {
+      "provider": "GITHUB_REPOSITORY",
+      "external_id": "affaan-m/ECC",
+      "title": "affaan-m/ECC: The agent harness performance optimization system. Skills, instincts, memory, security, and research-first development for Cla",
+      "canonical_url": "https://github.com/affaan-m/ECC",
+      "published_at": "2026-01-18T00:51:51+00:00",
+      "summary_chars": 171
+    }
+  ]
+}
