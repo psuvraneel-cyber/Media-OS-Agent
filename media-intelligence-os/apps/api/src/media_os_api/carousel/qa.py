@@ -209,6 +209,34 @@ def _card_visual(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> C
     )
 
 
+PREMIUM_DESIGNS = re.compile(
+    r"রাজকীয়|বেনারসি|শাঁখা|জামদানি|মোগল|নকশিকাঁথা|গাঁদার মালা"
+    r"|\b(royal|rajkiyo|ben[ae]rasi|banarasi|jamdani|mughal|mogul|nakshi|shankha)\b",
+    re.IGNORECASE,
+)
+INTERNAL_KICKERS = {"proof", "hook", "cta", "point", "প্রুফ", "হুক"}
+
+
+def _design_match(kit: BrandKit, draft: CarouselDraft) -> Check:
+    """Naming a premium design next to a card render implies that card is the design. None of
+    the clean card renders are premium designs, so that pairing would mislead."""
+    problems = []
+    for i, s in enumerate(draft.slides, 1):
+        asset = kit.asset(s.visual_asset_id) if s.visual_asset_id else None
+        if asset and asset.kind == "CARD" and PREMIUM_DESIGNS.search(" ".join(s.texts())):
+            problems.append(f"slide {i}: names a premium design but shows a different card")
+    return _check("design_matches_visual", problems)
+
+
+def _kickers(draft: CarouselDraft) -> Check:
+    leaked = [
+        f"slide {i}: '{s.kicker}'"
+        for i, s in enumerate(draft.slides, 1)
+        if s.kicker and s.kicker.strip().lower() in INTERNAL_KICKERS
+    ]
+    return _check("kicker_reads_naturally", leaked, warn=True)
+
+
 def run_text_qa(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> QaReport:
     checks = [
         _structure(draft),
@@ -222,6 +250,8 @@ def run_text_qa(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> Qa
         _hashtags(draft),
         *_slide_length(draft),
         _stickers(kit, draft),
+        _design_match(kit, draft),
+        _kickers(draft),
         _card_visual(kit, brief, draft),
     ]
     return QaReport(passed=not any(c.status == "FAIL" for c in checks), checks=checks)

@@ -12,6 +12,7 @@ import json
 from media_os_api.ai.router import AIRouter
 from media_os_api.ai.types import AttemptRecord, GenerationRequest, TaskClass
 from media_os_api.carousel.brand_kit import BrandKit
+from media_os_api.carousel.qa import QaReport, run_text_qa
 from media_os_api.carousel.schema import (
     LANGUAGE_RULES,
     MAX_SLIDES,
@@ -117,6 +118,14 @@ def build_prompt(kit: BrandKit, brief: CarouselBrief) -> tuple[str, str]:
         "how-to posts).\n"
         f"{card_rule}"
         "- Bodies: at most 15 words, one idea per slide, conversational. No filler.\n"
+        "- Bengali voice: everyday spoken চলিত Bengali, like a cousin helping with the "
+        "wedding: the words families actually say. Avoid bookish or translated words (prefer "
+        "'নামের বানান ভুল হবে না তো?' over 'নাম লেখা কি ভাবাচ্ছে?', 'সঙ্গে সঙ্গে' over "
+        "'তৎক্ষণাৎ').\n"
+        "- Kickers speak to the reader ('ধাপ ২', 'জানতেন?', 'STEP 2', 'DID YOU KNOW?'); "
+        "never an internal label like PROOF, HOOK, POINT or CTA.\n"
+        "- Never name a specific premium design (রাজকীয়, বেনারসি, জামদানি…) on a slide that "
+        "shows a card render: none of the available card renders are those designs.\n"
         "- Each slide must make the reader want the next one (build, then pay off).\n\n"
         f"STRUCTURE: {MIN_SLIDES}-{MAX_SLIDES} slides (6 is ideal). Slide 1 role HOOK. Middle "
         "slides POINT or PROOF (PROOF slides use a visual). Last slide role CTA. "
@@ -153,10 +162,21 @@ def build_prompt(kit: BrandKit, brief: CarouselBrief) -> tuple[str, str]:
 
 
 def write_carousel(
-    router: AIRouter, kit: BrandKit, brief: CarouselBrief
+    router: AIRouter,
+    kit: BrandKit,
+    brief: CarouselBrief,
+    *,
+    feedback: list[str] | None = None,
 ) -> tuple[CarouselDraft, str, list[AttemptRecord]]:
-    """Returns the draft, the route that wrote it ('provider/model'), and all attempts."""
+    """Returns the draft, the route that wrote it ('provider/model'), and all attempts.
+
+    `feedback` carries the QA failures of a previous attempt so the rewrite can fix them."""
     system, prompt = build_prompt(kit, brief)
+    if feedback:
+        prompt += (
+            "\n\nYOUR PREVIOUS DRAFT WAS REJECTED BY QA FOR THESE REASONS. Write a new draft "
+            "that fixes every one of them:\n" + "\n".join(f"- {f}" for f in feedback[:10])
+        )
     result = router.generate(
         GenerationRequest(
             task=task_for(brief.language),
@@ -171,3 +191,22 @@ def write_carousel(
     if not isinstance(result.data, CarouselDraft):  # router validated against the schema
         raise TypeError("Router returned no CarouselDraft.")
     return result.data, f"{result.provider}/{result.model}", result.attempts
+
+
+def write_with_qa(
+    router: AIRouter, kit: BrandKit, brief: CarouselBrief, *, max_rewrites: int = 1
+) -> tuple[CarouselDraft, str, list[AttemptRecord], QaReport]:
+    """Write, run text QA, and on failure rewrite once with the failures as feedback.
+
+    Returns the last draft with its QA report; a draft that still fails is returned as-is so the
+    caller can save it as QA-failed (it never reaches the approval queue)."""
+    draft, written_by, attempts = write_carousel(router, kit, brief)
+    qa = run_text_qa(kit, brief, draft)
+    for _ in range(max_rewrites):
+        if qa.passed:
+            break
+        feedback = [f"{c.name}: {c.detail}" for c in qa.failures]
+        draft, written_by, more = write_carousel(router, kit, brief, feedback=feedback)
+        attempts = attempts + more
+        qa = run_text_qa(kit, brief, draft)
+    return draft, written_by, attempts, qa

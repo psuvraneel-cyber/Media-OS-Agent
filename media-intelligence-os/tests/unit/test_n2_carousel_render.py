@@ -154,7 +154,7 @@ def test_festive_flag_never_for_memorial() -> None:
     assert not is_festive({"occasion": "SHRADDHA_MEMORIAL", "hook_type": "SEASONAL"})
 
 
-def test_numbered_kicker_hides_the_ghost_numeral() -> None:
+def test_ghost_numeral_follows_a_numbered_kicker() -> None:
     c = SlideContext(
         index=3,
         total=6,
@@ -166,6 +166,29 @@ def test_numbered_kicker_hides_the_ghost_numeral() -> None:
         content_number=2,
     )
     step = SLIDE.model_copy(update={"kicker": "STEP 3"})
-    assert 'class="ghost"' not in render_slide_html(NIMONTRON, step, c)
+    assert '<div class="ghost">03</div>' in render_slide_html(NIMONTRON, step, c)
     tip = SLIDE.model_copy(update={"kicker": "PRO TIP"})
-    assert 'class="ghost"' in render_slide_html(NIMONTRON, tip, c)
+    assert '<div class="ghost">02</div>' in render_slide_html(NIMONTRON, tip, c)
+    cb = SlideContext(
+        index=2,
+        total=6,
+        language=Language.BN,
+        image_uri=None,
+        image_kind=None,
+        icon_uri=None,
+        font_base_uri="file:///f/",
+        content_number=1,
+    )
+    bn = SLIDE.model_copy(update={"kicker": "ধাপ ২"})
+    assert '<div class="ghost">০২</div>' in render_slide_html(NIMONTRON, bn, cb)
+
+
+def test_bengali_kickers_unspaced_and_internal_labels_dropped() -> None:
+    bn = render_slide_html(
+        NIMONTRON, SLIDE.model_copy(update={"kicker": "জানতেন?"}), ctx(Language.BN)
+    )
+    assert '<div class="kicker bn">জানতেন?</div>' in bn
+    leaked = render_slide_html(
+        NIMONTRON, SLIDE.model_copy(update={"kicker": "প্রুফ"}), ctx(Language.BN)
+    )
+    assert "প্রুফ" not in leaked and 'class="kicker' not in leaked

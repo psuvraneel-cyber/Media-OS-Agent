@@ -42,6 +42,23 @@ FONT_FACES = (
 )
 
 
+BENGALI_CHARS = re.compile("[\u0980-\u09ff]")
+_INTERNAL_KICKERS = {"proof", "hook", "cta", "point", "প্রুফ", "হুক", "পয়েন্ট", "সিটিএ"}
+_DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+
+
+def reader_kicker(kicker: str | None) -> str | None:
+    """The kicker as shown, or None for empty labels and leaked slide-role names."""
+    text = (kicker or "").replace("*", "").strip()
+    return None if not text or text.lower() in _INTERNAL_KICKERS else text
+
+
+def kicker_number(kicker: str | None) -> int:
+    """The step number in a kicker like 'ধাপ ২' or 'STEP 2' (0 when there is none)."""
+    m = re.search(r"\d+", (kicker or "").translate(_DIGITS))
+    return int(m.group(0)) if m and int(m.group(0)) < 100 else 0
+
+
 @dataclass(frozen=True)
 class SlideContext:
     index: int  # 1-based
@@ -174,6 +191,7 @@ body.dark{{background:radial-gradient(110% 80% at 50% 28%,#c41d28 0%,{p["red"]} 
 .kicker{{align-self:flex-start;font-family:'Anek Bangla';font-weight:800;font-size:30px;
  letter-spacing:3px;text-transform:uppercase;color:{p["tint"]};background:{p["red"]};
  padding:10px 22px;border-radius:999px}}
+.kicker.bn{{letter-spacing:0;text-transform:none;font-size:32px}}
 .center .kicker{{align-self:center}}
 .dark .kicker{{background:{p["gold"]};color:{p["red_deep"]}}}
 .h-bn,.h-en{{font-family:'Anek Bangla',sans-serif;font-weight:800;color:{p["red_deep"]};
@@ -184,8 +202,8 @@ body.dark{{background:radial-gradient(110% 80% at 50% 28%,#c41d28 0%,{p["red"]} 
 .dark .h-bn,.dark .h-en{{color:#fff7ec;text-shadow:0 6px 30px rgba(60,0,0,.45)}}
 mark{{background:none;color:inherit;position:relative;white-space:nowrap;z-index:0}}
 /* Bengali lines are taller (line-height 1.3), so the bar sits higher to stay behind the letters. */
-.h-bn mark::before{{bottom:.30em !important;height:.34em !important}}
-mark::before{{content:"";position:absolute;left:-.12em;right:-.12em;bottom:.12em;height:.36em;
+.h-bn mark::before{{bottom:.52em !important;height:.30em !important}}
+mark::before{{content:"";position:absolute;left:-.12em;right:-.12em;bottom:.32em;height:.30em;
  background:{p["gold_soft"]};z-index:-1;transform:skew(-8deg);border-radius:6px}}
 .dark mark{{color:{p["gold_soft"]}}}
 .dark mark::before{{background:{p["gold"]};opacity:.55}}
@@ -256,8 +274,10 @@ def _rich(text: str) -> str:
 def _texts(slide: Slide, language: Language, *, compact: bool, hook: bool = False) -> str:
     """Kicker + headlines always; bodies trimmed when space is tight (hook, or a visual below)."""
     out: list[str] = []
-    if slide.kicker:
-        out.append(f'<div class="kicker">{escape(slide.kicker.replace("*", ""))}</div>')
+    kicker = reader_kicker(slide.kicker)
+    if kicker:
+        cls = "kicker bn" if BENGALI_CHARS.search(kicker) else "kicker"
+        out.append(f'<div class="{cls}">{escape(kicker)}</div>')
     if language is not Language.EN and slide.headline_bn:
         out.append(f'<h1 class="h-bn fit" data-fit>{_rich(slide.headline_bn)}</h1>')
     if slide.headline_en and language is not Language.BN:
@@ -346,12 +366,8 @@ def _content(kit: BrandKit, slide: Slide, ctx: SlideContext) -> tuple[str, str]:
         )
         body = f'<div class="content top tight">{texts}</div><div class="stage"></div>{visual}'
         return f"{theme} on-stage", body
-    numbered_kicker = bool(slide.kicker and re.search(r"[0-9০-৯]", slide.kicker))
-    ghost = (
-        f'<div class="ghost">{_num(ctx.content_number, ctx.language)}</div>'
-        if ctx.content_number and not numbered_kicker
-        else ""
-    )
+    number = kicker_number(slide.kicker) or ctx.content_number
+    ghost = f'<div class="ghost">{_num(number, ctx.language)}</div>' if number else ""
     color = kit.palette["gold_soft"] if theme == "dark" else kit.palette["gold"]
     corner = f'<div class="mandala m-corner">{_mandala(color, 0.35)}</div>'
     return theme, f'{ghost}{corner}<div class="content vcenter">{texts}</div>'
