@@ -278,3 +278,33 @@ def test_review_api_queue_files_and_decisions(env: dict[str, Any], client: TestC
             ).scalars()
         )
         assert {"CAROUSEL_DRAFTED", "CAROUSEL_APPROVED", "CAROUSEL_REJECTED"} <= actions
+
+
+def test_failed_draft_recheck_renders_after_rules_change(env: dict[str, Any]) -> None:
+    from media_os_api.carousel.service import RecheckError, recheck_package
+
+    pid = _save(env["factory"])
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, pid)
+        assert pkg is not None
+        # Simulate a draft that failed an older, stricter rule (no render job yet).
+        pkg.qa_report = {
+            "passed": False,
+            "checks": [
+                {"name": "banned_phrases", "status": "FAIL", "detail": "testimonial: 'Review'"}
+            ],
+        }
+        db.execute(
+            delete(OutboxEvent).where(
+                OutboxEvent.job_run_id.in_(select(JobRun.id).where(JobRun.task_name == RENDER_TASK))
+            )
+        )
+        db.execute(delete(JobRun).where(JobRun.task_name == RENDER_TASK))
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, pid)
+        assert pkg is not None
+        qa = recheck_package(db, pkg, actor_id="owner:test")
+        assert qa.passed and (pkg.qa_report or {}).get("passed") is True
+        assert db.execute(select(JobRun).where(JobRun.task_name == RENDER_TASK)).first()
+        with pytest.raises(RecheckError):
+            recheck_package(db, pkg, actor_id="owner:test")  # already passed

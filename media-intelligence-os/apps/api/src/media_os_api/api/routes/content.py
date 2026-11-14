@@ -27,6 +27,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_os_api.auth import SessionPayload, require_csrf, require_session
+from media_os_api.carousel.service import RecheckError, recheck_package
 from media_os_api.db.models import Asset, BrandProfile, ContentPackage, PublishSchedule
 from media_os_api.db.session import session_scope
 from media_os_api.publish.service import ScheduleRequestError, request_schedule
@@ -394,3 +395,22 @@ def schedule_carousel(
             schedules=_schedules(db, pkg),
             scheduling=True,
         )
+
+
+@router.post("/content/carousels/{package_id}/recheck", response_model=CarouselSummary)
+def recheck_carousel(
+    package_id: uuid.UUID,
+    request: Request,
+    session: Annotated[SessionPayload, Depends(require_csrf)],
+    brand: Annotated[str, Query(min_length=1, max_length=128)],
+) -> CarouselSummary:
+    """Re-run QA with the latest rules on a draft that failed; renders it if it now passes."""
+    with _db(request) as db:
+        pkg = _package(db, _brand_id(db, brand), package_id)
+        try:
+            recheck_package(db, pkg, actor_id=f"owner:{session.subject}")
+        except RecheckError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, {"code": "NOT_RECHECKABLE", "message": str(exc)}
+            ) from exc
+        return CarouselSummary(**_summary(pkg, _slide_assets(db, pkg)))
