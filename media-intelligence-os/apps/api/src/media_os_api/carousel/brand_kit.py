@@ -200,7 +200,13 @@ NIMONTRON = BrandKit(
             _p(r"\d[\d,.]*\s*\+?\s*(downloads|installs|users)|ডাউনলোড\s*[০-৯\d]|[০-৯\d]+\s*জন"),
         ),
         BannedPattern(
-            "testimonial", _p(r"\b(testimonial|review(s|ed)?|customers? (say|said|love))\b")
+            # Real testimonial shapes only; "Review and personalise" (an app step) is fine.
+            "testimonial",
+            _p(
+                r"\btestimonials?\b|\b(customer|user|5[- ]star|five[- ]star)\s+reviews?\b"
+                r"|\b(customers?|users?|families|people|parents)\s+(say|said|love[sd]?)\b"
+                r"|\b[1-5](\.\d)?\s*(stars?|★)|\brated\s+[1-5]|রিভিউ|প্রশংসাপত্র"
+            ),
         ),
         BannedPattern(
             "unapproved_occasion",

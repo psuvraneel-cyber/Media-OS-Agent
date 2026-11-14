@@ -123,6 +123,27 @@ def test_banned_phrases_fail(text: str) -> None:
     assert not report.passed
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Families love it",
+        "4.8 stars on Play",
+        "Read our customer reviews",
+        "Users say it is easy",
+        "Rated 5 by parents",
+    ],
+)
+def test_testimonial_shapes_fail(text: str) -> None:
+    report = run_text_qa(NIMONTRON, brief(), draft(caption_en=f"{text} {PLAY}"))
+    assert status(report, "banned_phrases") == "FAIL"
+
+
+def test_app_step_wording_is_not_a_testimonial() -> None:
+    text = f"Step 3: Review and personalise your card. {PLAY}"
+    report = run_text_qa(NIMONTRON, brief(), draft(caption_en=text))
+    assert status(report, "banned_phrases") == "PASS"
+
+
 def test_tagore_mention_is_a_warning_not_a_failure() -> None:
     d = draft(caption_en=f"Premium lines include verses by Tagore. {PLAY}")
     report = run_text_qa(NIMONTRON, brief(), d)
