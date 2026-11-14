@@ -36,7 +36,6 @@ import { IntegrationsView, LogsView, SettingsView } from "@/components/views/Ope
 import {
   AgentsView,
   AnalyticsView,
-  ApprovalsView,
   AssetsView,
   CalendarView,
   StudioView,
@@ -300,7 +299,6 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
         <StudioView />
         <AssetsView />
         <CalendarView />
-        <ApprovalsView />
         <AnalyticsView />
         <AgentsView />
         <IntegrationsView systemStatus={SYSTEM_STATUS} channels={EMPTY_CHANNELS} />

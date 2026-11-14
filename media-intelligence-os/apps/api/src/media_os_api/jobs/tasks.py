@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_os_api.carousel.render_job import RENDER_TASK, handle_render_carousel
 from media_os_api.config import Settings, load_settings
 from media_os_api.db.models import JobRun
 from media_os_api.db.retention import run_retention_evaluation
@@ -18,6 +19,10 @@ from media_os_api.jobs.celery_app import celery_app
 from media_os_api.jobs.errors import PermanentTaskError
 from media_os_api.jobs.ledger import TaskHandler, execute_durable_job
 from media_os_api.jobs.routing import (
+    CREATIVE_CELERY_TASK,
+    CREATIVE_LEASE_SECONDS,
+    CREATIVE_SOFT_TIME_LIMIT,
+    CREATIVE_TIME_LIMIT,
     RESEARCH_CELERY_TASK,
     RESEARCH_LEASE_SECONDS,
     RESEARCH_SOFT_TIME_LIMIT,
@@ -92,6 +97,7 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     "media_os.internal.ping": handle_internal_ping,
     "media_os.internal.retention_dry_run": handle_retention_dry_run,
     "media_os.research.ingest": handle_research_ingestion,
+    RENDER_TASK: handle_render_carousel,  # executes only in the creative container
 }
 
 
@@ -139,4 +145,22 @@ def execute_research_job_run(job_run_id: str) -> dict[str, Any]:
         job_run_id=uuid.UUID(job_run_id),
         registry=PHASE4_TASK_REGISTRY,
         lease_seconds=max(settings.job_lease_seconds, RESEARCH_LEASE_SECONDS),
+    )
+
+
+@celery_app.task(  # type: ignore[untyped-decorator]
+    name=CREATIVE_CELERY_TASK,
+    acks_late=True,
+    soft_time_limit=CREATIVE_SOFT_TIME_LIMIT,
+    time_limit=CREATIVE_TIME_LIMIT,
+)
+def execute_creative_job_run(job_run_id: str) -> dict[str, Any]:
+    """Creative jobs (slide rendering): consumed only by the creative container's worker."""
+    settings, session_factory = _get_worker_context()
+    logger.info("worker_executing_creative_job", extra={"job_run_id": job_run_id})
+    return execute_durable_job(
+        session_factory,
+        job_run_id=uuid.UUID(job_run_id),
+        registry=PHASE4_TASK_REGISTRY,
+        lease_seconds=max(settings.job_lease_seconds, CREATIVE_LEASE_SECONDS),
     )

@@ -19,10 +19,26 @@ RESEARCH_LEASE_SECONDS = 900
 RESEARCH_SOFT_TIME_LIMIT = 780
 RESEARCH_TIME_LIMIT = 840
 
+# N2: slide rendering runs only in the creative container (headless Chromium, no AI keys).
+CREATIVE_PREFIX = "media_os.creative."
+CREATIVE_QUEUE = "creative"
+CREATIVE_CELERY_TASK = "media_os.execute_creative_job_run"
+CREATIVE_LEASE_SECONDS = 600
+CREATIVE_SOFT_TIME_LIMIT = 480
+CREATIVE_TIME_LIMIT = 540
+
 
 def queue_for_task(task_name: str) -> str:
-    return RESEARCH_QUEUE if task_name.startswith(RESEARCH_FETCH_PREFIX) else DEFAULT_QUEUE
+    if task_name.startswith(RESEARCH_FETCH_PREFIX):
+        return RESEARCH_QUEUE
+    if task_name.startswith(CREATIVE_PREFIX):
+        return CREATIVE_QUEUE
+    return DEFAULT_QUEUE
 
 
 def celery_task_for_queue(queue_name: str) -> str:
-    return RESEARCH_CELERY_TASK if queue_name == RESEARCH_QUEUE else DEFAULT_CELERY_TASK
+    if queue_name == RESEARCH_QUEUE:
+        return RESEARCH_CELERY_TASK
+    if queue_name == CREATIVE_QUEUE:
+        return CREATIVE_CELERY_TASK
+    return DEFAULT_CELERY_TASK

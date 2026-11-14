@@ -310,7 +310,7 @@ def test_zz_downgrade_refuses_foreign_global_schedules_then_roundtrips(
         command.downgrade(cfg, "0004_add_brand_topic_assignments")
 
     ok, _, ver = check_database_health(engine)
-    assert ok and ver == "0005_research_source_registry"
+    assert ok and ver == "0006_content_tags_qa_score"
     with session_scope(factory) as db:  # failed downgrade rolled back fully
         seeded = db.execute(
             select(ScheduleDefinition).where(ScheduleDefinition.name.like("research.fetch.%"))
@@ -328,4 +328,4 @@ def test_zz_downgrade_refuses_foreign_global_schedules_then_roundtrips(
 
     command.upgrade(cfg, "head")
     ok, _, ver = check_database_health(engine)
-    assert ok and ver == "0005_research_source_registry"
+    assert ok and ver == "0006_content_tags_qa_score"

@@ -514,6 +514,13 @@ class ContentPackage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "'REJECTED', 'PAUSED')",
             name="content_previous_status_valid",
         ),
+        CheckConstraint(
+            "post_tags IS NULL OR jsonb_typeof(post_tags) = 'object'", name="post_tags_is_object"
+        ),
+        CheckConstraint(
+            "qa_report IS NULL OR jsonb_typeof(qa_report) = 'object'", name="qa_report_is_object"
+        ),
+        CheckConstraint("score IS NULL OR jsonb_typeof(score) = 'object'", name="score_is_object"),
         Index("ix_content_packages_brand_status", "brand_profile_id", "status"),
         Index("ix_content_packages_research_packet_id", "research_packet_id"),
     )
@@ -542,6 +549,10 @@ class ContentPackage(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     source_manifest: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     approval_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    # N2 (migration 0006): PostTags set, automated QA report, virality score v0 (heuristic).
+    post_tags: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    qa_report: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    score: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
 
 class ContentStateTransition(UUIDPrimaryKeyMixin, Base):

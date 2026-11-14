@@ -38,6 +38,9 @@ services:
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
       POSTIZ_BASE_URL: ${POSTIZ_BASE_URL:-http://host.docker.internal:4007}
       SOURCE_REDDIT_STATUS: ${SOURCE_REDDIT_STATUS:-BLOCKED}
+      MEDIA_OS_MEDIA_ROOT: /data/media
+    volumes:
+      - media_os_media:/data/media:ro
     ports:
       - "127.0.0.1:8000:8000"
     extra_hosts:
@@ -260,6 +263,98 @@ services:
         max-file: "3"
     restart: unless-stopped
 
+  media-os-creative:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.creative
+    image: media-intelligence-os-creative:n2
+    container_name: media-os-creative
+    command:
+      - celery
+      - -A
+      - media_os_api.jobs.celery_app:celery_app
+      - worker
+      - --loglevel=INFO
+      - --concurrency=1
+      - -Q
+      - creative
+      - -n
+      - creative@%h
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_PHASE: ${APP_PHASE:-phase-4-persistence}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_DISPLAY_TIMEZONE: ${APP_DISPLAY_TIMEZONE:-Asia/Kolkata}
+      OWNER_USERNAME: ${OWNER_USERNAME:-}
+      OWNER_PASSWORD_HASH: ${OWNER_PASSWORD_HASH:-}
+      OWNER_PASSWORD_HASH_B64: ${OWNER_PASSWORD_HASH_B64:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      POSTGRES_HOST: ${POSTGRES_HOST:-media-os-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-media_os}
+      POSTGRES_USER: ${POSTGRES_USER:-media_os_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DATABASE_URL: ${DATABASE_URL:-}
+      REDIS_HOST: ${REDIS_HOST:-media-os-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_URL: ${REDIS_URL:-}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-120}
+      OUTBOX_POLL_INTERVAL_SECONDS: ${OUTBOX_POLL_INTERVAL_SECONDS:-1.0}
+      SCHEDULER_POLL_INTERVAL_SECONDS: ${SCHEDULER_POLL_INTERVAL_SECONDS:-5.0}
+      RETENTION_SOURCE_DEFAULT_DAYS: ${RETENTION_SOURCE_DEFAULT_DAYS:-365}
+      RETENTION_YOUTUBE_NON_AUTH_DAYS: ${RETENTION_YOUTUBE_NON_AUTH_DAYS:-30}
+      RETENTION_YOUTUBE_VERIFY_INTERVAL_DAYS: ${RETENTION_YOUTUBE_VERIFY_INTERVAL_DAYS:-30}
+      RETENTION_APP_LOG_DAYS: ${RETENTION_APP_LOG_DAYS:-30}
+      RETENTION_AUDIT_EVENT_DAYS: ${RETENTION_AUDIT_EVENT_DAYS:-365}
+      RETENTION_FAILED_TEMP_MEDIA_DAYS: ${RETENTION_FAILED_TEMP_MEDIA_DAYS:-7}
+      MEDIA_STORAGE_DIR: ${MEDIA_STORAGE_DIR:-/tmp/media_os_artifacts}
+      MEDIA_STORAGE_WARN_PERCENT: ${MEDIA_STORAGE_WARN_PERCENT:-80}
+      # N2 creative worker: renders slides only. No AI keys, no research token.
+      MEDIA_OS_MEDIA_ROOT: /data/media
+      MEDIA_OS_BRAND_ASSETS_ROOT: /brand-assets
+      MEDIA_OS_FONT_DIR: /app/fonts
+    volumes:
+      # Owner's brand assets, read in place and never modified.
+      - ${NIMONTRON_STORE_DIR:-C:/nimontron/store}:/brand-assets/brand-app-promo:ro
+      - media_os_media:/data/media
+    depends_on:
+      media-os-postgres:
+        condition: service_healthy
+      media-os-redis:
+        condition: service_healthy
+    networks:
+      - media-os-net
+    read_only: true
+    tmpfs:
+      - /tmp
+    shm_size: 256m
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import pathlib, time; ts=int(pathlib.Path('/tmp/media_os_worker.heartbeat').read_text()); assert time.time()-ts < 60",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
   media-os-scheduler:
     image: media-intelligence-os-api:phase4
     container_name: media-os-scheduler
@@ -338,6 +433,8 @@ volumes:
     name: media_os_pgdata
   media_os_redisdata:
     name: media_os_redisdata
+  media_os_media:
+    name: media_os_media
 
 networks:
   media-os-net:
