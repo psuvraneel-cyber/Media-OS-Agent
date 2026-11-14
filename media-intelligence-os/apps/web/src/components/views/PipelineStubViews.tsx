@@ -7,7 +7,6 @@ import {
   Clapperboard,
   FolderKanban,
   LineChart,
-  ShieldCheck,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -142,43 +141,6 @@ export function CalendarView() {
         title={`No scheduled items for ${activeBrand.name}`}
         description="Automated scheduling and Postiz write operations are disabled in Phase 4."
         phaseBadge="Not Implemented — Phase 8"
-        brandLabel={activeBrand.name}
-      />
-    </div>
-  );
-}
-
-export function ApprovalsView() {
-  const { activeBrand } = useBrandContext();
-  return (
-    <div className="space-y-6">
-      <SurfaceCard
-        title={`Human Approval Policy — ${activeBrand.name}`}
-        subtitle="Mandatory human sign-off precedes every external social publish."
-        badge={<Badge tone="live">Policy Active</Badge>}
-      >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
-          {[
-            { gate: "Factual Verification", desc: "Claims trace directly to verified primary documentation." },
-            { gate: "Brand Isolation Check", desc: "Verified active BrandProfile voice, niche & assets match." },
-            { gate: "Visual & Audio QA", desc: "Slide legibility, safe margins & TTS pacing inspected." },
-          ].map((item) => (
-            <div
-              key={item.gate}
-              className="rounded-lg border border-slate-800 bg-[#090b10] p-3.5"
-            >
-              <p className="font-semibold text-slate-200">{item.gate}</p>
-              <p className="mt-1 text-slate-400">{item.desc}</p>
-            </div>
-          ))}
-        </div>
-      </SurfaceCard>
-
-      <EmptyState
-        icon={<ShieldCheck className="h-5 w-5" aria-hidden="true" />}
-        title={`0 items awaiting review for ${activeBrand.name}`}
-        description="Approval workflows unlock once editorial drafting and media rendering arrive in Phases 6-8."
-        phaseBadge="Not Implemented — Phase 6-8"
         brandLabel={activeBrand.name}
       />
     </div>

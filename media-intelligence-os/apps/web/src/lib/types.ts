@@ -225,3 +225,43 @@ export interface TopicDetailResponse {
   topic: TopicSummary;
   sources: ResearchSourceItem[];
 }
+
+// N2 carousel review queue
+export interface QaCheck {
+  name: string;
+  status: "PASS" | "WARN" | "FAIL" | string;
+  detail: string;
+}
+
+export interface CarouselSummary {
+  id: string;
+  status: string;
+  approval_status: string;
+  title: string | null;
+  hook: string | null;
+  language: string | null;
+  pillar: string | null;
+  hook_type: string | null;
+  slide_count: number;
+  qa_passed: boolean | null;
+  qa_warnings: number;
+  score_total: number | null;
+  score_label: string | null;
+  thumbnail_asset_id: string | null;
+  created_at: string;
+}
+
+export interface CarouselListResponse {
+  items: CarouselSummary[];
+}
+
+export interface CarouselDetail extends CarouselSummary {
+  caption: string | null;
+  hashtags: string[];
+  alt_text: string | null;
+  slides: Record<string, unknown>[];
+  assets: { id: string; index: number; width: number | null; height: number | null }[];
+  qa_report: { passed?: boolean; checks?: QaCheck[] } | null;
+  score: { total?: number; label?: string; suggestion?: string | null } | null;
+  post_tags: Record<string, unknown> | null;
+}

@@ -1,0 +1,23 @@
+# Creative worker (roadmap N2): renders carousel slides with headless Chromium.
+# Consumes only the `creative` Celery queue. Holds no AI keys. Brand assets are mounted read-only.
+FROM mcr.microsoft.com/playwright/python:v1.49.1-noble
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    MEDIA_OS_FONT_DIR=/app/fonts \
+    MEDIA_OS_MEDIA_ROOT=/data/media \
+    MEDIA_OS_BRAND_ASSETS_ROOT=/brand-assets
+
+WORKDIR /app
+
+COPY pyproject.toml /app/pyproject.toml
+COPY README.md /app/README.md
+COPY apps/api/src /app/apps/api/src
+COPY infra/creative/fonts /app/fonts
+
+# Playwright's Python package must match the browsers baked into the base image (1.49.1).
+RUN python3 -m pip install --no-cache-dir . "playwright==1.49.1" && \
+    mkdir -p /data/media && chown -R pwuser:pwuser /data/media
+
+USER pwuser

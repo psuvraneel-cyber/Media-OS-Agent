@@ -9,6 +9,8 @@ from media_os_api.carousel.qa import QaReport
 from media_os_api.carousel.schema import CarouselBrief, CarouselDraft
 from media_os_api.content.taxonomy import validate_for_brand
 from media_os_api.db.models import BrandProfile, ContentPackage, ContentStateTransition
+from media_os_api.jobs.ledger import enqueue_durable_job
+from media_os_api.jobs.routing import CREATIVE_QUEUE
 from media_os_api.services.audit_service import record_audit_event
 
 ACTOR = "system:carousel"
@@ -81,4 +83,17 @@ def create_carousel_package(
             "slides": len(draft.slides),
         },
     )
+    if qa.passed:
+        from media_os_api.carousel.render_job import RENDER_TASK
+
+        enqueue_durable_job(
+            session,
+            task_name=RENDER_TASK,
+            task_type="CREATIVE",
+            payload={"content_package_id": str(pkg.id)},
+            idempotency_key=f"render:{pkg.id}:v{pkg.version}",
+            brand_profile_id=brand.id,
+            queue_name=CREATIVE_QUEUE,
+            maximum_attempts=2,
+        )
     return pkg

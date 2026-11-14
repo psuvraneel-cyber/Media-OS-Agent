@@ -45,7 +45,7 @@ async function proxyRequest(
       cache: "no-store",
     });
 
-    const responseBody = await upstream.text();
+    const responseBody = await upstream.arrayBuffer();
     const outHeaders = new Headers();
     const contentType = upstream.headers.get("content-type");
     if (contentType) {

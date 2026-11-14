@@ -53,6 +53,7 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
     services = cfg["services"]
     assert sorted(services.keys()) == [
         "media-os-api",
+        "media-os-creative",
         "media-os-postgres",
         "media-os-redis",
         "media-os-scheduler",
@@ -67,8 +68,9 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
     redis = services["media-os-redis"]
     worker = services["media-os-worker"]
     scheduler = services["media-os-scheduler"]
+    creative = services["media-os-creative"]
 
-    for svc in (api, web, worker, scheduler):
+    for svc in (api, web, worker, scheduler, creative):
         assert svc["read_only"] is True
         assert "no-new-privileges:true" in svc.get("security_opt", [])
 
@@ -84,6 +86,18 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
     assert int(redis["mem_limit"]) <= 128 * 1024 * 1024
     assert int(worker["mem_limit"]) <= 256 * 1024 * 1024
     assert int(scheduler["mem_limit"]) <= 128 * 1024 * 1024
+    assert int(creative["mem_limit"]) <= 768 * 1024 * 1024
+
+    # N2 creative worker: creative queue only, no published ports, no AI or research tokens,
+    # brand assets read-only; the API sees rendered media read-only.
+    assert creative["command"][-3:] == ["creative", "-n", "creative@%h"]
+    assert not creative.get("ports")
+    secret_markers = ("GEMINI", "GROQ", "OPENROUTER", "CLOUDFLARE", "GITHUB_TOKEN")
+    assert not [k for k in creative["environment"] if k.startswith(secret_markers)]
+    mounts = {v["target"]: v.get("read_only", False) for v in creative["volumes"]}
+    assert mounts == {"/brand-assets/brand-app-promo": True, "/data/media": False}
+    assert {v["target"]: v.get("read_only", False) for v in api["volumes"]} == {"/data/media": True}
+    assert "creative" not in worker["command"][-1]
 
     # Strict loopback-only host bindings for web and api
     api_ports = api["ports"]
@@ -106,7 +120,7 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
     assert "media-os-baseline-net" not in networks
 
     volumes = cfg.get("volumes", {})
-    assert sorted(volumes.keys()) == ["media_os_pgdata", "media_os_redisdata"]
+    assert sorted(volumes.keys()) == ["media_os_media", "media_os_pgdata", "media_os_redisdata"]
 
     # Web must communicate internally over docker network without hardcoded secrets
     web_env = web["environment"]
