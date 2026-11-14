@@ -8,7 +8,7 @@ For each generation step the router walks the task's ordered route list:
 * timeouts / 5xx → per-provider circuit breaker (3 failures in 5 min → provider paused 5 min);
 * 401/403 (bad key) → provider paused 6 h; 404 (model gone) → route paused 24 h;
 * response missing or invalid for the requested schema → one repair attempt on the same route, then
-  the next route.
+  the next route; a reply cut off by the output-token limit goes straight to the next route.
 
 Only when **every** route is unavailable does the step stop: `AllProvidersExhausted`
 (retryable, with `resume_at` = earliest reset), so the durable job resumes later instead of failing.
@@ -51,6 +51,8 @@ BREAKER_PAUSE = timedelta(minutes=5)
 AUTH_PAUSE = timedelta(hours=6)
 NOT_FOUND_PAUSE = timedelta(hours=24)
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+# A repair prompt cannot fix these; asking again would only spend another request.
+NO_REPAIR_CODES = frozenset({"BLOCKED", "BAD_RESPONSE", "PROVIDER_ERROR", "TRUNCATED"})
 REPAIR_SUFFIX = (
     "\n\nYour previous reply could not be parsed. Reply with ONLY one JSON object that matches the "
     "requested fields exactly. No prose, no code fences."
@@ -227,7 +229,7 @@ class AIRouter:
                     self._record(
                         request, AttemptRecord(route.provider, route.model, code), attempts
                     )
-                    if repair or code in {"BLOCKED", "BAD_RESPONSE", "PROVIDER_ERROR"}:
+                    if repair or code in NO_REPAIR_CODES:
                         break
                     if not self._quota.reserve(route):
                         quota_limited += 1

@@ -424,3 +424,66 @@ def test_default_routes_are_valid_for_their_providers() -> None:
         assert len({r.provider for r in routes}) >= 2, f"{task} needs cross-provider failover"
         for route in routes:
             providers[route.provider].endpoint(route.model)  # raises on an invalid/paid id
+
+
+# ---------------------------------------------------------------- truncation / thinking budgets
+
+
+def test_output_token_floors_for_thinking_models() -> None:
+    small = GenerationRequest(task=TaskClass.REVIEW, system="s", prompt="p", max_output_tokens=16)
+    assert (
+        GeminiProvider().payload("gemini-3.5-flash", small)["generationConfig"]["maxOutputTokens"]
+        == 1024
+    )
+    groq = GroqProvider()
+    assert groq.payload("openai/gpt-oss-120b", small)["max_tokens"] == 512
+    assert groq.payload("qwen/qwen3.8-27b", small)["max_tokens"] == 16
+
+
+def test_truncated_replies_are_detected_per_provider() -> None:
+    gemini_cut = {
+        "candidates": [
+            {
+                "content": {"parts": [{"text": "thinking...", "thought": True}, {"text": ":**"}]},
+                "finishReason": "MAX_TOKENS",
+            }
+        ]
+    }
+    openai_cut = {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
+    cf_cut = {"success": True, "result": openai_cut}
+    for provider, doc in (
+        (GeminiProvider(), gemini_cut),
+        (GroqProvider(), openai_cut),
+        (CloudflareProvider(ACCOUNT), cf_cut),
+    ):
+        with pytest.raises(InvalidModelOutput) as exc:
+            provider.parse(json.dumps(doc).encode())
+        assert exc.value.code == "TRUNCATED"
+
+
+def test_gemini_thought_parts_are_not_returned_as_text() -> None:
+    doc = {
+        "candidates": [
+            {
+                "content": {"parts": [{"text": "plan", "thought": True}, {"text": "উত্তর"}]},
+                "finishReason": "STOP",
+            }
+        ]
+    }
+    assert GeminiProvider().parse(json.dumps(doc).encode()).text == "উত্তর"
+
+
+def test_truncation_moves_to_next_provider_without_repair_attempt() -> None:
+    cut = httpx.Response(
+        200, json={"candidates": [{"content": {"parts": []}, "finishReason": "MAX_TOKENS"}]}
+    )
+    router, rec, _s, attempts = make_router(
+        {
+            "generativelanguage.googleapis.com": lambda r: cut,
+            "api.groq.com": lambda r: openai_ok("ঠিক আছে"),
+        },
+        routes=TWO_ROUTES,
+    )
+    assert router.generate(req()).provider == "groq"
+    assert attempts == [("gemini", "TRUNCATED"), ("groq", "OK")]
+    assert rec.hosts().count("generativelanguage.googleapis.com") == 1  # no wasted retry

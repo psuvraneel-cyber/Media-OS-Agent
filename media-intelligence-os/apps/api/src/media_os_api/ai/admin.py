@@ -79,7 +79,7 @@ def cmd_ping(task: str) -> int:
                 task=TaskClass(task),
                 system="You are a terse assistant.",
                 prompt="Reply with the single word: ok",
-                max_output_tokens=16,
+                max_output_tokens=64,
                 temperature=0.0,
                 operation="ping",
             )

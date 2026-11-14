@@ -38,6 +38,12 @@ def _json(body: bytes) -> Any:
         raise InvalidModelOutput("Provider response is not JSON.", code="BAD_RESPONSE") from exc
 
 
+def _truncated(text: str) -> InvalidModelOutput:
+    """The reply hit the output-token limit (thinking models can spend it all before answering)."""
+    detail = "an empty reply" if not text.strip() else "a cut-off reply"
+    return InvalidModelOutput(f"Output-token limit reached with {detail}.", code="TRUNCATED")
+
+
 def _int(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
@@ -49,6 +55,11 @@ class Provider(ABC):
     auth_scheme: ClassVar[str | None] = "Bearer"
     host_policy: ClassVar[HostPolicy]
     model_pattern: ClassVar[re.Pattern[str]]
+    # Reasoning/thinking models spend output tokens before answering; never send less than this.
+    min_output_tokens: ClassVar[int] = 0
+
+    def output_tokens(self, model: str, requested: int) -> int:
+        return max(requested, self.min_output_tokens)
 
     def validate_model(self, model: str) -> str:
         if not self.model_pattern.match(model):
@@ -88,6 +99,7 @@ class GeminiProvider(Provider):
     auth_scheme = None
     host_policy = _policy("generativelanguage.googleapis.com")
     model_pattern = re.compile(r"^[a-z0-9][a-z0-9.\-]{1,80}$")
+    min_output_tokens = 1024
     base = "https://generativelanguage.googleapis.com/v1beta"
 
     def endpoint(self, model: str) -> str:
@@ -96,7 +108,7 @@ class GeminiProvider(Provider):
     def payload(self, model: str, request: GenerationRequest) -> dict[str, Any]:
         config: dict[str, Any] = {
             "temperature": request.temperature,
-            "maxOutputTokens": request.max_output_tokens,
+            "maxOutputTokens": self.output_tokens(model, request.max_output_tokens),
         }
         if request.output_schema is not None:
             config["responseMimeType"] = "application/json"
@@ -119,8 +131,13 @@ class GeminiProvider(Provider):
                 f"Gemini returned no candidates ({reason or 'empty'}).",
                 code="BLOCKED" if reason else "EMPTY",
             )
-        parts = ((candidates[0] or {}).get("content") or {}).get("parts") or []
-        text = "".join(str(p.get("text", "")) for p in parts if isinstance(p, dict))
+        first = candidates[0] or {}
+        parts = (first.get("content") or {}).get("parts") or []
+        text = "".join(
+            str(p.get("text", "")) for p in parts if isinstance(p, dict) and not p.get("thought")
+        )
+        if first.get("finishReason") == "MAX_TOKENS":
+            raise _truncated(text)
         if not text.strip():
             raise InvalidModelOutput("Gemini returned an empty candidate.", code="EMPTY")
         usage = doc.get("usageMetadata") or {}
@@ -157,7 +174,7 @@ class _OpenAICompatible(Provider):
                 {"role": "user", "content": request.prompt},
             ],
             "temperature": request.temperature,
-            "max_tokens": request.max_output_tokens,
+            "max_tokens": self.output_tokens(model, request.max_output_tokens),
         }
         if request.output_schema is not None:
             body["response_format"] = {"type": "json_object"}
@@ -172,6 +189,8 @@ class _OpenAICompatible(Provider):
         choices = doc.get("choices") or []
         message = (choices[0] or {}).get("message") if choices else None
         text = str((message or {}).get("content") or "")
+        if choices and (choices[0] or {}).get("finish_reason") == "length":
+            raise _truncated(text)
         if not text.strip():
             raise InvalidModelOutput("Empty completion.", code="EMPTY")
         usage = doc.get("usage") or {}
@@ -193,6 +212,10 @@ class GroqProvider(_OpenAICompatible):
     env_key = "GROQ_API_KEY"
     host_policy = _policy("api.groq.com")
     base = "https://api.groq.com/openai/v1"
+
+    def output_tokens(self, model: str, requested: int) -> int:
+        # gpt-oss models reason before answering (≈100-200 tokens even for one line).
+        return max(requested, 512) if model.startswith("openai/gpt-oss") else requested
 
 
 class OpenRouterProvider(_OpenAICompatible):
@@ -236,7 +259,7 @@ class CloudflareProvider(Provider):
                 {"role": "system", "content": system},
                 {"role": "user", "content": request.prompt},
             ],
-            "max_tokens": request.max_output_tokens,
+            "max_tokens": self.output_tokens(model, request.max_output_tokens),
             "temperature": request.temperature,
         }
 
@@ -251,6 +274,8 @@ class CloudflareProvider(Provider):
             message = (choices[0] or {}).get("message") or {}
             response = message.get("content")
         text = response if isinstance(response, str) else json.dumps(response) if response else ""
+        if choices and (choices[0] or {}).get("finish_reason") == "length":
+            raise _truncated(text)
         if not text.strip():
             raise InvalidModelOutput("Empty completion.", code="EMPTY")
         usage = result.get("usage") or {}
