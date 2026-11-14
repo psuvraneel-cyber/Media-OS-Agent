@@ -1,0 +1,130 @@
+{
+  "check": "N1 free-tier AI live check",
+  "date": "2026-11-14",
+  "approved_by": "owner (chat: 'Merge, then live check')",
+  "runtime": {
+    "api_image": "media-intelligence-os-api:phase4 0ff784f1ac14",
+    "rollback_tag": "media-intelligence-os-api:rollback-pre-n1",
+    "keys_location": "worker container only; API container has none"
+  },
+  "configured_providers": [
+    "cloudflare",
+    "gemini",
+    "groq",
+    "openrouter"
+  ],
+  "model_listing_counts": {
+    "cloudflare": 75,
+    "gemini": 49,
+    "groq": 11,
+    "openrouter": 14
+  },
+  "requests": "one request per candidate model; prompt: Bengali Durga Puja greeting; no content stored in DB",
+  "results": [
+    {
+      "route": "gemini/gemini-2.5-flash",
+      "outcome": "OK",
+      "ms": 2365,
+      "tokens": [
+        21,
+        7
+      ],
+      "bengali_script_ok": true
+    },
+    {
+      "route": "gemini/gemini-2.5-flash-lite",
+      "outcome": "AIUnavailable",
+      "detail": "No route produced a valid result for BENGALI_COPY: gemini/gemini-2.5-flash-lite=NOT_FOUND",
+      "bengali_script_ok": false
+    },
+    {
+      "route": "gemini/gemini-3.5-flash",
+      "outcome": "OK",
+      "ms": 3506,
+      "tokens": [
+        21,
+        12
+      ],
+      "bengali_script_ok": true
+    },
+    {
+      "route": "gemini/gemini-3.5-flash-lite",
+      "outcome": "OK",
+      "ms": 1336,
+      "tokens": [
+        21,
+        10
+      ],
+      "bengali_script_ok": true
+    },
+    {
+      "route": "groq/openai/gpt-oss-120b",
+      "outcome": "OK",
+      "ms": 768,
+      "tokens": [
+        96,
+        136
+      ],
+      "bengali_script_ok": true
+    },
+    {
+      "route": "groq/openai/gpt-oss-20b",
+      "outcome": "OK",
+      "ms": 651,
+      "tokens": [
+        96,
+        169
+      ],
+      "bengali_script_ok": true
+    },
+    {
+      "route": "groq/qwen/qwen3.8-27b",
+      "outcome": "OK",
+      "ms": 244,
+      "tokens": [
+        41,
+        13
+      ],
+      "bengali_script_ok": true
+    },
+    {
+      "route": "openrouter/google/gemma-4-31b-it:free",
+      "outcome": "AllProvidersExhausted",
+      "detail": "All 1 routes for BENGALI_COPY are out of free quota; resume at 2026-11-14T09:18:42.984782+00:00.",
+      "bengali_script_ok": false
+    },
+    {
+      "route": "cloudflare/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+      "outcome": "OK",
+      "ms": 938,
+      "tokens": [
+        59,
+        23
+      ],
+      "bengali_script_ok": true
+    },
+    {
+      "route": "cloudflare/@cf/google/gemma-4-26b-a4b-it",
+      "outcome": "AIUnavailable",
+      "detail": " result for BENGALI_COPY: cloudflare/@cf/google/gemma-4-26b-a4b-it=EMPTY, cloudflare/@cf/google/gemma-4-26b-a4b-it=EMPTY",
+      "bengali_script_ok": false
+    },
+    {
+      "route": "cloudflare/@cf/meta/llama-3.1-8b-instruct-fp8",
+      "outcome": "OK",
+      "ms": 92098,
+      "tokens": [
+        40,
+        22
+      ],
+      "bengali_script_ok": true
+    }
+  ],
+  "findings": [
+    "gemini-2.5-flash-lite is listed but returns 404; dropped from defaults",
+    "Groq no longer serves Llama 3.x; defaults moved to openai/gpt-oss-120b, gpt-oss-20b, qwen/qwen3.8-27b",
+    "OpenRouter google/gemma-4-31b-it:free answered 429 (upstream busy); router blocked the route and reported resume time",
+    "Cloudflare Gemma 4 answers in OpenAI chat format inside result; parser updated",
+    "Cloudflare llama-3.1-8b-instruct-fp8 took 92 s; excluded from defaults"
+  ]
+}
