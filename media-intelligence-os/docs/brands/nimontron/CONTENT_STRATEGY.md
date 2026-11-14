@@ -39,8 +39,18 @@ Hard caps enforced in the brand profile's `publishing_preferences` (N3 publishin
 them): Instagram 2/day, Facebook 2/day, YouTube Shorts 1/day, YouTube long-form 1/week. No
 identical cross-account reposts; the same idea is re-cut per format.
 
-**Language:** Bengali-first on-image text, with an English caption block for families abroad
-(`Language.BN_EN`). A small share of English-only posts (`EN`) tests the abroad audience.
+**Language mix (owner direction 2026-11-14): not everything in Bengali script.** Every post is
+written natively in one of three modes:
+
+| Mode | Share (start) | On the slides | Caption |
+|---|---|---|---|
+| `BN_EN` bilingual | ~40% | Bengali headline + English line on every slide | Bengali, then English |
+| `EN` English only | ~30% | English only (families abroad, relatives who don't read Bengali); says clearly the app makes Bengali cards | English |
+| `BN` Bengali only | ~30% | Bengali only (West Bengal, Bangladesh) | Bengali + one short English line |
+
+Card images stay Bengali in every mode (that is the product). Modes rotate evenly across pillars
+and hooks while everything is `EXPLORE`; N5 then shifts the mix toward what performs. Applies to
+Reels/Shorts (N4) too.
 
 ## 4. Hook library (structural patterns, not copy)
 
@@ -82,7 +92,8 @@ The rotation covers every hook type and slot at least once. Specific auspicious 
 | Sun | Carousel | — | `other_occasions` · `QUESTION` · EVENING |
 
 Week 2 repeats the rhythm with the hooks rotated (`NUMBER_LIST`, `PAIN_POINT`, `CURIOSITY`, …) and
-the slots shifted, so no pillar is tied to a single hook or time.
+the slots shifted, so no pillar is tied to a single hook or time. The language mode rotates
+alongside (`BN_EN` → `EN` → `BN` …), so no pillar or hook is tied to one language.
 
 ## 7. Open items
 

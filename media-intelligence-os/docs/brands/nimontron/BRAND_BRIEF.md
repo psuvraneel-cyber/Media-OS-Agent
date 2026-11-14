@@ -94,6 +94,11 @@ borders, bold Bengali display type. Fonts are bundled in `public/fonts` (licence
 Fresh card renders for content should come from the app's own renderer (sample data only), so designs
 stay pixel-accurate. The app has a screenshot generator: `scripts/store-assets.mjs`.
 
+**⚠ Found 2026-11-14 (N2):** `store/raw/card-2.png` and `store/screenshots/3.png`, `4.png` (the
+রাজকীয় card) still credit the default wedding verse "শুভদিনে শুভক্ষণে…" to রবীন্দ্রনাথ ঠাকুর, which
+CHANGELOG 1.1.0 says is not his. Media OS excludes these three files from all content. If the same
+screenshots are live on the Play Store listing, the owner should regenerate and re-upload them.
+
 ## 7. Channels (owner's plan, 2026-11-14)
 
 | Account | Formats |
