@@ -166,7 +166,7 @@ body.dark{{background:radial-gradient(110% 80% at 50% 28%,#c41d28 0%,{p["red"]} 
  flex-direction:column;gap:24px;z-index:2}}
 .content.top{{bottom:auto;height:560px;justify-content:flex-start}}
 .content.tight{{height:460px}}
-.content.band-card{{height:400px;justify-content:center}}
+.content.band-card{{height:350px;justify-content:center}}
 .content.band-phone{{height:430px;justify-content:center}}
 .content.festive{{top:190px}}
 .center{{justify-content:center;text-align:center;align-items:center}}
@@ -183,7 +183,9 @@ body.dark{{background:radial-gradient(110% 80% at 50% 28%,#c41d28 0%,{p["red"]} 
 .hook .h-bn{{font-size:112px}} .hook .h-en{{font-size:96px}}
 .dark .h-bn,.dark .h-en{{color:#fff7ec;text-shadow:0 6px 30px rgba(60,0,0,.45)}}
 mark{{background:none;color:inherit;position:relative;white-space:nowrap;z-index:0}}
-mark::before{{content:"";position:absolute;left:-.12em;right:-.12em;bottom:.08em;height:.42em;
+/* Bengali lines are taller (line-height 1.3), so the bar sits higher to stay behind the letters. */
+.h-bn mark::before{{bottom:.30em !important;height:.34em !important}}
+mark::before{{content:"";position:absolute;left:-.12em;right:-.12em;bottom:.12em;height:.36em;
  background:{p["gold_soft"]};z-index:-1;transform:skew(-8deg);border-radius:6px}}
 .dark mark{{color:{p["gold_soft"]}}}
 .dark mark::before{{background:{p["gold"]};opacity:.55}}
@@ -200,7 +202,7 @@ mark::before{{content:"";position:absolute;left:-.12em;right:-.12em;bottom:.08em
 .sticker span{{font-family:'Anek Bangla';font-weight:800;font-size:38px;line-height:1.08;
  color:{p["red_deep"]}}}
 .hero{{position:absolute;z-index:1;filter:drop-shadow(0 40px 50px rgba(40,0,0,.45))}}
-.hero.card{{width:470px;right:76px;bottom:150px;transform:rotate(6deg);border-radius:10px}}
+.hero.card{{width:420px;right:90px;bottom:150px;transform:rotate(6deg);border-radius:10px}}
 .hero.card2{{width:470px;left:60px;bottom:170px;transform:rotate(-8deg);opacity:.92}}
 .stage{{position:absolute;left:0;right:0;bottom:0;height:520px;z-index:0;
  background:linear-gradient(180deg,{p["red"]} 0%,{p["red_deep"]} 100%)}}
