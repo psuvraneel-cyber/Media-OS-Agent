@@ -111,8 +111,32 @@ describe("CarouselReviewView", () => {
     expect(await screen.findByText(/0 carousels awaiting review/)).toBeInTheDocument();
   });
 
+  it("explains a QA-failed draft and offers a re-check instead of 'still rendering'", async () => {
+    const failed = {
+      ...DETAIL, status: "DRAFTED", qa_passed: false, assets: [],
+      qa_report: { passed: false, checks: [{ name: "banned_phrases", status: "FAIL", detail: "x" }] },
+    };
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      calls.push(`${(init?.method ?? "GET").toUpperCase()} ${url}`);
+      if (url.includes("/recheck")) return json({ ...SUMMARY, status: "DRAFTED", qa_passed: true });
+      if (url.includes("/content/carousels/c1")) return json(failed);
+      return json({ items: [{ ...SUMMARY, status: "DRAFTED", qa_passed: false }] });
+    });
+    render(
+      <BrandProvider brands={[BRAND]} initialBrandId={APP}>
+        <CarouselReviewView />
+      </BrandProvider>,
+    );
+    expect(await screen.findByText(/didn.t pass the automated checks/)).toBeInTheDocument();
+    expect(screen.queryByText(/still rendering/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Re-check with latest rules/ }));
+    expect(calls.some((c) => c.startsWith("POST") && c.includes("/recheck"))).toBe(true);
+  });
+
   it("disables approve for carousels that have not passed QA", async () => {
-    const draft = { ...DETAIL, status: "DRAFTED", assets: [] };
+    const draft = { ...DETAIL, status: "DRAFTED", qa_passed: true, assets: [] };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes("/content/carousels/c1")) return json(draft);

@@ -109,11 +109,42 @@ function DetailPanel({
     }
   };
 
+  const recheck = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      await browserApiFetch(
+        `/content/carousels/${encodeURIComponent(detail.id)}/recheck?brand=${encodeURIComponent(brand)}`,
+        { method: "POST" },
+      );
+      onDecided();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
   const checks: QaCheck[] = detail.qa_report?.checks ?? [];
   return (
     <div className="space-y-5">
       <div className="flex gap-3 overflow-x-auto pb-2" aria-label="Slides">
-        {detail.assets.length === 0 ? (
+        {detail.assets.length === 0 && detail.qa_passed === false ? (
+          <div className="space-y-2 rounded-lg border border-rose-900/60 bg-rose-950/30 p-3 text-xs text-rose-200">
+            <p>
+              This draft didn&apos;t pass the automated checks, so it wasn&apos;t rendered. See the
+              failed checks below. You can reject it, or re-check it if the rules have changed since.
+            </p>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => void recheck()}
+              className="rounded-md border border-rose-700 px-2.5 py-1 text-rose-100 disabled:opacity-40"
+            >
+              Re-check with latest rules
+            </button>
+          </div>
+        ) : detail.assets.length === 0 ? (
           <p className="text-xs text-slate-400">Slides are still rendering — refresh in a moment.</p>
         ) : (
           detail.assets.map((asset) => (
