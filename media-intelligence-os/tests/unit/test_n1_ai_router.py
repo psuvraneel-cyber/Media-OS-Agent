@@ -191,6 +191,15 @@ def test_cloudflare_account_validation_and_parse() -> None:
     assert p.parse(cloudflare_ok("yo").content).text == "yo"
     with pytest.raises(InvalidModelOutput):
         p.parse(json.dumps({"success": False}).encode())
+    chat_shape = {
+        "success": True,
+        "result": {
+            "choices": [{"message": {"content": "নমস্কার"}}],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+        },
+    }
+    parsed = p.parse(json.dumps(chat_shape).encode())
+    assert (parsed.text, parsed.input_tokens, parsed.output_tokens) == ("নমস্কার", 3, 2)
 
 
 def test_providers_from_env_skips_missing_credentials() -> None:
@@ -404,3 +413,14 @@ def test_redis_store_fails_closed() -> None:
     tracker = QuotaTracker(RedisQuotaStore(Broken()), {})
     with pytest.raises(AIUnavailable):
         tracker.reserve(ModelRoute("groq", "m"))
+
+
+def test_default_routes_are_valid_for_their_providers() -> None:
+    from media_os_api.ai.config import DEFAULT_ROUTES
+
+    providers = providers_from_env(SECRETS)
+    for task in TaskClass:
+        routes = DEFAULT_ROUTES[task]
+        assert len({r.provider for r in routes}) >= 2, f"{task} needs cross-provider failover"
+        for route in routes:
+            providers[route.provider].endpoint(route.model)  # raises on an invalid/paid id

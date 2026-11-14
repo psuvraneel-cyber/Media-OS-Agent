@@ -39,25 +39,37 @@ from media_os_api.research.http.ratelimit import InMemoryMinIntervalLimiter, Rat
 from media_os_api.research.http.retry import RetryPolicy
 from media_os_api.research.http.ssrf import Resolver, system_resolver
 
-GEMINI_FLASH = ModelRoute("gemini", "gemini-2.5-flash")
-GEMINI_LITE = ModelRoute("gemini", "gemini-2.5-flash-lite")
-GROQ_LARGE = ModelRoute("groq", "llama-3.3-70b-versatile")
-GROQ_SMALL = ModelRoute("groq", "llama-3.1-8b-instant")
-OPENROUTER_FREE = ModelRoute("openrouter", "meta-llama/llama-3.3-70b-instruct:free")
-CLOUDFLARE_SMALL = ModelRoute("cloudflare", "@cf/meta/llama-3.1-8b-instruct")
+# Verified live on 2026-11-14 (model listing + one Bengali request each; see
+# docs/evidence/n1_ai_live_check_2026-11-14.json). Re-verify with `ai.admin models` when changing.
+GEMINI_FLASH = ModelRoute("gemini", "gemini-3.5-flash")  # best Bengali in the live check
+GEMINI_FLASH_PREV = ModelRoute("gemini", "gemini-2.5-flash")
+GEMINI_LITE = ModelRoute("gemini", "gemini-3.5-flash-lite")
+GROQ_LARGE = ModelRoute("groq", "openai/gpt-oss-120b")  # reasoning model: keep max tokens >= 300
+GROQ_SMALL = ModelRoute("groq", "openai/gpt-oss-20b")
+GROQ_FAST = ModelRoute("groq", "qwen/qwen3.8-27b")
+OPENROUTER_FREE = ModelRoute("openrouter", "google/gemma-4-31b-it:free")  # often busy upstream
+CLOUDFLARE_LARGE = ModelRoute("cloudflare", "@cf/meta/llama-3.3-70b-instruct-fp8-fast")
+CLOUDFLARE_GEMMA = ModelRoute("cloudflare", "@cf/google/gemma-4-26b-a4b-it")
 
 # Bengali quality: Gemini first for anything a reader sees in Bengali.
 DEFAULT_ROUTES: dict[TaskClass, list[ModelRoute]] = {
-    TaskClass.BENGALI_COPY: [GEMINI_FLASH, GEMINI_LITE, OPENROUTER_FREE, GROQ_LARGE],
-    TaskClass.ENGLISH_COPY: [GEMINI_LITE, GROQ_LARGE, OPENROUTER_FREE, CLOUDFLARE_SMALL],
-    TaskClass.SIMPLE_FORMAT: [GROQ_SMALL, CLOUDFLARE_SMALL, GEMINI_LITE, OPENROUTER_FREE],
-    TaskClass.REVIEW: [GEMINI_FLASH, GROQ_LARGE, GEMINI_LITE, OPENROUTER_FREE],
+    TaskClass.BENGALI_COPY: [
+        GEMINI_FLASH,
+        GEMINI_FLASH_PREV,
+        GROQ_LARGE,
+        OPENROUTER_FREE,
+        CLOUDFLARE_LARGE,
+    ],
+    TaskClass.ENGLISH_COPY: [GEMINI_LITE, GROQ_LARGE, CLOUDFLARE_LARGE, OPENROUTER_FREE],
+    TaskClass.SIMPLE_FORMAT: [GROQ_FAST, GROQ_SMALL, CLOUDFLARE_LARGE, GEMINI_LITE],
+    TaskClass.REVIEW: [GEMINI_FLASH, GROQ_LARGE, GEMINI_FLASH_PREV, CLOUDFLARE_GEMMA],
 }
 
 # Self-imposed caps at or below published/observed free tiers (dashboards are authoritative).
 DEFAULT_LIMITS: dict[str, QuotaLimits] = {
     GEMINI_FLASH.key: QuotaLimits(rpm=5, rpd=20, reset_timezone="America/Los_Angeles"),
-    GEMINI_LITE.key: QuotaLimits(rpm=10, rpd=400, reset_timezone="America/Los_Angeles"),
+    GEMINI_FLASH_PREV.key: QuotaLimits(rpm=5, rpd=20, reset_timezone="America/Los_Angeles"),
+    GEMINI_LITE.key: QuotaLimits(rpm=10, rpd=200, reset_timezone="America/Los_Angeles"),
     "groq": QuotaLimits(rpm=25, rpd=900),
     "openrouter": QuotaLimits(rpm=15, rpd=45),  # free models: 50/day without purchased credits
     "cloudflare": QuotaLimits(rpm=30, rpd=150),  # ~10k neurons/day shared across models

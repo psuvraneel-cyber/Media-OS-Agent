@@ -246,6 +246,10 @@ class CloudflareProvider(Provider):
             raise InvalidModelOutput("Cloudflare reported failure.", code="PROVIDER_ERROR")
         result = doc.get("result") or {}
         response = result.get("response")
+        choices = result.get("choices") or []
+        if response is None and choices:  # newer models answer in OpenAI chat format
+            message = (choices[0] or {}).get("message") or {}
+            response = message.get("content")
         text = response if isinstance(response, str) else json.dumps(response) if response else ""
         if not text.strip():
             raise InvalidModelOutput("Empty completion.", code="EMPTY")
