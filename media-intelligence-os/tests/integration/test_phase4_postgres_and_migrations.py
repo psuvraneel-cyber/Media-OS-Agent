@@ -142,7 +142,7 @@ def test_alembic_empty_upgrade_downgrade_and_schema_inventory() -> None:
         command.upgrade(cfg, "head")
         ok, _detail, ver = check_database_health(engine)
         assert ok is True
-        assert ver == "0006_content_tags_qa_score"
+        assert ver == "0007_facebook_platform"
         inspector5 = inspect(engine)
         assert {"research_sources", "research_source_checkpoints"}.issubset(
             set(inspector5.get_table_names())

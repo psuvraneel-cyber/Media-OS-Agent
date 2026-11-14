@@ -1,5 +1,5 @@
-import { CarouselReviewView } from "@/components/views/CarouselReviewView";
+import { ApprovalsTabs } from "@/components/views/ApprovalsTabs";
 
 export default function ApprovalsPage() {
-  return <CarouselReviewView />;
+  return <ApprovalsTabs />;
 }

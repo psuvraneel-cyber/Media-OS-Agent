@@ -4,8 +4,9 @@
 * `GET  /api/v1/content/carousels/{id}?brand=<ref>` — one carousel with slides and assets.
 * `GET  /api/v1/content/assets/{id}/file?brand=<ref>` — a rendered slide PNG (read-only volume).
 * `POST /api/v1/content/carousels/{id}/decision` (CSRF) — approve or reject.
-
-Approving records the owner's decision only; nothing is published (publishing is N3, via Postiz).
+* `POST /api/v1/content/carousels/{id}/schedule` (CSRF) — schedule an APPROVED carousel to
+  Instagram/Facebook at a chosen time (N3). The worker uploads the images and creates the post in
+  Postiz; Postiz publishes at that time. Approving alone never publishes anything.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -25,8 +27,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_os_api.auth import SessionPayload, require_csrf, require_session
-from media_os_api.db.models import Asset, ContentPackage
+from media_os_api.db.models import Asset, BrandProfile, ContentPackage, PublishSchedule
 from media_os_api.db.session import session_scope
+from media_os_api.publish.service import ScheduleRequestError, request_schedule
 from media_os_api.services import BrandNotFoundError, get_brand
 from media_os_api.services.audit_service import record_audit_event
 from media_os_api.workflow.state_machine import ContentLifecycleStatus, transition_content_status
@@ -34,6 +37,30 @@ from media_os_api.workflow.state_machine import ContentLifecycleStatus, transiti
 router = APIRouter(tags=["content"])
 
 REVIEW_STATUSES = ("QA_PASSED", "RENDERED", "DRAFTED")
+PUBLISH_STATUSES = (
+    "QA_PASSED",
+    "POSTIZ_DRAFT",
+    "USER_APPROVED",
+    "SCHEDULED",
+    "PUBLISHING",
+    "PUBLISHED",
+    "FAILED_RETRYABLE",
+)
+
+
+class ScheduleEntry(BaseModel):
+    platform: str
+    status: str
+    scheduled_at: str
+    timezone: str
+    post_url: str | None
+
+
+class ScheduleRequest(BaseModel):
+    scheduled_at: datetime
+    platforms: list[Literal["INSTAGRAM", "FACEBOOK"]] = Field(
+        default=["INSTAGRAM", "FACEBOOK"], min_length=1, max_length=2
+    )
 
 
 class SlideAsset(BaseModel):
@@ -59,6 +86,8 @@ class CarouselSummary(BaseModel):
     score_label: str | None
     thumbnail_asset_id: str | None
     created_at: str
+    schedules: list[ScheduleEntry] = Field(default_factory=list)
+    scheduling: bool = False
 
 
 class CarouselDetail(CarouselSummary):
@@ -130,6 +159,39 @@ def _slide_assets(db: Session, pkg: ContentPackage) -> list[Asset]:
     return list(rows)
 
 
+def _schedules(db: Session, pkg: ContentPackage) -> list[ScheduleEntry]:
+    rows = db.execute(
+        select(PublishSchedule)
+        .where(PublishSchedule.content_package_id == pkg.id)
+        .order_by(PublishSchedule.platform)
+    ).scalars()
+    return [
+        ScheduleEntry(
+            platform=r.platform,
+            status=r.status,
+            scheduled_at=r.scheduled_at.isoformat(),
+            timezone=r.timezone,
+            post_url=r.remote_post_id if (r.remote_post_id or "").startswith("http") else None,
+        )
+        for r in rows
+    ]
+
+
+def _scheduling(db: Session, pkg: ContentPackage) -> bool:
+    from media_os_api.db.models import JobRun
+
+    return (
+        db.execute(
+            select(JobRun.id).where(
+                JobRun.task_name == "media_os.publish.schedule_carousel",
+                JobRun.status.in_(("PENDING", "DISPATCHED", "RUNNING", "FAILED_RETRYABLE")),
+                JobRun.payload["content_package_id"].astext == str(pkg.id),
+            )
+        ).first()
+        is not None
+    )
+
+
 def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
     tags = pkg.post_tags or {}
     qa = pkg.qa_report or {}
@@ -158,7 +220,7 @@ def list_carousels(
     request: Request,
     _session: Annotated[SessionPayload, Depends(require_session)],
     brand: Annotated[str, Query(min_length=1, max_length=128)],
-    queue: Annotated[Literal["review", "all"], Query()] = "review",
+    queue: Annotated[Literal["review", "publish", "all"], Query()] = "review",
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ) -> CarouselList:
     with _db(request) as db:
@@ -171,8 +233,20 @@ def list_carousels(
                 ContentPackage.status.in_(REVIEW_STATUSES),
                 ContentPackage.approval_status == "PENDING",
             )
+        elif queue == "publish":
+            stmt = stmt.where(
+                ContentPackage.status.in_(PUBLISH_STATUSES),
+                ContentPackage.approval_status == "APPROVED",
+            )
         pkgs = db.execute(stmt.order_by(ContentPackage.created_at.desc()).limit(limit)).scalars()
-        items = [CarouselSummary(**_summary(p, _slide_assets(db, p))) for p in pkgs]
+        items = [
+            CarouselSummary(
+                **_summary(p, _slide_assets(db, p)),
+                schedules=_schedules(db, p),
+                scheduling=_scheduling(db, p),
+            )
+            for p in pkgs
+        ]
         return CarouselList(items=items)
 
 
@@ -188,6 +262,8 @@ def get_carousel(
         assets = _slide_assets(db, pkg)
         return CarouselDetail(
             **_summary(pkg, assets),
+            schedules=_schedules(db, pkg),
+            scheduling=_scheduling(db, pkg),
             caption=pkg.caption,
             hashtags=list(pkg.hashtags or []),
             alt_text=pkg.description,
@@ -274,3 +350,47 @@ def decide_carousel(
         )
         db.flush()
         return CarouselSummary(**_summary(pkg, _slide_assets(db, pkg)))
+
+
+@router.post("/content/carousels/{package_id}/schedule", response_model=CarouselSummary)
+def schedule_carousel(
+    package_id: uuid.UUID,
+    payload: ScheduleRequest,
+    request: Request,
+    session: Annotated[SessionPayload, Depends(require_csrf)],
+    brand: Annotated[str, Query(min_length=1, max_length=128)],
+) -> CarouselSummary:
+    """Owner schedules an APPROVED carousel; the worker uploads images, then creates the post."""
+    actor = f"owner:{session.subject}"
+    with _db(request) as db:
+        brand_id = _brand_id(db, brand)
+        pkg = _package(db, brand_id, package_id)
+        profile = db.get(BrandProfile, brand_id)
+        if profile is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, {"code": "BRAND_NOT_FOUND", "message": "Unknown brand."}
+            )
+        if _scheduling(db, pkg) or _schedules(db, pkg):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                {"code": "ALREADY_SCHEDULED", "message": "This carousel is already scheduled."},
+            )
+        try:
+            request_schedule(
+                db,
+                pkg=pkg,
+                brand=profile,
+                when=payload.scheduled_at,
+                platforms=list(payload.platforms),
+                actor_id=actor,
+            )
+        except ScheduleRequestError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, {"code": exc.code, "message": str(exc)}
+            ) from exc
+        db.flush()
+        return CarouselSummary(
+            **_summary(pkg, _slide_assets(db, pkg)),
+            schedules=_schedules(db, pkg),
+            scheduling=True,
+        )

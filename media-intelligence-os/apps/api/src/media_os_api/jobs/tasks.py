@@ -28,6 +28,12 @@ from media_os_api.jobs.routing import (
     RESEARCH_SOFT_TIME_LIMIT,
     RESEARCH_TIME_LIMIT,
 )
+from media_os_api.publish.service import (
+    SCHEDULE_TASK,
+    SYNC_TASK,
+    handle_schedule_carousel,
+    handle_sync_status,
+)
 from media_os_api.research.jobs import research_fetch_registry
 from media_os_api.research.tasks import handle_research_ingestion
 
@@ -98,6 +104,8 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     "media_os.internal.retention_dry_run": handle_retention_dry_run,
     "media_os.research.ingest": handle_research_ingestion,
     RENDER_TASK: handle_render_carousel,  # executes only in the creative container
+    SCHEDULE_TASK: handle_schedule_carousel,  # N3: worker only (GitHub + Postiz credentials)
+    SYNC_TASK: handle_sync_status,
 }
 
 

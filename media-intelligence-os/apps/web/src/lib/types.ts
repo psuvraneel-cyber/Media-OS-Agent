@@ -249,6 +249,16 @@ export interface CarouselSummary {
   score_label: string | null;
   thumbnail_asset_id: string | null;
   created_at: string;
+  schedules: ScheduleEntry[];
+  scheduling: boolean;
+}
+
+export interface ScheduleEntry {
+  platform: string;
+  status: string;
+  scheduled_at: string;
+  timezone: string;
+  post_url: string | null;
 }
 
 export interface CarouselListResponse {
