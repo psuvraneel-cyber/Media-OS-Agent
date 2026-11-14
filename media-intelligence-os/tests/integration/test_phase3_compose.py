@@ -109,7 +109,7 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
 
     assert len(web_ports) == 1
     assert web_ports[0]["host_ip"] == "127.0.0.1"
-    assert int(web_ports[0]["published"]) == 3000
+    assert int(web_ports[0]["published"]) == 3100  # 3000 is used by another local project
     assert int(web_ports[0]["target"]) == 3000
 
     # Complete network and volume isolation from external Postiz and Phase 1 baseline stacks

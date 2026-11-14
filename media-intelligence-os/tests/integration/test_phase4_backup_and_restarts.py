@@ -70,7 +70,7 @@ def test_live_container_readiness_and_postiz_isolation() -> None:
         pytest.skip("Set RUN_LIVE_RESTART_TESTS=1 to run live container restart tests.")
 
     assert httpx.get("http://127.0.0.1:8000/health/ready", timeout=5).status_code == 200
-    assert httpx.get("http://127.0.0.1:3000/api/health", timeout=5).status_code == 200
+    assert httpx.get("http://127.0.0.1:3100/api/health", timeout=5).status_code == 200
     assert httpx.get("http://localhost:4007/api/auth/can-register", timeout=5).status_code == 200
 
     # Restart each service cleanly and confirm health recovers without touching Postiz
@@ -107,5 +107,5 @@ def test_live_container_readiness_and_postiz_isolation() -> None:
             pytest.fail(f"Container {container} did not recover healthy after restart.")
 
     assert httpx.get("http://127.0.0.1:8000/health/ready", timeout=5).status_code == 200
-    assert httpx.get("http://127.0.0.1:3000/api/health", timeout=5).status_code == 200
+    assert httpx.get("http://127.0.0.1:3100/api/health", timeout=5).status_code == 200
     assert httpx.get("http://localhost:4007/api/auth/can-register", timeout=5).status_code == 200

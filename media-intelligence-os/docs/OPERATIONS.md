@@ -11,7 +11,7 @@ Media Intelligence OS is designed as two **independent** local Docker Compose de
 
 1. **Stack A — `media-os-baseline` (Phase 1) → `media-intelligence-os` (Phase 4 Active Stack):**
    - **Phase 1 Active Baseline:** Single minimal health service (`infra/docker/compose.baseline.yml`) bound to `127.0.0.1:8000` on isolated network `media-os-baseline-net`.
-   - **Phase 4 Persistence & Durable Jobs Stack (`infra/docker/compose.app.yml`):** 6 containers on isolated `media-os-net`: `media-os-web` (`127.0.0.1:3000`), `media-os-api` (`127.0.0.1:8000`), `media-os-postgres` (PostgreSQL 17, `5432` internal), `media-os-redis` (Redis 7.2, `6379` internal), `media-os-worker` (Celery `--concurrency=1`), and `media-os-scheduler` (outbox dispatcher + persistent scheduler + lease reaper). *(Future Phase 5/7 `research` & `creative` workers will bind to reserved queues.)*
+   - **Phase 4 Persistence & Durable Jobs Stack (`infra/docker/compose.app.yml`):** 6 containers on isolated `media-os-net`: `media-os-web` (`127.0.0.1:3100`; port set by `MEDIA_OS_WEB_PORT`, login origins by `MEDIA_OS_WEB_ORIGINS` — 3000 is used by another local project), `media-os-api` (`127.0.0.1:8000`), `media-os-postgres` (PostgreSQL 17, `5432` internal), `media-os-redis` (Redis 7.2, `6379` internal), `media-os-worker` (Celery `--concurrency=1`), and `media-os-scheduler` (outbox dispatcher + persistent scheduler + lease reaper). *(Future Phase 5/7 `research` & `creative` workers will bind to reserved queues.)*
 2. **Stack B — `postiz-runtime` (Phase 2 Verified, separate directory `C:\Media OS Agent\postiz-runtime`):**
    - Deployed independently using pinned release `v2.25.3` (`ghcr.io/gitroomhq/postiz-app:v2.25.3`), exposing `http://localhost:4007` (`127.0.0.1:4007:5000`), with 8 running containers and 6 persistent named volumes. See [`docs/POSTIZ_DEPLOYMENT.md`](./POSTIZ_DEPLOYMENT.md).
 
@@ -43,7 +43,7 @@ docker exec -it media-os-api python -m media_os_api.auth.rotate_password --usern
 # Inspect status, health endpoints, and worker heartbeats
 docker compose --env-file "C:\Media OS Agent\media-os-runtime\.env" -f infra/docker/compose.app.yml ps
 Invoke-RestMethod -Uri "http://127.0.0.1:8000/health/ready"
-Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health"
+Invoke-RestMethod -Uri "http://127.0.0.1:3100/api/health"
 
 # Safe stop (NEVER `-v`! Stop custom app before running `pytest tests/smoke` because Phase 1 also binds 127.0.0.1:8000)
 docker compose --env-file "C:\Media OS Agent\media-os-runtime\.env" -f infra/docker/compose.app.yml down
