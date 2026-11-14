@@ -19,6 +19,8 @@ QA_VERSION = "text-v2"
 CARD_PILLARS = {"wedding_season", "design_showcase", "other_occasions"}
 _BENGALI = re.compile(r"[ঀ-৿]")
 _LATIN = re.compile(r"[A-Za-z]")
+# Devanagari letters; the danda (U+0964/0965) is shared punctuation that Bengali also uses.
+_DEVANAGARI = re.compile("[ऀ-ॣ०-ॿ]")
 _HASHTAG = re.compile(r"^#[^\s#]{2,40}$")
 
 
@@ -65,7 +67,9 @@ def _language(brief: CarouselBrief, draft: CarouselDraft) -> Check:
         elif brief.language is Language.EN:
             if not s.headline_en:
                 problems.append(f"slide {i}: English headline missing")
-            if bn or _BENGALI.search(en):
+            # Headlines stay fully English; a body may quote a short Bengali term (শ্রী/শ্রীমতী).
+            body_en = s.body_en or ""
+            if bn or _BENGALI.search(s.headline_en or "") or bengali_share(body_en) > 0.35:
                 problems.append(f"slide {i}: Bengali script on an English-only slide")
         else:
             if not (s.headline_bn and s.headline_en):
@@ -85,6 +89,12 @@ def _language(brief: CarouselBrief, draft: CarouselDraft) -> Check:
     if brief.language is not Language.BN and not draft.caption_en:
         problems.append("English caption missing")
     return _check("language_mode", problems)
+
+
+def _script(draft: CarouselDraft) -> Check:
+    """Devanagari (Hindi script) sometimes leaks into Bengali output; it is always wrong here."""
+    hits = [t[:40] for t in draft.all_text() if _DEVANAGARI.search(t)]
+    return _check("wrong_script", [f"Devanagari in: '{h}'" for h in hits])
 
 
 def _structure(draft: CarouselDraft) -> Check:
@@ -202,6 +212,7 @@ def _card_visual(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> C
 def run_text_qa(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> QaReport:
     checks = [
         _structure(draft),
+        _script(draft),
         _language(brief, draft),
         _claims(kit, draft),
         *_banned(kit, draft),

@@ -82,7 +82,8 @@ def build_prompt(kit: BrandKit, brief: CarouselBrief) -> tuple[str, str]:
         "prices, statistics or reviews.\n"
         "2. Never say best, #1, top, leading, সেরা, or quote download/install/user counts.\n"
         "3. Never mention Christian or Buddhist cards. Never attribute any verse to Tagore.\n"
-        "4. Never use a real person's name (relations like মেজোমামা, পিসিমা, aunt are fine). "
+        "4. Bengali text must be in Bengali script only — never Devanagari (Hindi script). "
+        "Never use a real person's name (relations like মেজোমামা, পিসিমা, aunt are fine). "
         "Never mention iOS/iPhone.\n"
         "5. Prices (₹) only with 'in India'; otherwise 'price on Google Play'.\n"
         "Reply with ONE JSON object only."
@@ -162,7 +163,7 @@ def write_carousel(
             system=system,
             prompt=prompt,
             output_schema=CarouselDraft,
-            max_output_tokens=4096,
+            max_output_tokens=8192,  # thinking models spend part of this
             temperature=0.9,
             operation="carousel_write",
         )

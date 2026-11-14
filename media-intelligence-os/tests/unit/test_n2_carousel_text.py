@@ -250,3 +250,13 @@ def test_emphasis_markers_are_ignored_by_checks() -> None:
     d = draft()
     d.slides[0].headline_en = "*Wedding season* is here"
     assert run_text_qa(NIMONTRON, brief(), d).passed
+
+
+def test_devanagari_fails_and_english_body_may_quote_bengali_terms() -> None:
+    d = draft(Language.EN)
+    d.slides[1].body_en = "श्री/श्रीमती added automatically"
+    assert status(run_text_qa(NIMONTRON, brief(Language.EN), d), "wrong_script") == "FAIL"
+    d.slides[1].body_en = "Honorifics like শ্রী/শ্রীমতী are added automatically for you"
+    report = run_text_qa(NIMONTRON, brief(Language.EN), d)
+    assert status(report, "wrong_script") == "PASS"
+    assert status(report, "language_mode") == "PASS"
