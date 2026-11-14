@@ -103,7 +103,7 @@ class Settings(BaseSettings):
     csrf_cookie_name: str = "media_os_csrf"
 
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://127.0.0.1:3000", "http://localhost:3000"]
+        default_factory=lambda: ["http://127.0.0.1:3100", "http://localhost:3100"]
     )
 
     login_rate_limit_max_attempts: int = Field(default=5, ge=1, le=100)

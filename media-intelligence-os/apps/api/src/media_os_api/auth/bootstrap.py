@@ -23,7 +23,7 @@ def render_runtime_env_content(
     owner_password_hash: str,
     session_secret: str,
     cookie_secure: bool = False,
-    cors_allowed_origins: str = "http://127.0.0.1:3000,http://localhost:3000",
+    cors_allowed_origins: str = "http://127.0.0.1:3100,http://localhost:3100",
     postiz_base_url: str = "http://host.docker.internal:4007",
     postgres_password: str | None = None,
     redis_password: str | None = None,
