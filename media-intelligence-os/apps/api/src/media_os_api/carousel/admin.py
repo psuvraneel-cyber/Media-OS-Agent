@@ -17,10 +17,9 @@ from typing import Any
 from media_os_api.ai.config import build_router
 from media_os_api.ai.quota import InMemoryQuotaStore, QuotaStore, RedisQuotaStore
 from media_os_api.carousel.brand_kit import kit_for
-from media_os_api.carousel.qa import run_text_qa
 from media_os_api.carousel.schema import CarouselBrief
 from media_os_api.carousel.score import ai_review, score_carousel
-from media_os_api.carousel.writer import write_carousel
+from media_os_api.carousel.writer import write_with_qa
 from media_os_api.config import load_settings
 from media_os_api.content.taxonomy import (
     CallToAction,
@@ -61,8 +60,7 @@ def produce(brand_slug: str, brief: CarouselBrief, *, save: bool) -> dict[str, A
         on_attempt = usage_recorder(factory)
     router = build_router(quota_store=_quota_store(), on_attempt=on_attempt)
     try:
-        draft, written_by, attempts = write_carousel(router, kit, brief)
-        qa = run_text_qa(kit, brief, draft)
+        draft, written_by, attempts, qa = write_with_qa(router, kit, brief)
         score = score_carousel(brief, draft, ai_review(router, draft))
     finally:
         router.close()

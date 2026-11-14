@@ -171,6 +171,10 @@ def test_price_without_india_fails_and_install_cta_needs_play() -> None:
     assert status(run_text_qa(NIMONTRON, brief(), d), "pricing_region") == "FAIL"
     d2 = draft(caption_en="No link here", caption_bn="লিঙ্ক নেই")
     assert status(run_text_qa(NIMONTRON, brief(), d2), "call_to_action") == "FAIL"
+    d3 = draft(Language.EN)
+    d3.slides[0].sticker = "৩ ধাপে কার্ড"
+    d3.slides[0].claim_ids = ["speed"]
+    assert status(run_text_qa(NIMONTRON, brief(Language.EN), d3), "language_mode") == "FAIL"
 
 
 def test_structure_requires_hook_first_and_cta_last() -> None:
@@ -217,3 +221,81 @@ def test_score_is_labelled_heuristic_and_blends_review() -> None:
 def test_bengali_share() -> None:
     assert bengali_share("বিয়ের কার্ড") == 1.0
     assert bengali_share("card") == 0.0
+
+
+def test_sticker_must_be_claim_backed_and_on_hook_only() -> None:
+    d = draft()
+    d.slides[0].sticker = "৩ ধাপে কার্ড"
+    assert status(run_text_qa(NIMONTRON, brief(), d), "sticker_claim") == "FAIL"  # no claim
+    d.slides[0].claim_ids = ["speed"]
+    assert status(run_text_qa(NIMONTRON, brief(), d), "sticker_claim") == "PASS"
+    d.slides[2].sticker = "Free"
+    assert status(run_text_qa(NIMONTRON, brief(), d), "sticker_claim") == "FAIL"
+
+
+def test_long_bodies_warn_then_fail_and_wedding_posts_want_a_card() -> None:
+    d = draft()
+    d.slides[1].body_en = " ".join(["word"] * 20)
+    r = run_text_qa(NIMONTRON, brief(), d)
+    assert status(r, "readable_length") == "WARN"
+    d.slides[1].body_en = " ".join(["word"] * 30)
+    assert status(run_text_qa(NIMONTRON, brief(), d), "readable_length") == "FAIL"
+    assert status(r, "shows_a_card") == "WARN"  # wedding_season without a CARD visual
+    d2 = draft()
+    d2.slides[2].visual_asset_id = "card_muslim_wedding"
+    assert status(run_text_qa(NIMONTRON, brief(), d2), "shows_a_card") == "PASS"
+
+
+def test_emphasis_markers_are_ignored_by_checks() -> None:
+    d = draft()
+    d.slides[0].headline_en = "*Wedding season* is here"
+    assert run_text_qa(NIMONTRON, brief(), d).passed
+
+
+def test_devanagari_fails_and_english_body_may_quote_bengali_terms() -> None:
+    d = draft(Language.EN)
+    d.slides[1].body_en = "श्री/श्रीमती added automatically"
+    assert status(run_text_qa(NIMONTRON, brief(Language.EN), d), "wrong_script") == "FAIL"
+    d.slides[1].body_en = "Honorifics like শ্রী/শ্রীমতী are added automatically for you"
+    report = run_text_qa(NIMONTRON, brief(Language.EN), d)
+    assert status(report, "wrong_script") == "PASS"
+    assert status(report, "language_mode") == "PASS"
+
+
+def test_premium_design_named_next_to_a_different_card_fails() -> None:
+    d = draft()
+    d.slides[2].headline_en = "Add a royal touch"
+    d.slides[2].visual_asset_id = "card_muslim_wedding"
+    assert status(run_text_qa(NIMONTRON, brief(), d), "design_matches_visual") == "FAIL"
+    d.slides[2].visual_asset_id = "screen_names_bn"  # no card shown: naming the design is fine
+    assert status(run_text_qa(NIMONTRON, brief(), d), "design_matches_visual") == "PASS"
+
+
+def test_internal_kicker_labels_warn() -> None:
+    d = draft()
+    d.slides[2].kicker = "প্রুফ"
+    assert status(run_text_qa(NIMONTRON, brief(), d), "kicker_reads_naturally") == "WARN"
+
+
+def test_failed_qa_triggers_one_rewrite_with_feedback() -> None:
+    from media_os_api.carousel import writer as writer_mod
+
+    bad = draft()
+    bad.slides[0].role, bad.slides[-1].role = bad.slides[-1].role, bad.slides[0].role
+    good = draft()
+    calls: list[list[str] | None] = []
+
+    def fake_write(
+        router: object, kit: object, b: object, *, feedback: list[str] | None = None
+    ) -> tuple[CarouselDraft, str, list[object]]:
+        calls.append(feedback)
+        return (bad if len(calls) == 1 else good), "test/model", []
+
+    original = writer_mod.write_carousel
+    writer_mod.write_carousel = fake_write  # type: ignore[assignment]
+    try:
+        result, _, _, qa = writer_mod.write_with_qa(None, NIMONTRON, brief())  # type: ignore[arg-type]
+    finally:
+        writer_mod.write_carousel = original
+    assert qa.passed and result is good
+    assert calls[0] is None and calls[1] and any("structure" in f for f in calls[1])

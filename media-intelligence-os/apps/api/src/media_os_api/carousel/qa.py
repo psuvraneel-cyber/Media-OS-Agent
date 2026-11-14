@@ -12,12 +12,15 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from media_os_api.carousel.brand_kit import BrandKit
-from media_os_api.carousel.schema import CarouselBrief, CarouselDraft, Slide, SlideRole
+from media_os_api.carousel.schema import CarouselBrief, CarouselDraft, SlideRole, plain
 from media_os_api.content.taxonomy import CallToAction, Language
 
-QA_VERSION = "text-v1"
+QA_VERSION = "text-v2"
+CARD_PILLARS = {"wedding_season", "design_showcase", "other_occasions"}
 _BENGALI = re.compile(r"[ঀ-৿]")
 _LATIN = re.compile(r"[A-Za-z]")
+# Devanagari letters; the danda (U+0964/0965) is shared punctuation that Bengali also uses.
+_DEVANAGARI = re.compile("[ऀ-ॣ०-ॿ]")
 _HASHTAG = re.compile(r"^#[^\s#]{2,40}$")
 
 
@@ -64,13 +67,21 @@ def _language(brief: CarouselBrief, draft: CarouselDraft) -> Check:
         elif brief.language is Language.EN:
             if not s.headline_en:
                 problems.append(f"slide {i}: English headline missing")
-            if bn or _BENGALI.search(en):
+            # Headlines stay fully English; a body may quote a short Bengali term (শ্রী/শ্রীমতী).
+            body_en = s.body_en or ""
+            if bn or _BENGALI.search(s.headline_en or "") or bengali_share(body_en) > 0.35:
                 problems.append(f"slide {i}: Bengali script on an English-only slide")
         else:
             if not (s.headline_bn and s.headline_en):
                 problems.append(f"slide {i}: bilingual slide needs both headlines")
             elif bengali_share(s.headline_bn) < 0.8 or _BENGALI.search(s.headline_en):
                 problems.append(f"slide {i}: headline languages mixed up")
+    for i, s in enumerate(draft.slides, 1):
+        labels = " ".join(t for t in (s.kicker, s.sticker) if t)
+        if brief.language is Language.EN and _BENGALI.search(labels):
+            problems.append(f"slide {i}: Bengali kicker/sticker on an English-only post")
+        if brief.language is Language.BN and labels and bengali_share(labels) < 0.5:
+            problems.append(f"slide {i}: English kicker/sticker on a Bengali-only post")
     if brief.language is Language.EN and draft.caption_bn:
         problems.append("English-only post has a Bengali caption")
     if brief.language is not Language.EN and not draft.caption_bn:
@@ -78,6 +89,12 @@ def _language(brief: CarouselBrief, draft: CarouselDraft) -> Check:
     if brief.language is not Language.BN and not draft.caption_en:
         problems.append("English caption missing")
     return _check("language_mode", problems)
+
+
+def _script(draft: CarouselDraft) -> Check:
+    """Devanagari (Hindi script) sometimes leaks into Bengali output; it is always wrong here."""
+    hits = [t[:40] for t in draft.all_text() if _DEVANAGARI.search(t)]
+    return _check("wrong_script", [f"Devanagari in: '{h}'" for h in hits])
 
 
 def _structure(draft: CarouselDraft) -> Check:
@@ -133,12 +150,10 @@ def _pricing(draft: CarouselDraft) -> Check:
 
 
 def _cta(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> Check:
+    # The CTA template always draws the Google Play button; the caption must carry the link.
     problems: list[str] = []
     if brief.call_to_action is CallToAction.INSTALL:
-        last = " ".join(draft.slides[-1].texts()).lower()
         caption = f"{draft.caption_bn or ''} {draft.caption_en or ''}"
-        if not re.search(r"google play|play store|প্লে স্টোর|গুগল প্লে", last):
-            problems.append("CTA slide does not mention Google Play")
         if kit.play_url not in caption:
             problems.append("caption is missing the Play link")
     return _check("call_to_action", problems)
@@ -151,17 +166,81 @@ def _hashtags(draft: CarouselDraft) -> Check:
     return _check("hashtags", problems)
 
 
-def _slide_length(draft: CarouselDraft) -> Check:
-    def words(s: Slide) -> int:
-        return max(len((s.body_bn or "").split()), len((s.body_en or "").split()))
+def _words(text: str | None) -> int:
+    return len(plain(text or "").split())
 
-    long_ones = [f"slide {i}" for i, s in enumerate(draft.slides, 1) if words(s) > 32]
-    return _check("readable_length", long_ones, warn=True)
+
+def _slide_length(draft: CarouselDraft) -> list[Check]:
+    long_bodies = [
+        f"slide {i}: {max(_words(s.body_bn), _words(s.body_en))} words"
+        for i, s in enumerate(draft.slides, 1)
+        if max(_words(s.body_bn), _words(s.body_en)) > 18
+    ]
+    too_long = [x for x in long_bodies if int(x.split(": ")[1].split()[0]) > 28]
+    hook = draft.slides[0]
+    hook_words = max(_words(hook.headline_bn), _words(hook.headline_en))
+    hook_issue = (
+        [f"hook headline has {hook_words} words (aim for 9 or fewer)"] if hook_words > 10 else []
+    )
+    return [
+        _check("readable_length", long_bodies, warn=not too_long),
+        _check("hook_length", hook_issue, warn=True),
+    ]
+
+
+def _stickers(kit: BrandKit, draft: CarouselDraft) -> Check:
+    problems: list[str] = []
+    for i, s in enumerate(draft.slides, 1):
+        if s.sticker and s.role is not SlideRole.HOOK:
+            problems.append(f"slide {i}: stickers belong on the hook only")
+        if s.sticker and not [c for c in s.claim_ids if kit.claim(c)]:
+            problems.append(f"slide {i}: sticker is not backed by an approved claim")
+    return _check("sticker_claim", problems)
+
+
+def _card_visual(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> Check:
+    if brief.pillar not in CARD_PILLARS:
+        return _check("shows_a_card", [])
+    kinds = {
+        a.kind for s in draft.slides if s.visual_asset_id and (a := kit.asset(s.visual_asset_id))
+    }
+    return _check(
+        "shows_a_card", [] if "CARD" in kinds else ["no real card render shown"], warn=True
+    )
+
+
+PREMIUM_DESIGNS = re.compile(
+    r"রাজকীয়|বেনারসি|শাঁখা|জামদানি|মোগল|নকশিকাঁথা|গাঁদার মালা"
+    r"|\b(royal|rajkiyo|ben[ae]rasi|banarasi|jamdani|mughal|mogul|nakshi|shankha)\b",
+    re.IGNORECASE,
+)
+INTERNAL_KICKERS = {"proof", "hook", "cta", "point", "প্রুফ", "হুক"}
+
+
+def _design_match(kit: BrandKit, draft: CarouselDraft) -> Check:
+    """Naming a premium design next to a card render implies that card is the design. None of
+    the clean card renders are premium designs, so that pairing would mislead."""
+    problems = []
+    for i, s in enumerate(draft.slides, 1):
+        asset = kit.asset(s.visual_asset_id) if s.visual_asset_id else None
+        if asset and asset.kind == "CARD" and PREMIUM_DESIGNS.search(" ".join(s.texts())):
+            problems.append(f"slide {i}: names a premium design but shows a different card")
+    return _check("design_matches_visual", problems)
+
+
+def _kickers(draft: CarouselDraft) -> Check:
+    leaked = [
+        f"slide {i}: '{s.kicker}'"
+        for i, s in enumerate(draft.slides, 1)
+        if s.kicker and s.kicker.strip().lower() in INTERNAL_KICKERS
+    ]
+    return _check("kicker_reads_naturally", leaked, warn=True)
 
 
 def run_text_qa(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> QaReport:
     checks = [
         _structure(draft),
+        _script(draft),
         _language(brief, draft),
         _claims(kit, draft),
         *_banned(kit, draft),
@@ -169,6 +248,10 @@ def run_text_qa(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> Qa
         _pricing(draft),
         _cta(kit, brief, draft),
         _hashtags(draft),
-        _slide_length(draft),
+        *_slide_length(draft),
+        _stickers(kit, draft),
+        _design_match(kit, draft),
+        _kickers(draft),
+        _card_visual(kit, brief, draft),
     ]
     return QaReport(passed=not any(c.status == "FAIL" for c in checks), checks=checks)

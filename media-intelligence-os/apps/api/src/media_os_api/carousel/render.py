@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from media_os_api.carousel.brand_kit import BrandKit
-from media_os_api.carousel.schema import Slide
+from media_os_api.carousel.schema import Slide, SlideRole
 from media_os_api.carousel.templates import HEIGHT, WIDTH, SlideContext, render_slide_html
 from media_os_api.content.taxonomy import Language
 
@@ -27,7 +27,8 @@ async () => {
   await Promise.all(imgs.map(loaded));
   // Bengali vowel signs overhang their line box vertically; that is not clipping. A box only
   // fails when text runs out sideways; the content area fails when it is taller than its frame.
-  const over = el => el.scrollHeight > el.clientHeight + 2 || el.scrollWidth > el.clientWidth + 2;
+  // 28px allowance: Bengali vowel signs (ি ু ৃ) overhang the last line box.
+  const over = el => el.scrollHeight > el.clientHeight + 28 || el.scrollWidth > el.clientWidth + 2;
   const wide = el => el.scrollWidth > el.clientWidth + 4;
   const content = document.querySelector('.content');
   const boxes = Array.from(document.querySelectorAll('[data-fit]'));
@@ -79,6 +80,8 @@ def render_carousel(
     slides: list[Slide],
     language: Language,
     out_dir: Path,
+    *,
+    festive: bool = False,
 ) -> list[RenderedSlide]:
     from playwright.sync_api import sync_playwright  # type: ignore[import-not-found,unused-ignore]
 
@@ -87,6 +90,17 @@ def render_carousel(
     out_dir.mkdir(parents=True, exist_ok=True)
     allowed_roots = [str(p.resolve()) for p in (assets, font_dir(), out_dir)]
     rendered: list[RenderedSlide] = []
+    card_uris = tuple(
+        _uri(assets / a.path)
+        for a in kit.assets
+        if a.kind == "CARD" and (assets / a.path).is_file()
+    )
+    content_numbers: dict[int, int] = {}
+    n = 0
+    for i, s in enumerate(slides, 1):
+        if s.role not in (SlideRole.HOOK, SlideRole.CTA):
+            n += 1
+            content_numbers[i] = n
     with sync_playwright() as pw:
         browser = pw.chromium.launch(args=["--disable-gpu", "--no-first-run"])
         try:
@@ -114,6 +128,9 @@ def render_carousel(
                     image_kind=visual.kind if visual else None,
                     icon_uri=_uri(icon) if icon.is_file() else None,
                     font_base_uri=_uri(font_dir()) + "/",
+                    festive=festive,
+                    card_uris=card_uris,
+                    content_number=content_numbers.get(i, 0),
                 )
                 html_path = out_dir / f"slide-{i:02d}.html"
                 html_path.write_text(render_slide_html(kit, slide, ctx), encoding="utf-8")

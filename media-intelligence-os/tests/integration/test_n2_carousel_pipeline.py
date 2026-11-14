@@ -101,8 +101,12 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
         saved_pillars = list(brand.content_pillars)
         brand.content_pillars = PILLARS
     monkeypatch.setenv("MEDIA_OS_MEDIA_ROOT", str(tmp_path))
+    calls: list[bool] = []
 
-    def fake_render(kit: Any, slides: list[Any], language: Any, out_dir: Path) -> list[Any]:
+    def fake_render(
+        kit: Any, slides: list[Any], language: Any, out_dir: Path, *, festive: bool = False
+    ) -> list[Any]:
+        calls.append(festive)
         out_dir.mkdir(parents=True, exist_ok=True)
         out = []
         for i, _ in enumerate(slides, 1):
@@ -116,7 +120,13 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
 
     monkeypatch.setattr(render_mod, "render_carousel", fake_render)
     try:
-        yield {"factory": factory, "db_url": db_url, "redis_url": redis_url, "root": tmp_path}
+        yield {
+            "factory": factory,
+            "db_url": db_url,
+            "redis_url": redis_url,
+            "root": tmp_path,
+            "festive_calls": calls,
+        }
     finally:
         with session_scope(factory) as db:
             ids = list(
@@ -181,6 +191,7 @@ def test_save_enqueues_render_and_render_reaches_qa_passed(env: dict[str, Any]) 
 
     result = _render(env["factory"], pid)
     assert result == {"slides": 5, "qa_passed": True, "status": "QA_PASSED"}
+    assert env["festive_calls"] == [True]  # wedding_season + SEASONAL hook gets the garland
     with session_scope(env["factory"]) as db:
         assets = list(db.execute(select(Asset).where(Asset.content_package_id == pid)).scalars())
         assert len(assets) == 5 and all(a.local_path.startswith("carousels/") for a in assets)
