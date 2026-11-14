@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from media_os_api.ai.errors import AIUnavailable, AllProvidersExhausted
 from media_os_api.ai.router import AIRouter
 from media_os_api.ai.types import GenerationRequest, TaskClass
-from media_os_api.carousel.schema import CarouselBrief, CarouselDraft, SlideRole
+from media_os_api.carousel.schema import CarouselBrief, CarouselDraft, SlideRole, plain
 from media_os_api.content.taxonomy import HookType
 
 SCORE_VERSION = "heuristic-v0"
@@ -32,24 +32,28 @@ class AIReview(BaseModel):
 
 def _hook_text(draft: CarouselDraft) -> str:
     first = draft.slides[0]
-    return first.headline_en or first.headline_bn or ""
+    return plain(first.headline_en or first.headline_bn or "")
 
 
 def rule_scores(brief: CarouselBrief, draft: CarouselDraft) -> dict[str, int]:
     hook = _hook_text(draft)
-    hook_pts = 10 if len(hook) <= 60 else 6 if len(hook) <= 80 else 3
+    words = len(hook.split())
+    hook_pts = 10 if words <= 9 else 7 if words <= 12 else 4
     if brief.hook_type is HookType.QUESTION and "?" not in hook:
         hook_pts -= 3
     if brief.hook_type is HookType.NUMBER_LIST and not re.search(r"[\d০-৯]", hook):
         hook_pts -= 3
-    bodies = [len((s.body_en or s.body_bn or "").split()) for s in draft.slides]
+    first = draft.slides[0]
+    if first.visual_asset_id:
+        hook_pts += 1  # a visual hook stops the scroll better than text alone
+    bodies = [len(plain(s.body_en or s.body_bn or "").split()) for s in draft.slides]
     avg = sum(bodies) / len(bodies)
-    clarity = 10 if avg <= 18 else 7 if avg <= 25 else 4
+    clarity = 10 if avg <= 12 else 8 if avg <= 15 else 5
     visuals = sum(1 for s in draft.slides if s.visual_asset_id)
-    visual = 10 if 1 <= visuals <= 3 else 6 if visuals > 3 else 3
+    visual = 10 if 2 <= visuals <= 4 else 7 if visuals == 1 or visuals > 4 else 3
     cta = 10 if draft.slides[-1].role is SlideRole.CTA else 2
     return {
-        "hook_strength": max(hook_pts, 0),
+        "hook_strength": min(max(hook_pts, 0), 10),
         "clarity": clarity,
         "visual_proof": visual,
         "cta_strength": cta,

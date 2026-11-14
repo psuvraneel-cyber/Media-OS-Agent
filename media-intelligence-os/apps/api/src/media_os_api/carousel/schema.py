@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -68,17 +69,35 @@ class SlideRole(StrEnum):
     CTA = "CTA"
 
 
+EMPHASIS = re.compile(r"\*([^*]{1,40})\*")
+
+
+def plain(text: str) -> str:
+    """Text without *emphasis* markers (for QA and length checks)."""
+    return EMPHASIS.sub(lambda m: m.group(1), text).replace("*", "")
+
+
 class Slide(BaseModel):
     role: SlideRole
-    headline_bn: str | None = Field(default=None, max_length=90)
-    body_bn: str | None = Field(default=None, max_length=240)
-    headline_en: str | None = Field(default=None, max_length=90)
-    body_en: str | None = Field(default=None, max_length=240)
+    kicker: str | None = Field(default=None, max_length=28)  # tiny label above the headline
+    headline_bn: str | None = Field(default=None, max_length=96)
+    body_bn: str | None = Field(default=None, max_length=170)
+    headline_en: str | None = Field(default=None, max_length=96)
+    body_en: str | None = Field(default=None, max_length=170)
+    sticker: str | None = Field(default=None, max_length=26)  # HOOK badge, must be claim-backed
     visual_asset_id: str | None = Field(default=None, max_length=64)
     claim_ids: list[str] = Field(default_factory=list, max_length=4)
 
     def texts(self) -> list[str]:
-        return [t for t in (self.headline_bn, self.body_bn, self.headline_en, self.body_en) if t]
+        raw = (
+            self.kicker,
+            self.headline_bn,
+            self.body_bn,
+            self.headline_en,
+            self.body_en,
+            self.sticker,
+        )
+        return [plain(t) for t in raw if t]
 
 
 class CarouselDraft(BaseModel):

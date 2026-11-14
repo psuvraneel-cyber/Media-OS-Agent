@@ -28,6 +28,20 @@ INSTAGRAM_MAX_BYTES = 8 * 1024 * 1024
 SLIDE_ASSET_TYPE = "CAROUSEL_SLIDE"
 
 
+FESTIVE_OCCASIONS = {"WEDDING_HINDU", "WEDDING_MUSLIM", "GAYE_HOLUD", "BOUBHAT_WALIMA", "PUJA"}
+
+
+def is_festive(tags: dict[str, Any]) -> bool:
+    """Marigold garland on the hook: celebrations only, never shraddha/memorial."""
+    if tags.get("occasion") == "SHRADDHA_MEMORIAL":
+        return False
+    return (
+        tags.get("occasion") in FESTIVE_OCCASIONS
+        or tags.get("hook_type") == "SEASONAL"
+        or tags.get("pillar") == "wedding_season"
+    )
+
+
 def relative_slide_dir(pkg: ContentPackage) -> Path:
     return Path("carousels") / str(pkg.id) / f"v{pkg.version}"
 
@@ -70,7 +84,9 @@ def handle_render_carousel(session: Session, job: JobRun) -> dict[str, Any]:
     language = Language((pkg.post_tags or {}).get("language", Language.BN_EN.value))
 
     rel = relative_slide_dir(pkg)
-    rendered = render_carousel(kit, slides, language, media_root() / rel)
+    rendered = render_carousel(
+        kit, slides, language, media_root() / rel, festive=is_festive(pkg.post_tags or {})
+    )
 
     session.execute(
         update(Asset)

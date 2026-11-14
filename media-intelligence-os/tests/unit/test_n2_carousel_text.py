@@ -171,6 +171,10 @@ def test_price_without_india_fails_and_install_cta_needs_play() -> None:
     assert status(run_text_qa(NIMONTRON, brief(), d), "pricing_region") == "FAIL"
     d2 = draft(caption_en="No link here", caption_bn="লিঙ্ক নেই")
     assert status(run_text_qa(NIMONTRON, brief(), d2), "call_to_action") == "FAIL"
+    d3 = draft(Language.EN)
+    d3.slides[0].sticker = "৩ ধাপে কার্ড"
+    d3.slides[0].claim_ids = ["speed"]
+    assert status(run_text_qa(NIMONTRON, brief(Language.EN), d3), "language_mode") == "FAIL"
 
 
 def test_structure_requires_hook_first_and_cta_last() -> None:
@@ -217,3 +221,32 @@ def test_score_is_labelled_heuristic_and_blends_review() -> None:
 def test_bengali_share() -> None:
     assert bengali_share("বিয়ের কার্ড") == 1.0
     assert bengali_share("card") == 0.0
+
+
+def test_sticker_must_be_claim_backed_and_on_hook_only() -> None:
+    d = draft()
+    d.slides[0].sticker = "৩ ধাপে কার্ড"
+    assert status(run_text_qa(NIMONTRON, brief(), d), "sticker_claim") == "FAIL"  # no claim
+    d.slides[0].claim_ids = ["speed"]
+    assert status(run_text_qa(NIMONTRON, brief(), d), "sticker_claim") == "PASS"
+    d.slides[2].sticker = "Free"
+    assert status(run_text_qa(NIMONTRON, brief(), d), "sticker_claim") == "FAIL"
+
+
+def test_long_bodies_warn_then_fail_and_wedding_posts_want_a_card() -> None:
+    d = draft()
+    d.slides[1].body_en = " ".join(["word"] * 20)
+    r = run_text_qa(NIMONTRON, brief(), d)
+    assert status(r, "readable_length") == "WARN"
+    d.slides[1].body_en = " ".join(["word"] * 30)
+    assert status(run_text_qa(NIMONTRON, brief(), d), "readable_length") == "FAIL"
+    assert status(r, "shows_a_card") == "WARN"  # wedding_season without a CARD visual
+    d2 = draft()
+    d2.slides[2].visual_asset_id = "card_muslim_wedding"
+    assert status(run_text_qa(NIMONTRON, brief(), d2), "shows_a_card") == "PASS"
+
+
+def test_emphasis_markers_are_ignored_by_checks() -> None:
+    d = draft()
+    d.slides[0].headline_en = "*Wedding season* is here"
+    assert run_text_qa(NIMONTRON, brief(), d).passed
