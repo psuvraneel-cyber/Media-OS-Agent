@@ -313,10 +313,16 @@ AI-specific — expected, since relevance is decided per brand in Phase 6, not a
   assignments (verified). `sortBy=lastUpdatedDate` was deliberately not used: it would resurface
   revisions of old papers as new discoveries.
 - No ETag/Last-Modified on the arXiv API; the high-water mark is the incremental mechanism.
-- **Owner confirmation item:** the sanitised abstract excerpt (≤ 500 chars) is stored in
-  `minimal_permitted_summary`. arXiv metadata is widely redistributed, but the owner should confirm
-  this storage is acceptable under arXiv's API Terms of Use before the source is enabled; setting
-  the excerpt to empty for arXiv is a one-line change if not.
+- **Abstract excerpts: ✅ owner-approved 2026-11-14.**
+  - **What is stored:** the sanitised excerpt (≤ 500 chars) in `minimal_permitted_summary`.
+  - **Why it is allowed:** arXiv's API Terms of Use license descriptive metadata, including
+    abstracts, under CC0 1.0.
+  - **Terms the fetcher already meets:**
+    - no PDFs or e-print content are stored or served;
+    - links point to the abstract page;
+    - requests are spaced 3.1 s apart (the limit is 1 request per 3 s);
+    - there is no claim of arXiv endorsement.
+  - **Still off:** the source stays `OFF` until the owner enables research sources.
 - Deployment note: the running API image predates `defusedxml`; it is installed when the image is
   rebuilt from this `pyproject.toml` (M5 deploy step).
 

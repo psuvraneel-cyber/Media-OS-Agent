@@ -94,7 +94,7 @@ docker exec media-os-api python -m media_os_api.research.admin schedule --source
 | GitHub `sort=stars` favours established repositories | Add a `created:>` new-repo query mode (T1) |
 | OpenAI feed mixes customer case studies with announcements | De-prioritise in Phase 6 scoring (T1) |
 | Hugging Face trending can include uncensored/NSFW models | Brand-safety filter in Phase 6 (T1) |
-| arXiv abstract excerpts (≤ 500 chars) stored | Owner to confirm against arXiv API terms before enabling |
+| arXiv abstract excerpts (≤ 500 chars) stored | ✅ Owner approved 2026-11-14: arXiv API Terms of Use license descriptive metadata incl. abstracts under CC0 1.0 |
 | Two concurrent runs of one source are safe but not serialised | Acceptable; scheduled runs are de-duplicated per slot |
 | Explicit CHECK constraint names are double-prefixed (pre-existing since 0001) | Cosmetic; rename migration if ever needed |
 | Brands activated after a cluster exists get no assignment for it | Revisit with Phase 6 editorial evaluation |

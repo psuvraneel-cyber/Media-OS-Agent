@@ -85,7 +85,23 @@ Remediation (Milestone 1):
 | `audit_events` | 3 | test actions (`owner:test` reassignment, retention dry-run, retention cleanup) |
 | `brand_profiles` | 2 | the two seeded brands (keep) |
 
-## 6. Cleanup proposal — **not executed; requires owner authorization**
+## 6. Cleanup — ✅ executed 2026-11-14 (owner-approved Option A)
+
+**Outcome.** The owner approved Option A in chat ("Yes to both").
+- **Backup:** `media_os_20261114T100208Z.dump` was taken first and restore-verified
+  (schema `0005`, `brands_sha_match=True`).
+- **Rehearsal:** the script ran against a restored copy, which was then dropped.
+- **Real run:** one transaction, with the scheduler and worker stopped (not `down`).
+- **Guards:** checks before and after the deletes would have rolled back if the data had differed
+  from the documented fixtures.
+- **After:** `source_items`, `topic_clusters`, `brand_topic_assignments`, `content_packages`,
+  `channel_accounts` and `job_runs` hold 0 rows.
+- **Kept:** 2 brands, 1 owner user, 5 audit events, 5 schedule definitions, 6 research sources.
+- **Health:** API `/health/ready` is ready; all six containers are healthy.
+- **Rollback:** restore `media_os_20261114T100208Z.dump`.
+
+The original proposal is kept below for the record.
+
 
 Preconditions (both satisfied today, repeat immediately before execution):
 1. Fresh backup: `media_os_20261113T154338Z.dump` — `[OK] PostgreSQL backup created and TOC-verified`.
