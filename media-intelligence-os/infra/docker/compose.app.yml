@@ -232,6 +232,17 @@ services:
       CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
       AI_ROUTES: ${AI_ROUTES:-}
       AI_QUOTA_LIMITS: ${AI_QUOTA_LIMITS:-}
+      # N3 publishing (worker only): owner-approved carousels -> GitHub Pages images -> Postiz.
+      POSTIZ_API_BASE: ${POSTIZ_API_BASE:-http://host.docker.internal:4007}
+      POSTIZ_API_KEY: ${POSTIZ_API_KEY:-}
+      NIMONTRON_MEDIA_GITHUB_TOKEN: ${NIMONTRON_MEDIA_GITHUB_TOKEN:-}
+      NIMONTRON_MEDIA_GITHUB_REPO: ${NIMONTRON_MEDIA_GITHUB_REPO:-}
+      NIMONTRON_MEDIA_BASE_URL: ${NIMONTRON_MEDIA_BASE_URL:-}
+      MEDIA_OS_MEDIA_ROOT: /data/media
+    volumes:
+      - media_os_media:/data/media:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       media-os-postgres:
         condition: service_healthy

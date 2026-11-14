@@ -16,7 +16,7 @@ from media_os_api.db import check_database_health, create_db_engine
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HEAD = "0006_content_tags_qa_score"
+HEAD = "0007_facebook_platform"  # current head; 0006 is checked below
 
 
 def _db_url() -> str:

@@ -28,8 +28,13 @@ CREATIVE_SOFT_TIME_LIMIT = 480
 CREATIVE_TIME_LIMIT = 540
 
 
+# N3 publishing waits for GitHub Pages builds (1-2 min, up to 7), so it shares the long-lease
+# research queue/task (900 s lease) on the worker, which holds the publishing credentials.
+PUBLISH_PREFIX = "media_os.publish."
+
+
 def queue_for_task(task_name: str) -> str:
-    if task_name.startswith(RESEARCH_FETCH_PREFIX):
+    if task_name.startswith((RESEARCH_FETCH_PREFIX, PUBLISH_PREFIX)):
         return RESEARCH_QUEUE
     if task_name.startswith(CREATIVE_PREFIX):
         return CREATIVE_QUEUE

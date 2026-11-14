@@ -49,6 +49,8 @@ const SUMMARY: CarouselSummary = {
   score_label: "Heuristic v0 — rubric estimate, not a reach prediction",
   thumbnail_asset_id: "a1",
   created_at: "2026-11-14T10:00:00Z",
+  schedules: [],
+  scheduling: false,
 };
 
 const DETAIL: CarouselDetail = {

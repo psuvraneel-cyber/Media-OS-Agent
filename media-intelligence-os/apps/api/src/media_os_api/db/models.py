@@ -131,7 +131,7 @@ class ChannelAccount(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="uq_channel_accounts_platform_external_id",
         ),
         CheckConstraint(
-            "platform IN ('INSTAGRAM', 'YOUTUBE')",
+            "platform IN ('INSTAGRAM', 'FACEBOOK', 'YOUTUBE')",
             name="channel_platform_valid",
         ),
         CheckConstraint(
@@ -661,7 +661,7 @@ class PublishSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="fk_publish_schedules_content_brand",
         ),
         CheckConstraint(
-            "platform IN ('INSTAGRAM', 'YOUTUBE')",
+            "platform IN ('INSTAGRAM', 'FACEBOOK', 'YOUTUBE')",
             name="publish_schedule_platform_valid",
         ),
         Index("ix_publish_schedules_brand_status", "brand_profile_id", "status"),
