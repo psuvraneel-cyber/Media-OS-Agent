@@ -9,11 +9,18 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronDown,
+  Database,
   FileText,
   LineChart,
+  Plug,
+  Radar,
+  RefreshCw,
+  Rocket,
   Send,
+  Server,
   ShieldCheck,
   XCircle,
+  type LucideIcon,
 } from "lucide-react";
 
 import {
@@ -40,6 +47,7 @@ import { DEFAULT_RANGE, pipelinePath, viewsPath } from "@/lib/analytics-paths";
 import { useBrandContext } from "@/lib/brand-context";
 import { PLATFORM_LABEL, formatDateTime, formatInt, humanizeEnum, relativeTime } from "@/lib/format";
 import type { SystemStatusResponse } from "@/lib/types";
+import { useNow } from "@/lib/use-now";
 
 interface DashboardOverviewViewProps {
   systemStatus: SystemStatusResponse | null;
@@ -53,6 +61,183 @@ interface HealthItem {
   value: string;
   detail: string;
   tone: BadgeTone;
+}
+
+const HEALTH_ICONS: Record<string, LucideIcon> = {
+  "Control plane": Server,
+  Storage: Database,
+  "Postiz gateway": Send,
+  "Research ingestion": Radar,
+  "Analytics sync": RefreshCw,
+};
+
+const TONE_ICON_CLASS: Record<BadgeTone, string> = {
+  live: "text-emerald-300 border-emerald-400/20 bg-emerald-400/[0.08] shadow-[0_0_16px_-4px_rgba(45,212,191,0.5)]",
+  blocked: "text-rose-300 border-rose-400/20 bg-rose-400/[0.08] shadow-[0_0_16px_-4px_rgba(251,113,133,0.5)]",
+  prototype: "text-amber-300 border-amber-400/20 bg-amber-400/[0.08]",
+  info: "text-sky-300 border-sky-400/20 bg-sky-400/[0.08]",
+  disabled: "text-slate-500 border-white/[0.06] bg-white/[0.02]",
+  neutral: "text-slate-400 border-white/[0.06] bg-white/[0.02]",
+};
+
+/* ------------------------------------------------------------------ next post countdown */
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function splitDuration(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return {
+    d: Math.floor(total / 86400),
+    h: Math.floor((total % 86400) / 3600),
+    m: Math.floor((total % 3600) / 60),
+    s: total % 60,
+  };
+}
+
+function TimeBlock({ value, unit }: { value: number; unit: string }) {
+  const text = String(value).padStart(2, "0");
+  return (
+    <span className="flex flex-col items-center">
+      <span className="relative flex h-12 min-w-[3.1rem] items-center justify-center overflow-hidden rounded-lg border border-white/[0.08] bg-gradient-to-b from-white/[0.06] to-white/[0.01] px-2 font-mono text-2xl font-semibold text-slate-50 tabular shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_8px_20px_-12px_rgba(0,0,0,0.8)]">
+        {/* re-key per value so each change rolls in */}
+        <span key={text} className="tick-in">
+          {text}
+        </span>
+        <span aria-hidden="true" className="absolute inset-x-0 top-1/2 h-px bg-black/30" />
+      </span>
+      <span className="mt-1 text-[10px] tracking-[0.12em] text-slate-500 uppercase">{unit}</span>
+    </span>
+  );
+}
+
+function NextPostCountdown({
+  pipeline,
+  buildHref,
+}: {
+  pipeline: PipelineSummary | null;
+  buildHref: (p: string) => string;
+}) {
+  const now = useNow();
+  const at = pipeline?.publishing.next_scheduled_at ?? null;
+  const platform = pipeline?.publishing.next_scheduled_platform ?? null;
+
+  if (!pipeline) {
+    return <Skeleton className="h-[7.5rem] rounded-xl" />;
+  }
+
+  if (!at) {
+    return (
+      <section
+        aria-label="Next scheduled post"
+        className="surface flex flex-wrap items-center justify-between gap-4 px-5 py-4"
+      >
+        <div className="flex items-center gap-3.5">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/[0.08] bg-white/[0.03] text-slate-400">
+            <CalendarClock className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-slate-100">No post in the queue</p>
+            <p className="mt-0.5 text-xs text-slate-500">Approve and schedule a carousel to see a live countdown here.</p>
+          </div>
+        </div>
+        <Link
+          href={buildHref("/approvals")}
+          className="btn-press inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-400/10"
+        >
+          Go to approvals <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </Link>
+      </section>
+    );
+  }
+
+  const target = new Date(at).getTime();
+  const remaining = now === null ? null : target - now;
+  const live = remaining !== null && remaining <= 0;
+  const parts = splitDuration(remaining ?? 0);
+  // Ring shows how much of the final 24 h is left (full when further out than a day).
+  const frac = remaining === null ? 1 : Math.min(1, Math.max(0, remaining / DAY_MS));
+  const R = 30;
+  const C = 2 * Math.PI * R;
+
+  return (
+    <section
+      aria-label="Next scheduled post"
+      className="surface glow-border overflow-hidden px-5 py-5"
+    >
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-24 -right-16 h-56 w-72 rounded-full bg-[radial-gradient(closest-side,rgba(34,211,238,0.14),transparent)]"
+      />
+      <div className="relative flex flex-wrap items-center justify-between gap-5">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="relative h-[76px] w-[76px] shrink-0">
+            <svg viewBox="0 0 76 76" className="h-full w-full -rotate-90" aria-hidden="true">
+              <defs>
+                <linearGradient id="countdown-ring" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" style={{ stopColor: "var(--accent-strong)" }} />
+                  <stop offset="100%" style={{ stopColor: "var(--chart-2)" }} />
+                </linearGradient>
+              </defs>
+              <circle cx="38" cy="38" r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="5" />
+              <circle
+                cx="38"
+                cy="38"
+                r={R}
+                fill="none"
+                stroke="url(#countdown-ring)"
+                strokeWidth="5"
+                strokeLinecap="round"
+                strokeDasharray={C}
+                strokeDashoffset={C * (1 - frac)}
+                className="ring-progress"
+                style={{ filter: "drop-shadow(0 0 6px rgba(34,211,238,0.6))" }}
+              />
+            </svg>
+            <span className="absolute inset-0 flex items-center justify-center text-sky-200">
+              <Rocket className={`h-6 w-6 ${live ? "animate-bounce" : ""}`} aria-hidden="true" />
+            </span>
+          </div>
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 text-[11px] font-medium tracking-[0.1em] text-sky-300/90 uppercase">
+              <StatusDot tone="info" pulse />
+              {live ? "Going live now" : "Next post goes live in"}
+            </p>
+            <p className="mt-1 truncate text-[13px] text-slate-300">
+              {formatDateTime(at)} IST
+              {platform && <span className="text-slate-500"> · {PLATFORM_LABEL[platform] ?? platform}</span>}
+            </p>
+            {live && (
+              <p className="mt-1 text-xs text-slate-500">Waiting for the platform to confirm the post.</p>
+            )}
+          </div>
+        </div>
+
+        {!live && (
+          <div className="flex items-start gap-1.5" role="timer" aria-live="off" aria-label={`Time until next post: ${relativeTime(at)}`}>
+            {now === null ? (
+              <Skeleton className="h-12 w-56" />
+            ) : (
+              <>
+                {parts.d > 0 && <TimeBlock value={parts.d} unit="days" />}
+                <TimeBlock value={parts.h} unit="hrs" />
+                <span className="pt-2.5 font-mono text-xl text-slate-600">:</span>
+                <TimeBlock value={parts.m} unit="min" />
+                <span className="pt-2.5 font-mono text-xl text-slate-600">:</span>
+                <TimeBlock value={parts.s} unit="sec" />
+              </>
+            )}
+          </div>
+        )}
+
+        <Link
+          href={buildHref("/calendar")}
+          className="btn-press inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-400/10"
+        >
+          Open calendar <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </Link>
+      </div>
+    </section>
+  );
 }
 
 function healthItems(
@@ -116,20 +301,34 @@ function healthItems(
 function HealthStrip({ items }: { items: HealthItem[] }) {
   return (
     <section aria-label="System health" className="surface overflow-hidden">
-      <ul className="grid grid-cols-1 divide-y divide-white/[0.05] sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-5 lg:divide-x">
+      <ul className="stagger-children grid grid-cols-1 divide-y divide-white/[0.05] sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-5 lg:divide-x">
         {items.map((h, i) => (
           <li
             key={h.label}
-            className={`min-w-0 px-4 py-3.5 ${i >= 2 ? "sm:border-t sm:border-white/[0.05] lg:border-t-0" : ""}`}
+            className={`group/health min-w-0 px-4 py-3.5 transition-colors duration-200 hover:bg-white/[0.02] ${i >= 2 ? "sm:border-t sm:border-white/[0.05] lg:border-t-0" : ""}`}
           >
-            <p className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
-              <StatusDot tone={h.tone} pulse={h.tone === "live" && i === 0} />
-              {h.label}
-            </p>
-            <p className="mt-1 truncate text-sm font-semibold text-slate-100">{h.value}</p>
-            <p className="mt-0.5 truncate text-[11px] text-slate-500" title={h.detail}>
-              {h.detail}
-            </p>
+            <div className="flex items-start gap-3">
+              {(() => {
+                const Icon = HEALTH_ICONS[h.label] ?? Activity;
+                return (
+                  <span
+                    className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-transform duration-300 group-hover/health:scale-110 ${TONE_ICON_CLASS[h.tone]}`}
+                  >
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                );
+              })()}
+              <div className="min-w-0">
+                <p className="flex items-center gap-2 text-[11px] font-medium text-slate-500">
+                  <StatusDot tone={h.tone} pulse={h.tone === "live" && i === 0} />
+                  {h.label}
+                </p>
+                <p className="mt-1 truncate text-sm font-semibold text-slate-100">{h.value}</p>
+                <p className="mt-0.5 truncate text-[11px] text-slate-500" title={h.detail}>
+                  {h.detail}
+                </p>
+              </div>
+            </div>
           </li>
         ))}
       </ul>
@@ -167,7 +366,7 @@ function PipelineCard({
 
   return (
     <SurfaceCard
-      title="Publishing pipeline"
+      icon={<Send />} title="Publishing pipeline"
       subtitle={
         pipeline
           ? `${formatInt(pipeline.content.total)} content packages · platform posts counted per channel`
@@ -182,23 +381,46 @@ function PipelineCard({
         </Link>
       }
     >
-      <ol className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-        {PIPELINE_STEPS.map((step) => {
+      <ol className="stagger-children grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {PIPELINE_STEPS.map((step, idx) => {
           const Icon = step.icon;
           const n = counts[step.key];
           const highlight = step.key === "awaiting" && (n ?? 0) > 0;
           return (
             <li
               key={step.key}
-              className={`rounded-lg border px-3 py-3 ${
-                highlight ? "border-sky-400/25 bg-sky-400/[0.05]" : "border-white/[0.05] bg-[var(--surface-inset)]"
+              className={`surface-interactive tilt group relative overflow-hidden rounded-lg border px-3 py-3 ${
+                highlight
+                  ? "border-sky-400/30 bg-sky-400/[0.06] shadow-[0_0_24px_-10px_rgba(34,211,238,0.6)]"
+                  : "border-white/[0.05] bg-[var(--surface-inset)]"
               }`}
             >
+              {/* Marching flow line along the bottom edge: content moving to the next stage */}
+              {idx < PIPELINE_STEPS.length - 1 && (
+                <span
+                  aria-hidden="true"
+                  className="flow-line pointer-events-none absolute right-0 bottom-0 left-0 h-px opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+                />
+              )}
+              {(n ?? 0) > 0 && (
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute -top-8 -right-8 h-20 w-20 rounded-full bg-[radial-gradient(closest-side,rgba(34,211,238,0.16),transparent)]"
+                />
+              )}
               <p className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                <Icon className={`h-3.5 w-3.5 ${highlight ? "text-sky-300" : ""}`} aria-hidden="true" />
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-md border transition-colors ${
+                    highlight
+                      ? "border-sky-400/30 bg-sky-400/10 text-sky-300"
+                      : "border-white/[0.06] bg-white/[0.02] text-slate-400 group-hover:text-slate-200"
+                  }`}
+                >
+                  <Icon className="h-3 w-3" aria-hidden="true" />
+                </span>
                 {step.label}
               </p>
-              <p className="mt-1.5 text-xl font-semibold tracking-tight text-slate-50 tabular">
+              <p className="kpi-number mt-2.5 text-2xl text-slate-50">
                 {loading && n === null ? <Skeleton className="h-6 w-8" /> : n === null ? "—" : formatInt(n)}
               </p>
             </li>
@@ -237,7 +459,7 @@ function PipelineCard({
 function ActivityCard({ pipeline }: { pipeline: PipelineSummary | null }) {
   const items = pipeline?.recent_activity ?? [];
   return (
-    <SurfaceCard title="Recent content activity" subtitle="Latest workflow transitions for this brand">
+    <SurfaceCard icon={<Activity />} title="Recent content activity" subtitle="Latest workflow transitions for this brand">
       {!pipeline ? (
         <div className="space-y-2">
           {[0, 1, 2].map((i) => (
@@ -289,7 +511,7 @@ function ConnectorsCard({
   const research = pipeline?.research ?? [];
   return (
     <SurfaceCard
-      title="Connectors"
+      icon={<Plug />} title="Connectors"
       subtitle="Social channels via Postiz and research sources"
       badge={
         <Link
@@ -360,20 +582,25 @@ export function DashboardOverviewView({
 
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <p className="text-[11px] font-medium tracking-[0.08em] text-slate-500 uppercase">Brand workspace</p>
-          <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-50">{activeBrand.name}</h2>
-          <p className="mt-0.5 text-[13px] text-slate-400">{activeBrand.niche}</p>
+          <p className="flex items-center gap-2 text-[11px] font-medium tracking-[0.1em] text-sky-300/80 uppercase">
+            <StatusDot tone={activeBrand.active ? "live" : "disabled"} />
+            Brand workspace
+          </p>
+          <h1 className="text-gradient mt-1.5 text-[1.75rem] leading-tight font-semibold sm:text-[2.25rem]">
+            {activeBrand.name}
+          </h1>
+          <p className="mt-1 text-[13px] text-slate-400">{activeBrand.niche}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
             href={buildHrefWithBrand("/analytics")}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.08] bg-[var(--surface-panel)] px-3 py-1.5 text-xs font-medium text-slate-200 transition-colors hover:border-white/[0.16] hover:bg-[var(--surface-elevated)]"
+            className="glass-chip btn-press inline-flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-medium text-slate-100 hover:border-white/[0.22] hover:bg-white/[0.09]"
           >
             <LineChart className="h-3.5 w-3.5" aria-hidden="true" /> Analytics
           </Link>
           <Link
             href={buildHrefWithBrand("/approvals")}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-sky-400 px-3 py-1.5 text-xs font-semibold text-[#04121a] transition-colors hover:bg-sky-300"
+            className="btn-press btn-shine inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-b from-sky-300 to-sky-400 px-3.5 py-2 text-xs font-semibold text-[#04121a] shadow-[0_0_0_1px_rgba(34,211,238,0.5),0_8px_20px_-8px_rgba(34,211,238,0.7)] hover:from-sky-200 hover:to-sky-300 hover:shadow-[0_0_0_1px_rgba(103,232,249,0.7),0_10px_28px_-8px_rgba(34,211,238,0.85)]"
           >
             <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
             Review queue
@@ -384,6 +611,8 @@ export function DashboardOverviewView({
         </div>
       </div>
 
+      <NextPostCountdown pipeline={pipe} buildHref={buildHrefWithBrand} />
+
       <HealthStrip items={healthItems(systemStatus, pipe, report)} />
 
       <section aria-labelledby="views-heading">
@@ -392,7 +621,7 @@ export function DashboardOverviewView({
           title="Audience attention"
           description="Platform-reported views across every published post for this brand"
         />
-        <div className="surface p-5">
+        <div className="surface surface-hero p-5 sm:p-6">
           {views.error && !report && (
             <div className="mb-4">
               <ErrorBanner title="Views unavailable" message={views.error} />
@@ -462,7 +691,7 @@ export function DashboardOverviewView({
           aria-expanded={detailsOpen}
           aria-controls="system-details"
           onClick={() => setDetailsOpen((o) => !o)}
-          className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
+          className="flex w-full items-center justify-between gap-3 rounded-[var(--radius-lg)] px-5 py-4 text-left transition-colors hover:bg-white/[0.015]"
         >
           <span>
             <span className="flex items-center gap-2 text-sm font-semibold text-slate-100">

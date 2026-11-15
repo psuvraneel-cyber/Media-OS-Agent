@@ -40,13 +40,13 @@ export function ConfirmActionDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
       aria-describedby="confirm-dialog-desc"
     >
-      <div className="w-full max-w-md rounded-xl border border-slate-700 bg-[var(--surface-panel)] p-5 shadow-2xl">
+      <div className="glass animate-scale-in w-full max-w-md rounded-xl p-5">
         <h3 id="confirm-dialog-title" className="text-base font-semibold text-slate-100">
           {title}
         </h3>
@@ -58,7 +58,7 @@ export function ConfirmActionDialog({
             type="button"
             disabled={pending}
             onClick={onCancel}
-            className="rounded-lg border border-slate-700 bg-slate-800/70 px-3.5 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+            className="rounded-lg border border-white/[0.1] bg-[var(--surface-elevated)] px-3.5 py-2 text-xs font-medium text-slate-200 hover:border-white/[0.18] hover:bg-white/[0.08] disabled:opacity-50"
           >
             {cancelLabel}
           </button>

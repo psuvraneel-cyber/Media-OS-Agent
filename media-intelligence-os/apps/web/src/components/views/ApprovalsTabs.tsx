@@ -25,7 +25,7 @@ export function ApprovalsTabs() {
             className={`rounded-md px-3 py-1.5 text-sm ${
               tab === t.id
                 ? "bg-amber-500/15 text-amber-200 border border-amber-500/40"
-                : "border border-slate-700 text-slate-300"
+                : "border border-white/[0.1] text-slate-300"
             }`}
           >
             {t.label}

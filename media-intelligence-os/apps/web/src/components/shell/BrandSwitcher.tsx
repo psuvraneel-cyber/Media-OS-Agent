@@ -17,10 +17,10 @@ export function BrandSwitcher() {
     .toUpperCase();
 
   return (
-    <div className="relative flex items-center gap-2 rounded-lg border border-white/[0.08] bg-[var(--surface-panel)] py-1 pr-2 pl-1 transition-colors focus-within:border-sky-400/50 hover:border-white/[0.14]">
+    <div className="glass-chip relative flex items-center gap-2 rounded-lg py-1 pr-2 pl-1 transition-colors focus-within:border-sky-400/50 hover:border-white/[0.2]">
       <span
         aria-hidden="true"
-        className="flex h-6 w-6 items-center justify-center rounded-md bg-sky-400/15 text-[10px] font-semibold text-sky-300"
+        className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-sky-300/30 to-indigo-400/25 text-[10px] font-semibold text-sky-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]"
       >
         {initials}
       </span>

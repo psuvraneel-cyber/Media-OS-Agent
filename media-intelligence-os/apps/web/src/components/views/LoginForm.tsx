@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { Cpu, Lock } from "lucide-react";
 
+import { AmbientBackground } from "@/components/ui/Ambient";
 import { ApiClientError, browserApiFetch } from "@/lib/api-client";
 import type { SessionUser } from "@/lib/types";
 
@@ -39,18 +40,24 @@ export function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--surface-inset)] px-4 py-10 text-slate-100">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700/50 bg-[var(--surface-elevated)] p-7 shadow-2xl">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-400/40 bg-sky-500/15 text-sky-300">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10 text-slate-100">
+      <AmbientBackground />
+      {/* Halo behind the card */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 left-1/2 z-[1] h-[34rem] w-[34rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(closest-side,rgba(34,211,238,0.12),transparent)]"
+      />
+      <div className="glass glow-border animate-scale-in relative z-[2] w-full max-w-md rounded-2xl p-8">
+        <div className="mb-7 flex items-center gap-3.5">
+          <div className="btn-shine flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-200 via-sky-400 to-sky-600 text-[#04121a] shadow-[0_0_0_1px_rgba(34,211,238,0.45),0_10px_28px_-8px_rgba(34,211,238,0.85)]">
             <Cpu className="h-5 w-5" aria-hidden="true" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight text-slate-100">
+            <h1 className="text-gradient text-xl font-semibold tracking-tight">
               Media Intelligence OS
             </h1>
             <p className="text-xs text-slate-400">
-              Local Operator Sign-In • Phase 4 Control Plane
+              Local operator sign-in · Intelligence control plane
             </p>
           </div>
         </div>
@@ -71,7 +78,7 @@ export function LoginForm() {
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-[var(--surface-inset)] px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-400 focus:outline-none"
+              className="w-full rounded-lg border border-white/[0.1] bg-black/30 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 transition-[border-color,box-shadow] duration-200 hover:border-white/[0.18] focus:border-sky-400/70 focus:shadow-[0_0_0_4px_rgba(34,211,238,0.12),0_0_20px_-6px_rgba(34,211,238,0.6)] focus:outline-none"
               placeholder="Enter local owner username"
             />
           </div>
@@ -91,7 +98,7 @@ export function LoginForm() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-[var(--surface-inset)] px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-400 focus:outline-none"
+              className="w-full rounded-lg border border-white/[0.1] bg-black/30 px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 transition-[border-color,box-shadow] duration-200 hover:border-white/[0.18] focus:border-sky-400/70 focus:shadow-[0_0_0_4px_rgba(34,211,238,0.12),0_0_20px_-6px_rgba(34,211,238,0.6)] focus:outline-none"
               placeholder="Enter owner password"
             />
           </div>
@@ -108,14 +115,14 @@ export function LoginForm() {
           <button
             type="submit"
             disabled={submitting}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-sky-400/40 bg-sky-500/20 px-4 py-2.5 text-sm font-semibold text-sky-100 transition-colors hover:bg-sky-500/30 disabled:opacity-50"
+            className="btn-press btn-shine inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-b from-sky-300 to-sky-500 px-4 py-2.5 text-sm font-semibold text-[#04121a] shadow-[0_0_0_1px_rgba(34,211,238,0.5),0_10px_26px_-10px_rgba(34,211,238,0.9)] hover:from-sky-200 hover:to-sky-400 disabled:opacity-50"
           >
             <Lock className="h-4 w-4" aria-hidden="true" />
             <span>{submitting ? "Signing in..." : "Sign in to Control Plane"}</span>
           </button>
         </form>
 
-        <p className="mt-5 border-t border-slate-800 pt-4 text-[11px] leading-relaxed text-slate-400">
+        <p className="mt-5 border-t border-white/[0.06] pt-4 text-[11px] leading-relaxed text-slate-400">
           Single-owner local authentication via HttpOnly signed session cookies, PostgreSQL
           session revocation, Redis rate limiting, and CSRF verification. Public self-registration is
           disabled.

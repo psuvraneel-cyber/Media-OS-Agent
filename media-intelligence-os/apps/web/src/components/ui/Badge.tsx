@@ -32,13 +32,27 @@ export function Badge({ tone = "info", children, className = "", dot = false }: 
     <span
       className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[11px] leading-4 font-medium whitespace-nowrap ${TONE_CLASSES[tone]} ${className}`}
     >
-      {dot && <span className={`h-1.5 w-1.5 rounded-full ${DOT_CLASSES[tone]}`} aria-hidden="true" />}
+      {dot && (
+        <span className={`h-1.5 w-1.5 rounded-full ${DOT_CLASSES[tone]} ${GLOW_CLASSES[tone] ?? ""}`} aria-hidden="true" />
+      )}
       {children}
     </span>
   );
 }
 
+const GLOW_CLASSES: Partial<Record<BadgeTone, string>> = {
+  live: "shadow-[0_0_8px_rgba(45,212,191,0.65)]",
+  blocked: "shadow-[0_0_8px_rgba(251,113,133,0.6)]",
+  prototype: "shadow-[0_0_8px_rgba(251,191,36,0.5)]",
+  info: "shadow-[0_0_8px_rgba(34,211,238,0.6)]",
+};
+
+/**
+ * `pulse` = the primary live signal (sonar ping). Other healthy dots get a calm breathing halo so
+ * the screen feels alive without competing pings everywhere.
+ */
 export function StatusDot({ tone, pulse = false }: { tone: BadgeTone; pulse?: boolean }) {
+  const breathe = !pulse && tone === "live";
   return (
     <span className="relative inline-flex h-2 w-2" aria-hidden="true">
       {pulse && (
@@ -46,7 +60,12 @@ export function StatusDot({ tone, pulse = false }: { tone: BadgeTone; pulse?: bo
           className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-40 motion-reduce:hidden ${DOT_CLASSES[tone]}`}
         />
       )}
-      <span className={`relative inline-flex h-2 w-2 rounded-full ${DOT_CLASSES[tone]}`} />
+      {breathe && (
+        <span
+          className={`animate-glow-breathe absolute inline-flex h-full w-full rounded-full motion-reduce:hidden ${DOT_CLASSES[tone]}`}
+        />
+      )}
+      <span className={`relative inline-flex h-2 w-2 rounded-full ${DOT_CLASSES[tone]} ${GLOW_CLASSES[tone] ?? ""}`} />
     </span>
   );
 }

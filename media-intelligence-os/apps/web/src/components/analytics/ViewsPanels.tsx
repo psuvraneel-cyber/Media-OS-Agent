@@ -125,10 +125,10 @@ export function ViewsHero({
             <AnimatedNumber
               value={t.views ?? 0}
               format={formatInt}
-              className="text-[2.5rem] leading-none font-semibold tracking-tight text-slate-50"
+              className="kpi-number text-gradient text-glow text-[3rem] sm:text-[3.5rem]"
             />
           ) : (
-            <Skeleton className="h-10 w-40" />
+            <Skeleton className="h-12 w-48" />
           )}
           {report && t && <DeltaPill pct={report.range === "all" ? null : t.views_growth_pct} />}
         </div>
@@ -162,7 +162,7 @@ export function StatTile({
         {label}
         {tip && <InfoTip text={tip} label={`About ${label}`} />}
       </p>
-      <p className={`mt-1 font-semibold tracking-tight text-slate-100 ${emphasis ? "text-2xl" : "text-lg"}`}>
+      <p className={`kpi-number mt-1.5 text-slate-50 ${emphasis ? "text-[1.75rem]" : "text-[1.375rem]"}`}>
         {value === null || value === undefined ? (
           <span className="text-slate-500">—</span>
         ) : (
@@ -314,7 +314,7 @@ export function TopPostCard({
     <button
       type="button"
       onClick={() => onOpen(p.content_package_id)}
-      className="w-full rounded-lg p-1 -m-1 transition-colors hover:bg-white/[0.03]"
+      className="btn-press w-full rounded-lg p-1 -m-1 hover:bg-white/[0.04]"
     >
       {body}
     </button>

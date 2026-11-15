@@ -1,7 +1,16 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, LineChart, X } from "lucide-react";
+import {
+  BarChart3,
+  ChevronLeft,
+  ChevronRight,
+  Info,
+  LayoutGrid,
+  LineChart,
+  Users,
+  X,
+} from "lucide-react";
 
 import {
   PLATFORM_COLOR,
@@ -198,8 +207,8 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
       ) : (
         <>
           {/* A. Overview KPIs */}
-          <section aria-label="Overview" className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-            <div className="surface p-5 lg:col-span-2">
+          <section aria-label="Overview" className="stagger-children grid grid-cols-1 gap-4 lg:grid-cols-4">
+            <div className="surface surface-hero p-5 lg:col-span-2">
               <p className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
                 Total views · {RANGE_LABEL[range]}
                 <InfoTip text={VIEWS_TOOLTIP} label="How total views are counted" />
@@ -242,7 +251,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
 
           {/* B. Trend */}
           <SurfaceCard
-            title="Views over time"
+            icon={<LineChart />} title="Views over time"
             subtitle={report ? `Per ${report.granularity} · Asia/Kolkata · ${formatDate(report.window.start)} – ${formatDate(report.window.end)}` : "Loading…"}
             badge={report?.totals.approximate ? <Badge tone="neutral">≈ boundary estimates</Badge> : undefined}
           >
@@ -256,7 +265,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
           </SurfaceCard>
 
           {/* C. Platform comparison */}
-          <SurfaceCard title="Platform comparison" subtitle="Each platform's own metrics; definitions differ, so totals are never mixed" flush>
+          <SurfaceCard icon={<BarChart3 />} title="Platform comparison" subtitle="Each platform's own metrics; definitions differ, so totals are never mixed" flush>
             <div className="overflow-x-auto">
               <table aria-label="Platform comparison" className="w-full min-w-[640px] text-left text-xs">
                 <thead className="border-y border-white/[0.05] text-[11px] text-slate-500">
@@ -269,7 +278,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
                     <th scope="col" className="px-5 py-2 text-right font-medium">Posts</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.04]">
+                <tbody className="rows-in divide-y divide-white/[0.04]">
                   {ALL_PLATFORMS.map((pf) => {
                     const row = report?.by_platform.find((p) => p.platform === pf);
                     const connected = channels.some((c) => c.platform === pf && c.status === "CONNECTED");
@@ -304,7 +313,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
 
           {/* D. Top content */}
           <SurfaceCard
-            title="Content performance"
+            icon={<LayoutGrid />} title="Content performance"
             subtitle={`Platform posts ranked for ${RANGE_LABEL[range].toLowerCase()} · select a post for details`}
             flush
             badge={
@@ -383,7 +392,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
 
           {/* F. Accounts + methodology */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <SurfaceCard title="Views by social account">
+            <SurfaceCard icon={<Users />} title="Views by social account">
               {report ? (
                 <BarList
                   formatValue={formatInt}
@@ -403,7 +412,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
                 <Skeleton className="h-20" />
               )}
             </SurfaceCard>
-            <SurfaceCard title="How these numbers are calculated">
+            <SurfaceCard icon={<Info />} title="How these numbers are calculated">
               {report ? (
                 <>
                   <ul className="list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-slate-400">
@@ -489,7 +498,7 @@ function PostsTable({
             <th scope="col" className="px-5 py-2 text-right font-medium">Status</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-white/[0.04]">
+        <tbody className="rows-in divide-y divide-white/[0.04]">
           {data.items.map((r) => (
             <tr
               key={r.schedule_id}
@@ -596,7 +605,7 @@ function PostDetailDrawer({
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-labelledby="post-detail-title">
       <div className="animate-fade-in absolute inset-0 bg-black/55 backdrop-blur-[2px]" onClick={onClose} aria-hidden="true" />
-      <aside className="animate-slide-in-right relative flex h-full w-full max-w-xl flex-col border-l border-white/[0.08] bg-[var(--surface-panel)] shadow-[var(--shadow-lg)]">
+      <aside className="animate-slide-in-right relative flex h-full w-full max-w-xl flex-col border-l border-white/[0.1] bg-[rgba(12,14,19,0.78)] shadow-[var(--shadow-lg),inset_1px_0_0_rgba(255,255,255,0.05)] backdrop-blur-2xl backdrop-saturate-150">
         <header className="flex items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
           <div className="flex min-w-0 items-start gap-3">
             <PostThumb brandId={brandId} assetId={d?.thumbnail_asset_id} size={44} />
@@ -669,7 +678,7 @@ function PostDetailDrawer({
                           <th scope="col" className="px-4 py-2 text-right font-medium">Lifetime</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/[0.04]">
+                      <tbody className="rows-in divide-y divide-white/[0.04]">
                         {p.metrics.map((m) => (
                           <tr key={m.key}>
                             <td className="px-4 py-2 text-slate-300">

@@ -5,15 +5,17 @@ import { ArrowDownRight, ArrowUpRight, Info, Minus } from "lucide-react";
 
 /* ------------------------------------------------------------------ animated number */
 
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
+/** True when motion should be skipped: the user asked for reduced motion, or the environment
+ *  can't say (no matchMedia, e.g. server render or jsdom), in which case we stay static. */
+function motionDisabled(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-/** Counts from the previous value to the new one (~450ms, ease-out). Static under reduced motion. */
+/**
+ * Counts up from 0 on first mount (~900ms) and from the previous value on later changes (~450ms),
+ * both ease-out. Static under reduced motion. SSR renders the final value, so there is no flash.
+ */
 export function AnimatedNumber({
   value,
   format,
@@ -24,21 +26,22 @@ export function AnimatedNumber({
   className?: string;
 }) {
   const [display, setDisplay] = useState(value);
-  const fromRef = useRef(value);
+  const fromRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const from = fromRef.current;
+    const firstRun = fromRef.current === null;
+    const from = firstRun ? 0 : (fromRef.current as number);
     fromRef.current = value;
-    if (from === value || prefersReducedMotion() || typeof requestAnimationFrame !== "function") {
+    if (from === value || motionDisabled() || typeof requestAnimationFrame !== "function") {
       setDisplay(value);
       return;
     }
     let raf = 0;
     const start = performance.now();
-    const duration = 450;
+    const duration = firstRun ? 900 : 450;
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / duration);
-      const eased = 1 - Math.pow(1 - t, 3);
+      const eased = 1 - Math.pow(1 - t, 4);
       setDisplay(from + (value - from) * eased);
       if (t < 1) raf = requestAnimationFrame(tick);
     };
@@ -109,7 +112,7 @@ export function SegmentedControl<T extends string>({
       {indicator && (
         <span
           aria-hidden="true"
-          className="absolute top-0.5 bottom-0.5 rounded-md border border-white/[0.08] bg-[var(--surface-elevated)] shadow-sm transition-all duration-200 ease-out"
+          className="absolute top-0.5 bottom-0.5 rounded-md border border-white/[0.1] bg-gradient-to-b from-white/[0.07] to-white/[0.02] shadow-[0_1px_2px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.06)] transition-[left,width] duration-300 ease-[cubic-bezier(0.34,1.3,0.64,1)]"
           style={{ left: indicator.left, width: indicator.width }}
         />
       )}
@@ -200,7 +203,7 @@ export function InfoTip({ text, label = "More information" }: { text: string; la
         role="tooltip"
         className={
           open
-            ? "animate-fade-in pointer-events-none absolute top-full left-1/2 z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-lg border border-white/[0.1] bg-[var(--surface-elevated)] px-3 py-2 text-left text-[11px] leading-relaxed font-normal text-slate-300 shadow-[var(--shadow-lg)]"
+            ? "animate-fade-in pointer-events-none absolute top-full left-1/2 z-40 mt-2 w-64 max-w-[calc(100vw-2rem)] -translate-x-1/2 glass rounded-lg px-3 py-2 text-left text-[11px] leading-relaxed font-normal text-slate-300"
             : "sr-only"
         }
       >
@@ -219,10 +222,14 @@ export function DeltaPill({ pct, suffix = "vs previous period" }: { pct: number 
   const up = pct > 0;
   const flat = pct === 0;
   const Icon = flat ? Minus : up ? ArrowUpRight : ArrowDownRight;
-  const tone = flat ? "text-slate-400" : up ? "text-emerald-300" : "text-rose-300";
+  const tone = flat
+    ? "text-slate-400 bg-white/[0.04] border-white/[0.08]"
+    : up
+      ? "text-emerald-300 bg-emerald-400/10 border-emerald-400/20"
+      : "text-rose-300 bg-rose-400/10 border-rose-400/20";
   return (
     <span className="inline-flex items-center gap-1.5 text-xs">
-      <span className={`inline-flex items-center gap-0.5 font-medium tabular ${tone}`}>
+      <span className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 font-medium tabular ${tone}`}>
         <Icon className="h-3.5 w-3.5" aria-hidden="true" />
         {up ? "+" : ""}
         {pct.toFixed(1)}%
