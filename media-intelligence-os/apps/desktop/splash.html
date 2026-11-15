@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self'; font-src 'self'"
+    />
+    <title>Media OS</title>
+    <style>
+      @font-face {
+        font-family: "Space Grotesk";
+        src: url("assets/fonts/space-grotesk.woff2") format("woff2");
+        font-weight: 300 700;
+        font-display: block;
+      }
+
+      :root {
+        color-scheme: dark;
+        --blue: #38bdf8;
+        --blue-deep: #2563eb;
+        --gold: #f5b453;
+        --ink: #eceef2;
+        --muted: #8b93a3;
+        --ease: cubic-bezier(0.2, 0, 0, 1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        color: var(--ink);
+        user-select: none;
+      }
+
+      /* The whole window is the card; it can be dragged. */
+      .card {
+        position: absolute;
+        inset: 10px;
+        border-radius: 24px;
+        overflow: hidden;
+        isolation: isolate;
+        background:
+          radial-gradient(120% 90% at 50% 0%, rgba(37, 99, 235, 0.18), transparent 60%),
+          linear-gradient(180deg, #0b0f18 0%, #07090e 100%);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.14),
+          0 30px 60px -20px rgba(0, 0, 0, 0.8),
+          0 0 0 1px rgba(0, 0, 0, 0.4);
+        -webkit-app-region: drag;
+        animation: card-in 520ms var(--ease) both;
+      }
+
+      body.leaving .card {
+        animation: card-out 320ms var(--ease) both;
+      }
+
+      @keyframes card-in {
+        from { opacity: 0; transform: scale(0.96) translateY(6px); }
+        to { opacity: 1; transform: none; }
+      }
+      @keyframes card-out {
+        to { opacity: 0; transform: scale(1.02); }
+      }
+
+      /* ---- ambient: aurora fields + engineering grid (as in the dashboard) ---- */
+      .blob {
+        position: absolute;
+        border-radius: 50%;
+        z-index: -2;
+        will-change: transform;
+      }
+      .blob.a {
+        width: 420px; height: 320px; top: -170px; right: -120px;
+        background: radial-gradient(closest-side, rgba(56, 189, 248, 0.38), transparent);
+        animation: drift-a 9s ease-in-out infinite alternate;
+      }
+      .blob.b {
+        width: 380px; height: 300px; bottom: -180px; left: -110px;
+        background: radial-gradient(closest-side, rgba(245, 180, 83, 0.28), transparent);
+        animation: drift-b 11s ease-in-out infinite alternate;
+      }
+      .blob.c {
+        width: 300px; height: 240px; top: 40%; left: 55%;
+        background: radial-gradient(closest-side, rgba(37, 99, 235, 0.25), transparent);
+        animation: drift-c 13s ease-in-out infinite alternate;
+      }
+      @keyframes drift-a { to { transform: translate(-80px, 50px) scale(1.15); } }
+      @keyframes drift-b { to { transform: translate(90px, -40px) scale(0.9); } }
+      @keyframes drift-c { to { transform: translate(-120px, -30px) scale(1.2); } }
+
+      .grid {
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+        background-size: 32px 32px;
+        -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, #000 30%, transparent 80%);
+        mask-image: radial-gradient(ellipse 70% 70% at 50% 40%, #000 30%, transparent 80%);
+      }
+
+      /* ---- layout ---- */
+      .content {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 28px 40px 26px;
+      }
+
+      /* ---- the mark: icon inside an orbiting ring ---- */
+      .mark {
+        position: relative;
+        width: 168px;
+        height: 168px;
+        display: grid;
+        place-items: center;
+        animation: rise 700ms 80ms var(--ease) both;
+      }
+
+      .halo {
+        position: absolute;
+        inset: 6px;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, rgba(56, 189, 248, 0.45), rgba(245, 180, 83, 0.12) 60%, transparent);
+        filter: blur(14px);
+        animation: breathe 3.2s ease-in-out infinite;
+      }
+      @keyframes breathe {
+        0%, 100% { opacity: 0.55; transform: scale(0.94); }
+        50% { opacity: 1; transform: scale(1.06); }
+      }
+
+      /* Rotating gold → blue arc */
+      .ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        padding: 2px;
+        background: conic-gradient(from 0deg, transparent 0deg, rgba(245, 180, 83, 0.95) 70deg, transparent 140deg, transparent 200deg, rgba(56, 189, 248, 0.95) 270deg, transparent 340deg);
+        -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+        animation: spin 2.6s linear infinite;
+        filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.7));
+      }
+      .ring.inner {
+        inset: 14px;
+        padding: 1px;
+        opacity: 0.55;
+        animation: spin 4.2s linear infinite reverse;
+        filter: none;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* Tick marks around the dial (echo of the icon's dotted circle) */
+      .ticks {
+        position: absolute;
+        inset: -10px;
+        border-radius: 50%;
+        background: repeating-conic-gradient(rgba(255, 255, 255, 0.28) 0deg 0.8deg, transparent 0.8deg 10deg);
+        -webkit-mask: radial-gradient(closest-side, transparent 92%, #000 93%, #000 97%, transparent 98%);
+        mask: radial-gradient(closest-side, transparent 92%, #000 93%, #000 97%, transparent 98%);
+        opacity: 0.6;
+      }
+
+      .icon {
+        position: relative;
+        width: 108px;
+        height: 108px;
+        border-radius: 26px;
+        filter: drop-shadow(0 14px 28px rgba(37, 99, 235, 0.55)) drop-shadow(0 0 1px rgba(255, 255, 255, 0.3));
+      }
+
+      /* Orbiting satellite */
+      .orbit {
+        position: absolute;
+        inset: 10px;
+        animation: spin 3.4s linear infinite;
+      }
+      .orbit::after {
+        content: "";
+        position: absolute;
+        top: -4px;
+        left: 50%;
+        width: 9px;
+        height: 9px;
+        margin-left: -4.5px;
+        border-radius: 50%;
+        background: radial-gradient(circle at 35% 35%, #fff, #93c5fd 45%, #2563eb);
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.95), 0 0 24px rgba(56, 189, 248, 0.5);
+      }
+
+      /* Four-point sparkles that twinkle at the compass points */
+      .spark {
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        background: radial-gradient(closest-side, #fff, rgba(255, 255, 255, 0) 70%);
+        clip-path: polygon(50% 0, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0 50%, 40% 40%);
+        animation: twinkle 2.4s ease-in-out infinite;
+      }
+      .spark.n { top: -14px; left: calc(50% - 7px); }
+      .spark.e { right: -14px; top: calc(50% - 7px); animation-delay: 0.6s; filter: drop-shadow(0 0 4px var(--blue)); }
+      .spark.s { bottom: -14px; left: calc(50% - 7px); animation-delay: 1.2s; }
+      .spark.w { left: -14px; top: calc(50% - 7px); animation-delay: 1.8s; filter: drop-shadow(0 0 4px var(--gold)); }
+      @keyframes twinkle {
+        0%, 100% { opacity: 0.25; transform: scale(0.6) rotate(0deg); }
+        50% { opacity: 1; transform: scale(1.1) rotate(45deg); }
+      }
+
+      /* ---- wordmark ---- */
+      .wordmark {
+        margin-top: 22px;
+        font-family: "Space Grotesk", "Segoe UI Variable Display", sans-serif;
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: -0.03em;
+        background: linear-gradient(90deg, #fde3b0 0%, #ffffff 40%, #bae6fd 75%, #60a5fa 100%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: rise 700ms 200ms var(--ease) both;
+      }
+      .tagline {
+        margin-top: 4px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--muted);
+        animation: rise 700ms 300ms var(--ease) both;
+      }
+      @keyframes rise {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: none; }
+      }
+
+      /* ---- progress ---- */
+      .progress {
+        margin-top: 26px;
+        width: 220px;
+        height: 3px;
+        border-radius: 99px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+        position: relative;
+        animation: rise 700ms 400ms var(--ease) both;
+      }
+      .progress::after {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 40%;
+        border-radius: 99px;
+        background: linear-gradient(90deg, transparent, var(--gold), #fff, var(--blue), transparent);
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.8);
+        animation: sweep 1.5s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+      }
+      @keyframes sweep {
+        from { left: -40%; }
+        to { left: 100%; }
+      }
+      .status {
+        margin-top: 12px;
+        min-height: 16px;
+        font-size: 11.5px;
+        color: var(--muted);
+        animation: rise 700ms 480ms var(--ease) both;
+      }
+      .status span {
+        display: inline-block;
+        animation: rise 280ms var(--ease) both;
+      }
+
+      .version {
+        position: absolute;
+        right: 18px;
+        bottom: 14px;
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.28);
+        letter-spacing: 0.06em;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="blob a"></div>
+      <div class="blob b"></div>
+      <div class="blob c"></div>
+      <div class="grid"></div>
+
+      <div class="content">
+        <div class="mark" aria-hidden="true">
+          <div class="halo"></div>
+          <div class="ticks"></div>
+          <div class="ring"></div>
+          <div class="ring inner"></div>
+          <div class="orbit"></div>
+          <img class="icon" src="assets/icon.png" alt="" />
+          <i class="spark n"></i><i class="spark e"></i><i class="spark s"></i><i class="spark w"></i>
+        </div>
+        <div class="wordmark">Media OS</div>
+        <div class="tagline">Intelligence control plane</div>
+        <div class="progress" role="progressbar" aria-label="Starting Media OS"></div>
+        <div class="status" aria-live="polite"><span id="status">Starting…</span></div>
+      </div>
+      <div class="version" id="version"></div>
+    </div>
+    <script>
+      // The main process updates the status line and starts the exit animation. Text only.
+      window.setStatus = function (text) {
+        var el = document.getElementById("status");
+        if (!el || el.textContent === text) return;
+        var next = document.createElement("span");
+        next.id = "status";
+        next.textContent = String(text);
+        el.replaceWith(next);
+      };
+      window.leave = function () {
+        document.body.classList.add("leaving");
+      };
+      var v = new URLSearchParams(location.search).get("v");
+      if (v && /^[\w.\-]{1,20}$/.test(v)) document.getElementById("version").textContent = "v" + v;
+    </script>
+  </body>
+</html>

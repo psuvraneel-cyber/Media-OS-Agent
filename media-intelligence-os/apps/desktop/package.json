@@ -1,13 +1,60 @@
 {
-  "name": "@media-os/desktop",
+  "name": "media-os-desktop",
+  "productName": "Media OS",
   "version": "0.1.0",
   "private": true,
-  "description": "Media OS desktop shell: an Electron window with native Windows 11 Acrylic/Mica around the web UI.",
+  "description": "Media OS desktop app: the operator dashboard in a native Windows 11 Acrylic window.",
+  "author": "Media OS",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "icon": "electron scripts/make-icon.js",
+    "dist": "electron-builder --win nsis --x64 --publish never"
   },
   "devDependencies": {
-    "electron": "45.2.1"
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.mediaos.desktop",
+    "productName": "Media OS",
+    "copyright": "Media OS",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "offline.html",
+      "splash.html",
+      "assets/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Media-OS-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Media OS",
+      "uninstallDisplayName": "Media OS",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    }
   }
 }
