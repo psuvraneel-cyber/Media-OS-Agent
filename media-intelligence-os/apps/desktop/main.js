@@ -14,7 +14,7 @@
 // Node APIs to the page.
 //
 // Config (environment variables):
-//   MEDIA_OS_URL        UI to load            (default http://127.0.0.1:3200/dashboard)
+//   MEDIA_OS_URL        UI to load            (default http://127.0.0.1:3100/dashboard, the normal stack)
 //   MEDIA_OS_AUTH_URL   origin the API trusts for sign-in (default http://127.0.0.1:3100)
 //   MEDIA_OS_LOOK       acrylic (default) | clear   (overrides the remembered choice)
 
@@ -24,7 +24,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { app, BrowserWindow, ipcMain, nativeTheme, shell, session } = require("electron");
 
-const APP_URL = new URL(process.env.MEDIA_OS_URL || "http://127.0.0.1:3200/dashboard");
+const APP_URL = new URL(process.env.MEDIA_OS_URL || "http://127.0.0.1:3100/dashboard");
 const AUTH_ORIGIN = new URL(process.env.MEDIA_OS_AUTH_URL || "http://127.0.0.1:3100").origin;
 const ALLOWED_ORIGINS = new Set([APP_URL.origin, AUTH_ORIGIN]);
 const LOOKS = ["clear", "acrylic"];
@@ -94,6 +94,73 @@ function isAllowed(url) {
 let mainWindow = null;
 let currentLook = "acrylic";
 
+const ICON = path.join(__dirname, "assets", "icon.png");
+
+/* ------------------------------------------------------------------ splash screen */
+
+// Shown instantly at launch while the dashboard window loads hidden behind it; it fades out once
+// the dashboard (or the "not reachable" screen) has painted. Never shorter than SPLASH_MIN_MS so it
+// doesn't just flash, never longer than SPLASH_MAX_MS so a slow stack can't trap the user on it.
+const SPLASH_MIN_MS = 1400;
+const SPLASH_MAX_MS = 15000;
+let splash = null;
+let splashShownAt = 0;
+
+function createSplash() {
+  splash = new BrowserWindow({
+    width: 560,
+    height: 400,
+    center: true,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    hasShadow: false,
+    show: false,
+    title: "Media OS",
+    icon: ICON,
+    backgroundColor: "#00000000",
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, spellcheck: false },
+  });
+  splash.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  splash.webContents.on("will-navigate", (event) => event.preventDefault());
+  splash.once("ready-to-show", () => {
+    if (!splash || splash.isDestroyed()) return;
+    splash.show();
+    splashShownAt = Date.now();
+  });
+  splash.on("closed", () => {
+    splash = null;
+  });
+  void splash.loadFile(path.join(__dirname, "splash.html"), { query: { v: app.getVersion() } });
+}
+
+function splashStatus(text) {
+  if (!splash || splash.isDestroyed()) return;
+  splash.webContents.executeJavaScript(`window.setStatus && window.setStatus(${JSON.stringify(text)})`).catch(() => {});
+}
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Plays the splash exit, reveals the main window, then closes the splash. */
+async function handOffFromSplash(win, reveal) {
+  if (!splash || splash.isDestroyed() || !splashShownAt) {
+    reveal();
+    if (splash && !splash.isDestroyed()) splash.destroy();
+    return;
+  }
+  const remaining = SPLASH_MIN_MS - (Date.now() - splashShownAt);
+  if (remaining > 0) await wait(remaining);
+  if (splash && !splash.isDestroyed()) {
+    await splash.webContents.executeJavaScript("window.leave && window.leave()").catch(() => {});
+    await wait(240);
+  }
+  if (!win.isDestroyed()) reveal();
+  // Close the splash only after the main window is visible, so the app never has zero windows.
+  if (splash && !splash.isDestroyed()) splash.destroy();
+}
+
 function windowOptions(look, bounds) {
   const common = {
     ...(bounds ?? { width: 1440, height: 920 }),
@@ -101,6 +168,7 @@ function windowOptions(look, bounds) {
     minHeight: 640,
     show: false,
     title: "Media OS",
+    icon: ICON,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -124,7 +192,7 @@ function windowOptions(look, bounds) {
   };
 }
 
-function createWindow(look, { bounds, maximized, url } = {}) {
+function createWindow(look, { bounds, maximized, url, withSplash = false } = {}) {
   const win = new BrowserWindow(windowOptions(look, bounds));
   win.webContents.setUserAgent(`${win.webContents.getUserAgent()} ${SHELL_UA_TOKEN} look/${look}`);
 
@@ -154,12 +222,35 @@ function createWindow(look, { bounds, maximized, url } = {}) {
     }
   });
 
-  win.once("ready-to-show", () => {
+  const reveal = () => {
+    if (win.isDestroyed() || win.isVisible()) return;
     if (maximized) win.maximize();
     win.show();
-  });
+  };
+  if (withSplash) {
+    win.webContents.on("did-start-loading", () => splashStatus("Connecting to Media OS…"));
+    win.webContents.on("dom-ready", () => splashStatus("Opening the dashboard…"));
+    const fallback = setTimeout(() => void handOffFromSplash(win, reveal), SPLASH_MAX_MS);
+    win.once("ready-to-show", () => {
+      clearTimeout(fallback);
+      void handOffFromSplash(win, reveal);
+    });
+  } else {
+    win.once("ready-to-show", reveal);
+  }
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
+  });
+
+  // Stack not running (Docker off, still booting): show the bundled "not reachable" screen, which
+  // keeps retrying and returns to the page as soon as the UI answers.
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3 /* aborted by a newer navigation */) return;
+    if (!/^https?:\/\//.test(validatedURL) || !isAllowed(validatedURL)) return;
+    splashStatus("Media OS stack isn't running yet…");
+    void win.loadFile(path.join(__dirname, "offline.html"), {
+      query: { target: validatedURL, reason: errorDescription || String(errorCode) },
+    });
   });
 
   void win.loadURL(url && isAllowed(url) ? url : APP_URL.toString());
@@ -230,7 +321,8 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, callback) => callback(false));
     installAuthBridge();
     currentLook = readLook();
-    mainWindow = createWindow(currentLook);
+    createSplash();
+    mainWindow = createWindow(currentLook, { withSplash: true });
   });
 
   app.on("window-all-closed", () => app.quit());

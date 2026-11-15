@@ -43,6 +43,8 @@ node_modules/
 .next/
 dist/
 build/
+# Desktop app icon sources (electron-builder buildResources) are source, not build output.
+!apps/desktop/build/
 .turbo/
 *.tsbuildinfo
 next-env.d.ts

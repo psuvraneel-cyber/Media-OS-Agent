@@ -1087,3 +1087,163 @@ html[data-look="clear"] .glass-chip {
     background-color: var(--surface-canvas);
   }
 }
+
+/* ================================================================ brand loader */
+/* Route loading screen: the app icon in a rotating gold/blue orbit ring (same design as the
+   desktop splash). Reduced motion stops the movement via the global rule above. */
+
+.brand-loader {
+  --bl-blue: #38bdf8;
+  --bl-gold: #f5b453;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: fade-up 420ms var(--ease-out) both;
+}
+
+.brand-loader__mark {
+  position: relative;
+  width: 136px;
+  height: 136px;
+  display: grid;
+  place-items: center;
+}
+
+.brand-loader__mark > * {
+  position: absolute;
+}
+
+.brand-loader__halo {
+  inset: 4px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(56, 189, 248, 0.42), rgba(245, 180, 83, 0.12) 60%, transparent);
+  filter: blur(12px);
+  animation: bl-breathe 3.2s ease-in-out infinite;
+}
+
+.brand-loader__ticks {
+  inset: -8px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(rgba(255, 255, 255, 0.28) 0deg 0.8deg, transparent 0.8deg 10deg);
+  -webkit-mask: radial-gradient(closest-side, transparent 92%, #000 93%, #000 97%, transparent 98%);
+  mask: radial-gradient(closest-side, transparent 92%, #000 93%, #000 97%, transparent 98%);
+  opacity: 0.55;
+}
+
+.brand-loader__ring {
+  inset: 0;
+  border-radius: 50%;
+  padding: 2px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(245, 180, 83, 0.95) 70deg,
+    transparent 140deg,
+    transparent 200deg,
+    rgba(56, 189, 248, 0.95) 270deg,
+    transparent 340deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.7));
+  animation: bl-spin 2.6s linear infinite;
+}
+
+.brand-loader__ring--inner {
+  inset: 12px;
+  padding: 1px;
+  opacity: 0.5;
+  filter: none;
+  animation: bl-spin 4.2s linear infinite reverse;
+}
+
+.brand-loader__orbit {
+  inset: 8px;
+  animation: bl-spin 3.4s linear infinite;
+}
+
+.brand-loader__orbit::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff, #93c5fd 45%, #2563eb);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.95), 0 0 22px rgba(56, 189, 248, 0.5);
+}
+
+.brand-loader__icon {
+  position: relative !important;
+  width: 84px;
+  height: 84px;
+  filter: drop-shadow(0 12px 26px rgba(37, 99, 235, 0.55));
+}
+
+.brand-loader__spark {
+  width: 12px;
+  height: 12px;
+  background: radial-gradient(closest-side, #fff, rgba(255, 255, 255, 0) 70%);
+  clip-path: polygon(50% 0, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0 50%, 40% 40%);
+  animation: bl-twinkle 2.4s ease-in-out infinite;
+}
+.brand-loader__spark--n { top: -12px; left: calc(50% - 6px); }
+.brand-loader__spark--e { right: -12px; top: calc(50% - 6px); animation-delay: 0.6s; filter: drop-shadow(0 0 4px #38bdf8); }
+.brand-loader__spark--s { bottom: -12px; left: calc(50% - 6px); animation-delay: 1.2s; }
+.brand-loader__spark--w { left: -12px; top: calc(50% - 6px); animation-delay: 1.8s; filter: drop-shadow(0 0 4px #f5b453); }
+
+.brand-loader__label {
+  margin-top: 26px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  background: linear-gradient(90deg, #fde3b0 0%, #ffffff 40%, #bae6fd 75%, #60a5fa 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.brand-loader__detail {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.brand-loader__bar {
+  position: relative;
+  margin-top: 18px;
+  width: 200px;
+  height: 3px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.brand-loader__bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, transparent, #f5b453, #fff, #38bdf8, transparent);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.8);
+  animation: bl-sweep 1.5s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+@keyframes bl-spin { to { transform: rotate(360deg); } }
+@keyframes bl-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(0.94); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+@keyframes bl-twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.6) rotate(0deg); }
+  50% { opacity: 1; transform: scale(1.1) rotate(45deg); }
+}
+@keyframes bl-sweep {
+  from { left: -40%; }
+  to { left: 100%; }
+}
