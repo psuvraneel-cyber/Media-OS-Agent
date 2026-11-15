@@ -46,7 +46,7 @@ export function ConfirmActionDialog({
       aria-labelledby="confirm-dialog-title"
       aria-describedby="confirm-dialog-desc"
     >
-      <div className="w-full max-w-md rounded-xl border border-slate-700 bg-[#121824] p-5 shadow-2xl">
+      <div className="w-full max-w-md rounded-xl border border-slate-700 bg-[var(--surface-panel)] p-5 shadow-2xl">
         <h3 id="confirm-dialog-title" className="text-base font-semibold text-slate-100">
           {title}
         </h3>

@@ -5,12 +5,14 @@ import { Badge, type BadgeTone } from "@/components/ui/Badge";
 
 interface EmptyStateProps {
   title: string;
-  description: string;
-  phaseBadge: string;
+  description: React.ReactNode;
+  /** Optional status label (e.g. the delivery phase). Kept small so it never dominates. */
+  phaseBadge?: string;
   tone?: BadgeTone;
   brandLabel?: string;
   icon?: React.ReactNode;
   action?: React.ReactNode;
+  compact?: boolean;
 }
 
 export function EmptyState({
@@ -21,18 +23,25 @@ export function EmptyState({
   brandLabel,
   icon,
   action,
+  compact = false,
 }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-700/65 bg-[#0e131d] px-6 py-10 text-center">
-      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-lg border border-slate-700/60 bg-slate-800/60 text-sky-300">
+    <div
+      className={`animate-fade-in flex flex-col items-center justify-center rounded-xl border border-dashed border-white/[0.08] bg-white/[0.015] text-center ${compact ? "px-5 py-7" : "px-6 py-12"}`}
+    >
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg border border-white/[0.08] bg-[var(--surface-elevated)] text-slate-300">
         {icon ?? <Info className="h-5 w-5" aria-hidden="true" />}
       </div>
-      <div className="mb-2 flex flex-wrap items-center justify-center gap-2">
-        <Badge tone={tone}>{phaseBadge}</Badge>
-        {brandLabel && <Badge tone="info">{brandLabel}</Badge>}
+      <h3 className="text-sm font-semibold text-slate-100">{title}</h3>
+      <div className="mt-1.5 max-w-lg text-[13px] leading-relaxed text-slate-400">
+        {description}
       </div>
-      <h3 className="text-base font-semibold text-slate-100">{title}</h3>
-      <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-slate-400">{description}</p>
+      {(phaseBadge || brandLabel) && (
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
+          {phaseBadge && <Badge tone={tone}>{phaseBadge}</Badge>}
+          {brandLabel && <Badge tone="neutral">{brandLabel}</Badge>}
+        </div>
+      )}
       {action && <div className="mt-5">{action}</div>}
     </div>
   );

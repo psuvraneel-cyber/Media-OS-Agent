@@ -13,7 +13,11 @@ Flow (nothing is published without the owner's approval AND an explicit schedule
    existing post with that group is never created twice.
 3. Job `media_os.publish.sync_status` (every 15 min once enabled): reads Postiz post states and
    marks schedules PUBLISHED / FAILED / CANCELLED; the package becomes PUBLISHED when every
-   platform has published.
+   platform has settled and at least one published. A post still queued 30 min after its time
+   becomes OVERDUE (usually the PC or Docker was off): it stops counting toward the daily cap,
+   is shown as a warning, and keeps being checked in case Postiz publishes it late. FAILED posts
+   from the last 14 days are re-checked too, so a post the owner retried by hand in Postiz is
+   picked up as PUBLISHED (and then gets analytics).
 
 Postiz performs the actual publishing at the scheduled time (Meta Graph API).
 """
@@ -33,6 +37,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from media_os_api.content.caption import CAPTION_MAX, full_caption
 from media_os_api.db.models import (
     Asset,
     BrandProfile,
@@ -63,6 +68,13 @@ PROVIDER_TO_PLATFORM = {
 MIN_LEAD = timedelta(minutes=20)  # GitHub Pages build + Postiz queueing
 MAX_LEAD = timedelta(days=30)
 ACTIVE_SCHEDULE_STATES = ("SCHEDULED", "PUBLISHED")
+RESCHEDULABLE_STATES = ("FAILED", "CANCELLED")
+# Two carousels on one channel must be at least this far apart: retry recovery identifies a
+# carousel's Postiz post by channel + minute, so near-simultaneous posts would be confused.
+SLOT_GAP = timedelta(minutes=5)
+OVERDUE_AFTER = timedelta(minutes=30)
+FAILED_RECHECK_WINDOW = timedelta(days=14)
+PENDING_SCHEDULE_STATES = ("SCHEDULED", "OVERDUE")
 JPEG_QUALITY = 90
 GROUP_NAMESPACE = uuid.UUID("b5f2a3c4-6d1e-4f7a-9b8c-0d1e2f3a4b5c")
 
@@ -112,9 +124,18 @@ def group_id(package_id: uuid.UUID, when: datetime) -> str:
 
 
 def existing_posts(
-    postiz: PostizClient, when: datetime, integration_ids: set[str]
+    postiz: PostizClient,
+    when: datetime,
+    integration_ids: set[str],
+    claimed: set[str] | None = None,
 ) -> dict[str, str]:
-    """{integration_id: post_id} for API-created posts at this exact minute on these channels."""
+    """{integration_id: post_id} for API-created posts at this exact minute on these channels.
+
+    `claimed` holds Postiz post ids already linked to a PublishSchedule; they belong to another
+    carousel (or an earlier attempt) and are never adopted, so two carousels can never share one
+    Postiz post.
+    """
+    taken = claimed or set()
     found: dict[str, str] = {}
     for p in postiz.posts_between(when - timedelta(minutes=2), when + timedelta(minutes=2)):
         integ = str((p.get("integration") or {}).get("id") or "")
@@ -127,16 +148,71 @@ def existing_posts(
             and abs((at - when).total_seconds()) < 60
             and str(p.get("creationMethod") or "API") == "API"
             and p.get("id")
+            and str(p["id"]) not in taken
         ):
             found[integ] = str(p["id"])
     return found
 
 
+def claimed_post_ids(session: Session) -> set[str]:
+    return {
+        str(pid)
+        for pid in session.execute(
+            select(PublishSchedule.postiz_post_id).where(
+                PublishSchedule.postiz_post_id.is_not(None)
+            )
+        ).scalars()
+    }
+
+
 def compose_caption(pkg: ContentPackage) -> str:
-    caption = (pkg.caption or "").strip()
-    tags = " ".join(t for t in (pkg.hashtags or []) if isinstance(t, str))
-    full = f"{caption}\n\n{tags}".strip() if tags else caption
-    return full[:2200]
+    """Exact caption sent to Postiz. Never truncated: over-long captions are refused instead."""
+    return full_caption(pkg.caption, pkg.hashtags or [])
+
+
+def package_schedules(session: Session, pkg: ContentPackage) -> list[PublishSchedule]:
+    return list(
+        session.execute(
+            select(PublishSchedule).where(PublishSchedule.content_package_id == pkg.id)
+        ).scalars()
+    )
+
+
+def is_reschedule(pkg: ContentPackage, schedules: list[PublishSchedule]) -> bool:
+    """A carousel whose every platform post failed or was cancelled (e.g. deleted in Postiz)."""
+    return (
+        pkg.status == ContentLifecycleStatus.FAILED_RETRYABLE.value
+        and pkg.previous_status == ContentLifecycleStatus.SCHEDULED.value
+        and bool(schedules)
+        and all(s.status in RESCHEDULABLE_STATES for s in schedules)
+    )
+
+
+def can_schedule(pkg: ContentPackage, schedules: list[PublishSchedule]) -> bool:
+    if pkg.format != "CAROUSEL" or pkg.approval_status != "APPROVED":
+        return False
+    if pkg.status == ContentLifecycleStatus.QA_PASSED.value:
+        return not any(s.status in ACTIVE_SCHEDULE_STATES for s in schedules)
+    return is_reschedule(pkg, schedules)
+
+
+def slot_taken(
+    session: Session, brand_id: uuid.UUID, platform: str, when: datetime, package_id: uuid.UUID
+) -> bool:
+    """Another carousel already posts on this platform within SLOT_GAP of `when`."""
+    return (
+        session.execute(
+            select(PublishSchedule.id).where(
+                PublishSchedule.brand_profile_id == brand_id,
+                PublishSchedule.platform == platform,
+                PublishSchedule.status.in_(ACTIVE_SCHEDULE_STATES),
+                PublishSchedule.content_package_id != package_id,
+                PublishSchedule.scheduled_at > when - SLOT_GAP,
+                PublishSchedule.scheduled_at < when + SLOT_GAP,
+            )
+        ).first()
+        is not None
+    )
 
 
 # --------------------------------------------------------------------------- API side
@@ -157,9 +233,22 @@ def request_schedule(
         raise ScheduleRequestError("Time must include a timezone.", code="NAIVE_TIME")
     if pkg.format != "CAROUSEL":
         raise ScheduleRequestError("Only carousels can be scheduled.", code="NOT_CAROUSEL")
-    if pkg.approval_status != "APPROVED" or pkg.status != ContentLifecycleStatus.QA_PASSED.value:
+    schedules = package_schedules(session, pkg)
+    if not can_schedule(pkg, schedules):
         raise ScheduleRequestError(
-            "Only approved, QA-passed carousels can be scheduled.", code="NOT_APPROVED"
+            "Only approved, QA-passed carousels (or ones whose earlier post failed or was "
+            "cancelled) can be scheduled.",
+            code="NOT_APPROVED",
+        )
+    if any(s.scheduled_at == when for s in schedules):
+        raise ScheduleRequestError(
+            "This carousel was already scheduled for that exact time; pick a different time.",
+            code="SAME_TIME",
+        )
+    if len(compose_caption(pkg)) > CAPTION_MAX:
+        raise ScheduleRequestError(
+            f"Caption with hashtags is longer than Instagram's {CAPTION_MAX} characters.",
+            code="CAPTION_TOO_LONG",
         )
     if when < now + MIN_LEAD:
         raise ScheduleRequestError(
@@ -179,6 +268,11 @@ def request_schedule(
                 f"{platform.title()} already has {daily_cap(brand, platform)} posts that day "
                 "(daily cap).",
                 code="DAILY_CAP",
+            )
+        if slot_taken(session, brand.id, platform, when, pkg.id):
+            raise ScheduleRequestError(
+                f"Another post is scheduled on {platform.title()} within 5 minutes of that time.",
+                code="SLOT_TAKEN",
             )
     job, _created = enqueue_durable_job(
         session,
@@ -279,15 +373,22 @@ def _slides(session: Session, pkg: ContentPackage) -> list[bytes]:
 
 
 def _advance(
-    session: Session, pkg: ContentPackage, target: ContentLifecycleStatus, reason: str
+    session: Session,
+    pkg: ContentPackage,
+    target: ContentLifecycleStatus,
+    reason: str,
+    *,
+    attempt: str = "",
 ) -> None:
+    key = f"{target.value.lower()}:{pkg.id}:v{pkg.version}"
     transition_content_status(
         session,
         content_package_id=pkg.id,
         to_status=target,
         actor_id=ACTOR,
         reason=reason,
-        idempotency_key=f"{target.value.lower()}:{pkg.id}:v{pkg.version}",
+        # A reschedule repeats SCHEDULED, so it needs its own key or it would replay the first.
+        idempotency_key=f"{key}:{attempt}" if attempt else key,
         expected_brand_id=pkg.brand_profile_id,
     )
     session.refresh(pkg)
@@ -325,14 +426,22 @@ def handle_schedule_carousel(
         raise PermanentTaskError("Content package not found.", code="NOT_FOUND")
     if pkg.status == ContentLifecycleStatus.SCHEDULED.value:
         return {"skipped": True, "status": pkg.status}
-    if pkg.approval_status != "APPROVED" or pkg.status not in (
-        ContentLifecycleStatus.QA_PASSED.value,
-        ContentLifecycleStatus.POSTIZ_DRAFT.value,
+    rescheduling = is_reschedule(pkg, package_schedules(session, pkg))
+    if pkg.approval_status != "APPROVED" or not (
+        rescheduling
+        or pkg.status
+        in (ContentLifecycleStatus.QA_PASSED.value, ContentLifecycleStatus.POSTIZ_DRAFT.value)
     ):
         raise PolicyRefusalError("Carousel is not approved for publishing.", code="NOT_APPROVED")
     brand = session.get(BrandProfile, pkg.brand_profile_id)
     if brand is None:
         raise PermanentTaskError("Brand not found.", code="NOT_FOUND")
+    caption = compose_caption(pkg)
+    if len(caption) > CAPTION_MAX:
+        raise PermanentTaskError(
+            f"Caption is {len(caption)} characters; Instagram allows {CAPTION_MAX}.",
+            code="CAPTION_TOO_LONG",
+        )
 
     host, postiz = clients()
     try:
@@ -351,6 +460,10 @@ def handle_schedule_carousel(
                 brand, platform
             ):
                 raise PolicyRefusalError(f"Daily cap reached for {platform}.", code="DAILY_CAP")
+            if slot_taken(session, brand.id, platform, when, pkg.id):
+                raise PolicyRefusalError(
+                    f"Another post is scheduled on {platform} within 5 minutes.", code="SLOT_TAKEN"
+                )
 
         jpegs = [to_jpeg(b) for b in _slides(session, pkg)]
         stamp = when.astimezone(ZoneInfo(brand.timezone)).strftime("%Y-%m")
@@ -368,18 +481,31 @@ def handle_schedule_carousel(
 
         group = group_id(pkg.id, when)
         # Re-run safety: Postiz assigns its own ids, so an earlier attempt that created posts but
-        # crashed before saving is recognised by channel + publish time + API origin.
-        existing = existing_posts(postiz, when, {t.id for t in targets})
+        # crashed before saving is recognised by channel + publish time + API origin. Ids already
+        # linked to another schedule are excluded, so another carousel's post is never adopted.
+        target_ids = {t.id for t in targets}
+        claimed = claimed_post_ids(session)
+        existing = existing_posts(postiz, when, target_ids, claimed)
         missing = [t for t in targets if t.id not in existing]
         if missing:
             existing.update(
                 postiz.schedule_carousel(
                     when=when,
-                    caption=compose_caption(pkg),
+                    caption=caption,
                     image_urls=[f.url for f in hosted],
                     targets=missing,
                     image_prefix=group,
                 )
+            )
+            unconfirmed = target_ids - existing.keys()
+            if unconfirmed:
+                # Postiz accepted the request but did not report every post id: look them up.
+                existing.update(existing_posts(postiz, when, unconfirmed, claimed))
+        if target_ids - existing.keys():
+            # Never save a schedule without its Postiz id (status sync would later mark it
+            # CANCELLED even if it published). A retry recovers the ids via existing_posts.
+            raise RetryableTaskError(
+                "Postiz did not confirm a post id for every channel.", code="POSTIZ_NO_POST_ID"
             )
         channel_ids = {
             c.postiz_integration_id: c.id
@@ -409,13 +535,23 @@ def handle_schedule_carousel(
                 )
             )
         session.flush()
-        _advance(session, pkg, ContentLifecycleStatus.USER_APPROVED, "Owner approved carousel")
-        _advance(
-            session,
-            pkg,
-            ContentLifecycleStatus.SCHEDULED,
-            f"Scheduled in Postiz for {when.isoformat()}",
-        )
+        if rescheduling:
+            # FAILED_RETRYABLE resumes straight to SCHEDULED (its recorded previous state).
+            _advance(
+                session,
+                pkg,
+                ContentLifecycleStatus.SCHEDULED,
+                f"Rescheduled in Postiz for {when.isoformat()}",
+                attempt=group,
+            )
+        else:
+            _advance(session, pkg, ContentLifecycleStatus.USER_APPROVED, "Owner approved carousel")
+            _advance(
+                session,
+                pkg,
+                ContentLifecycleStatus.SCHEDULED,
+                f"Scheduled in Postiz for {when.isoformat()}",
+            )
         record_audit_event(
             session,
             actor_id=ACTOR,
@@ -450,15 +586,25 @@ POSTIZ_FAILED = {"ERROR"}
 
 
 def handle_sync_status(
-    session: Session, job: JobRun, *, clients: ClientFactory = _clients
+    session: Session,
+    job: JobRun,
+    *,
+    clients: ClientFactory = _clients,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Reflect Postiz post states (QUEUE/PUBLISHED/ERROR, deleted) back into Media OS."""
-    now = datetime.now(UTC)
+    now = now or datetime.now(UTC)
     due = list(
         session.execute(
             select(PublishSchedule).where(
-                PublishSchedule.status == "SCHEDULED",
-                PublishSchedule.scheduled_at <= now + timedelta(minutes=1),
+                (
+                    PublishSchedule.status.in_(PENDING_SCHEDULE_STATES)
+                    & (PublishSchedule.scheduled_at <= now + timedelta(minutes=1))
+                )
+                | (
+                    (PublishSchedule.status == "FAILED")
+                    & (PublishSchedule.scheduled_at >= now - FAILED_RECHECK_WINDOW)
+                )
             )
         ).scalars()
     )
@@ -471,18 +617,14 @@ def handle_sync_status(
         posts = postiz.posts_between(start, now + timedelta(days=1))
         by_id = {str(p.get("id")): p for p in posts if p.get("id")}
         for s in due:
-            post = by_id.get(s.postiz_post_id or "")
-            state = str((post or {}).get("state") or "").upper()
-            if post is None and s.scheduled_at < now - timedelta(minutes=30):
-                s.status = "CANCELLED"  # deleted in Postiz
-            elif state in POSTIZ_PUBLISHED:
-                s.status = "PUBLISHED"
-                release = str(post.get("releaseURL") or post.get("releaseId") or "")  # type: ignore[union-attr]
-                s.remote_post_id = release[:128] or None
-            elif state in POSTIZ_FAILED:
-                s.status = "FAILED"
-            else:
+            new_status = _next_status(s, by_id.get(s.postiz_post_id or ""), now)
+            if new_status is None or new_status == s.status:
                 continue
+            if new_status == "PUBLISHED":
+                post = by_id[s.postiz_post_id or ""]
+                release = str(post.get("releaseURL") or post.get("releaseId") or "")
+                s.remote_post_id = release[:128] or None
+            s.status = new_status
             updated += 1
         session.flush()
         for package_id in {s.content_package_id for s in due}:
@@ -497,19 +639,56 @@ def handle_sync_status(
         postiz.close()
 
 
+def _next_status(s: PublishSchedule, post: dict[str, Any] | None, now: datetime) -> str | None:
+    """New status for one schedule given its Postiz post (None = leave unchanged)."""
+    if post is None:
+        if not s.postiz_post_id:
+            return None  # no Postiz id recorded: deleted and published look the same, leave it
+        if s.status in PENDING_SCHEDULE_STATES and s.scheduled_at < now - OVERDUE_AFTER:
+            return "CANCELLED"  # deleted in Postiz
+        return None
+    state = str(post.get("state") or "").upper()
+    if state in POSTIZ_PUBLISHED:
+        return "PUBLISHED"
+    if state in POSTIZ_FAILED:
+        return "FAILED"
+    # Still queued in Postiz.
+    if s.status == "SCHEDULED" and s.scheduled_at < now - OVERDUE_AFTER:
+        return "OVERDUE"
+    return None
+
+
 def _settle_package(session: Session, package_id: uuid.UUID) -> None:
     pkg = session.get(ContentPackage, package_id)
-    if pkg is None or pkg.status != ContentLifecycleStatus.SCHEDULED.value:
+    if pkg is None:
         return
-    states = [
-        s.status
-        for s in session.execute(
+    # A carousel that failed everywhere can still publish if the owner retries it in Postiz.
+    recovering = (
+        pkg.status == ContentLifecycleStatus.FAILED_RETRYABLE.value
+        and pkg.previous_status == ContentLifecycleStatus.SCHEDULED.value
+    )
+    if pkg.status != ContentLifecycleStatus.SCHEDULED.value and not recovering:
+        return
+    rows = list(
+        session.execute(
             select(PublishSchedule).where(PublishSchedule.content_package_id == package_id)
         ).scalars()
-    ]
-    if not states or "SCHEDULED" in states:
+    )
+    states = [s.status for s in rows]
+    # Each schedule attempt (one publish time) settles separately, so a carousel that is
+    # rescheduled and fails again gets a fresh FAILED_RETRYABLE transition, not a replay.
+    attempt = max(s.scheduled_at for s in rows).astimezone(UTC).isoformat() if rows else ""
+    if not states or any(st in PENDING_SCHEDULE_STATES for st in states):
         return
     if "PUBLISHED" in states:
+        if recovering:
+            _advance(
+                session,
+                pkg,
+                ContentLifecycleStatus.SCHEDULED,
+                "Published after a retry in Postiz",
+                attempt=f"recovered:{attempt}",
+            )
         _advance(session, pkg, ContentLifecycleStatus.PUBLISHING, "Postiz started publishing")
         _advance(session, pkg, ContentLifecycleStatus.PUBLISHED, "Published by Postiz")
         record_audit_event(
@@ -521,12 +700,13 @@ def _settle_package(session: Session, package_id: uuid.UUID) -> None:
             outcome="SUCCESS",
             metadata={"platforms": states},
         )
-    elif all(s in ("FAILED", "CANCELLED") for s in states):
+    elif not recovering and all(s in RESCHEDULABLE_STATES for s in states):
         _advance(
             session,
             pkg,
             ContentLifecycleStatus.FAILED_RETRYABLE,
             "All platforms failed or were cancelled",
+            attempt=attempt,
         )
         record_audit_event(
             session,

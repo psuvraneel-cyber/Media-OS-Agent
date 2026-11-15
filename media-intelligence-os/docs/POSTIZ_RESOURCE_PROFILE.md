@@ -45,5 +45,5 @@ All container values below were captured via `docker stats --no-stream`, `wsl -d
 2. **Startup CPU/RAM Burst:** `postiz-runtime-app` spikes to `~1.86–2.11 GiB` and `130–201%` CPU during cold boot/warmup before settling to `1.23–1.51 GiB`.
 3. **Phase 3+ Design Impact:**
    - Do **not** blindly cap Postiz containers or remove Temporal/Elasticsearch before verifying compatibility—all 8 containers ran reliably with zero OOMs.
-   - Keep Media Intelligence OS services (`postgres`, `redis`, `api`, `workers/research`, `workers/creative`, `web`, `mcp`) slim, pin `creative-worker` concurrency strictly to `1`, and avoid running heavy concurrent browser/video workloads while Postiz is booting.
+   - Keep Media Intelligence OS services (`postgres`, `redis`, `api`, `worker`, `creative`, `web`, `mcp`) slim, pin `creative-worker` concurrency strictly to `1`, and avoid running heavy concurrent browser/video workloads while Postiz is booting.
    - Re-measure combined `media-intelligence-os` + `postiz-runtime` `docker stats` and `vmmemWSL` in Phase 3.

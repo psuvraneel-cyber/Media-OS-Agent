@@ -39,8 +39,8 @@ export function LoginForm() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#090b10] px-4 py-10 text-slate-100">
-      <div className="w-full max-w-md rounded-2xl border border-slate-700/50 bg-[#101520] p-7 shadow-2xl">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--surface-inset)] px-4 py-10 text-slate-100">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700/50 bg-[var(--surface-elevated)] p-7 shadow-2xl">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-sky-400/40 bg-sky-500/15 text-sky-300">
             <Cpu className="h-5 w-5" aria-hidden="true" />
@@ -71,7 +71,7 @@ export function LoginForm() {
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-[#090b10] px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-400 focus:outline-none"
+              className="w-full rounded-lg border border-slate-700 bg-[var(--surface-inset)] px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-400 focus:outline-none"
               placeholder="Enter local owner username"
             />
           </div>
@@ -91,7 +91,7 @@ export function LoginForm() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-slate-700 bg-[#090b10] px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-400 focus:outline-none"
+              className="w-full rounded-lg border border-slate-700 bg-[var(--surface-inset)] px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:border-sky-400 focus:outline-none"
               placeholder="Enter owner password"
             />
           </div>

@@ -251,6 +251,7 @@ export interface CarouselSummary {
   created_at: string;
   schedules: ScheduleEntry[];
   scheduling: boolean;
+  can_schedule: boolean;
 }
 
 export interface ScheduleEntry {

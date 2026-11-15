@@ -44,7 +44,7 @@ export default async function AuthenticatedShellLayout({
   }
 
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#090b10]" />}>
+    <Suspense fallback={<div className="min-h-screen bg-[var(--surface-inset)]" />}>
       <BrandProvider brands={brandsResult.data.items}>
         <OperatorShell sessionUser={sessionResult.data}>{children}</OperatorShell>
       </BrandProvider>

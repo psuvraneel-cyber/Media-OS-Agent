@@ -40,6 +40,8 @@ import {
   CalendarView,
   StudioView,
 } from "@/components/views/PipelineStubViews";
+import type { PipelineSummary, PostsPage, ViewsReport } from "@/lib/analytics";
+import { pipelinePath, postsPath, viewsPath } from "@/lib/analytics-paths";
 import { BrandProvider } from "@/lib/brand-context";
 import { NAV_ROUTES } from "@/lib/navigation";
 import type {
@@ -92,6 +94,74 @@ const BRAND_FIXTURES: BrandProfileSummary[] = [
 ];
 
 const EMPTY_CHANNELS: ChannelAccountSummary[] = [];
+
+// Empty (no published posts) analytics for the Technology & AI brand: honest zero state.
+const EMPTY_SYNC = {
+  last_success_at: null,
+  last_attempt_at: null,
+  last_status: null,
+  last_error_code: null,
+  schedule_enabled: false,
+  schedule_configured: true,
+  source: "Postiz public API",
+};
+const EMPTY_VIEWS: ViewsReport = {
+  brand_id: BRAND_TECH_ID,
+  range: "30d",
+  timezone: "Asia/Kolkata",
+  generated_at: "2026-11-15T00:00:00+00:00",
+  window: { start: "2026-10-16T18:30:00+00:00", end: "2026-11-15T00:00:00+00:00" },
+  previous_window: { start: "2026-09-16T18:30:00+00:00", end: "2026-10-16T18:30:00+00:00" },
+  granularity: "day",
+  totals: {
+    views: 0,
+    views_previous: 0,
+    views_growth_pct: null,
+    engagement: null,
+    engagement_previous: null,
+    engagement_growth_pct: null,
+    approximate: false,
+    published_posts: 0,
+    published_in_period: 0,
+    posts_with_view_data: 0,
+    contributing_posts: 0,
+    avg_views_per_post: null,
+  },
+  trend: [],
+  by_platform: [],
+  by_account: [],
+  top_post: null,
+  breakdowns: {},
+  coverage: { tracking_since: null, last_observation_at: null, notes: [] },
+  sync: EMPTY_SYNC,
+};
+const EMPTY_PIPELINE: PipelineSummary = {
+  brand_id: BRAND_TECH_ID,
+  content: { total: 0, by_status: {}, awaiting_approval: 0, approved_unscheduled: 0 },
+  publishing: {
+    scheduled: 0,
+    published: 0,
+    failed: 0,
+    cancelled: 0,
+    next_scheduled_at: null,
+    next_scheduled_platform: null,
+  },
+  channels: [],
+  research: [],
+  recent_activity: [],
+};
+const EMPTY_POSTS: PostsPage = {
+  range: "30d",
+  window: EMPTY_VIEWS.window,
+  sort: "views",
+  page: 1,
+  page_size: 10,
+  total: 0,
+  items: [],
+};
+const VIEWS_SEED = { path: viewsPath(BRAND_TECH_ID, "30d"), data: EMPTY_VIEWS };
+const PIPELINE_SEED = { path: pipelinePath(BRAND_TECH_ID), data: EMPTY_PIPELINE };
+const POSTS_SEED = { path: postsPath(BRAND_TECH_ID, "30d", "views", 1, {}, 10), data: EMPTY_POSTS };
 
 const SESSION_USER: SessionUser = {
   authenticated: true,
@@ -278,28 +348,35 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
 
   it("renders all non-research domain views honestly with empty/disabled/policy states, persisted audit logs, and zero fake analytics", async () => {
     const user = userEvent.setup();
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(TELEMETRY_LOGS), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(AUDIT_EVENTS), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
+    // Route by URL: the calendar loads its month on mount; logs refresh on click.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      const body = url.includes("/system/logs")
+        ? TELEMETRY_LOGS
+        : url.includes("/system/audit-events")
+          ? AUDIT_EVENTS
+          : { start: "", end: "", items: [] };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
 
     const { unmount } = renderInShell(
       <>
-        <DashboardOverviewView systemStatus={SYSTEM_STATUS} />
+        <DashboardOverviewView
+          systemStatus={SYSTEM_STATUS}
+          initialViews={VIEWS_SEED}
+          initialPipeline={PIPELINE_SEED}
+        />
         <StudioView />
         <AssetsView />
         <CalendarView />
-        <AnalyticsView />
+        <AnalyticsView
+          initialViews={VIEWS_SEED}
+          initialPosts={POSTS_SEED}
+          initialPipeline={PIPELINE_SEED}
+        />
         <AgentsView />
         <IntegrationsView systemStatus={SYSTEM_STATUS} channels={EMPTY_CHANNELS} />
         <SettingsView sessionUser={SESSION_USER} systemStatus={SYSTEM_STATUS} />
@@ -310,16 +387,21 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
     expect(screen.getByText("No performance records collected for Technology & AI")).toBeInTheDocument();
     expect(screen.getByText(/App Promotion/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Generate with Gemini/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Queue in Postiz/i })).toBeDisabled();
+    expect(screen.getByRole("link", { name: /Open Postiz/i })).toHaveAttribute(
+      "href",
+      "http://localhost:4007",
+    );
     expect(screen.getByRole("button", { name: /Bind Postiz Channel/i })).toBeDisabled();
     expect(screen.getByText("GET /api/v1/system/status")).toBeInTheDocument();
     expect(screen.getByText("BRAND_ACTIVATION_CHANGED")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Refresh Logs/i }));
+    const logCalls = () =>
+      fetchSpy.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith("/api/v1/system/"));
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(logCalls()).toHaveLength(2);
     });
-    expect(fetchSpy.mock.calls.map((c) => c[0])).toEqual([
+    expect(logCalls()).toEqual([
       "/api/v1/system/logs?limit=40",
       "/api/v1/system/audit-events?limit=40",
     ]);

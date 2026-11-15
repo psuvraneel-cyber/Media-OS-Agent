@@ -77,7 +77,7 @@ function errorText(err: unknown, fallback: string): string {
 
 function ItemRow({ item }: { item: ResearchSourceItem }) {
   return (
-    <li className="space-y-1 rounded-lg border border-slate-800 bg-[#090b10] p-3 text-xs">
+    <li className="space-y-1 rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-3 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="info">{item.provider}</Badge>
         <SafeExternalLink href={item.canonical_url}>
@@ -349,7 +349,7 @@ export function TopicsView() {
                 <button
                   type="button"
                   onClick={() => void openTopic(t.topic_cluster_id)}
-                  className="w-full space-y-1 rounded-lg border border-slate-800 bg-[#090b10] p-3 text-left text-xs hover:border-slate-600"
+                  className="w-full space-y-1 rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-3 text-left text-xs hover:border-slate-600"
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={editorialTone(t.assignment.editorial_status)}>

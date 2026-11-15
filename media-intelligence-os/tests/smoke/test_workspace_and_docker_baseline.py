@@ -67,8 +67,6 @@ def test_workspace_structure_and_docs_exist() -> None:
         "../.github/workflows/ci.yml",  # CI lives at the repository root
         "apps/web",
         "apps/api",
-        "workers/research",
-        "workers/creative",
         "services/mcp",
         "infra/docker/Dockerfile.baseline",
         "infra/docker/compose.baseline.yml",

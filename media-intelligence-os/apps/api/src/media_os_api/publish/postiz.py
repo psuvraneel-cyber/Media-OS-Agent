@@ -143,6 +143,18 @@ class PostizClient:
     def delete_post(self, post_id: str) -> None:
         self._call("DELETE", f"/posts/{post_id}")
 
+    def post_analytics(self, post_id: str) -> list[dict[str, Any]] | None:
+        """Lifetime metrics for one published post (`GET /analytics/post/{id}`), read-only.
+
+        Returns the provider's list of `{label, data: [{total, date}]}`; an empty list when the
+        post has no release yet or the provider exposes no post analytics; None when Postiz marks
+        the post `missing` on the platform.
+        """
+        data = self._call("GET", f"/analytics/post/{post_id}", params={"date": 7})
+        if isinstance(data, dict) and data.get("missing"):
+            return None
+        return [m for m in data or [] if isinstance(m, dict)] if isinstance(data, list) else []
+
     def posts_between(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
         data = self._call(
             "GET", "/posts", params={"startDate": start.isoformat(), "endDate": end.isoformat()}

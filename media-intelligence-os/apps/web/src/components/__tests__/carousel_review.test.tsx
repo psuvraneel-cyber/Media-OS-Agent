@@ -51,6 +51,7 @@ const SUMMARY: CarouselSummary = {
   created_at: "2026-11-14T10:00:00Z",
   schedules: [],
   scheduling: false,
+  can_schedule: false,
 };
 
 const DETAIL: CarouselDetail = {

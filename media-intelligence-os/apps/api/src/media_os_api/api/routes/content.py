@@ -15,7 +15,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -30,7 +30,13 @@ from media_os_api.auth import SessionPayload, require_csrf, require_session
 from media_os_api.carousel.service import RecheckError, recheck_package
 from media_os_api.db.models import Asset, BrandProfile, ContentPackage, PublishSchedule
 from media_os_api.db.session import session_scope
-from media_os_api.publish.service import ScheduleRequestError, request_schedule
+from media_os_api.publish.service import (
+    OVERDUE_AFTER,
+    ScheduleRequestError,
+    can_schedule,
+    package_schedules,
+    request_schedule,
+)
 from media_os_api.services import BrandNotFoundError, get_brand
 from media_os_api.services.audit_service import record_audit_event
 from media_os_api.workflow.state_machine import ContentLifecycleStatus, transition_content_status
@@ -89,6 +95,7 @@ class CarouselSummary(BaseModel):
     created_at: str
     schedules: list[ScheduleEntry] = Field(default_factory=list)
     scheduling: bool = False
+    can_schedule: bool = False  # QA-passed, or every earlier platform post failed/cancelled
 
 
 class CarouselDetail(CarouselSummary):
@@ -245,6 +252,7 @@ def list_carousels(
                 **_summary(p, _slide_assets(db, p)),
                 schedules=_schedules(db, p),
                 scheduling=_scheduling(db, p),
+                can_schedule=can_schedule(p, package_schedules(db, p)),
             )
             for p in pkgs
         ]
@@ -265,6 +273,7 @@ def get_carousel(
             **_summary(pkg, assets),
             schedules=_schedules(db, pkg),
             scheduling=_scheduling(db, pkg),
+            can_schedule=can_schedule(pkg, package_schedules(db, pkg)),
             caption=pkg.caption,
             hashtags=list(pkg.hashtags or []),
             alt_text=pkg.description,
@@ -301,6 +310,95 @@ def get_asset_file(
             status.HTTP_404_NOT_FOUND, {"code": "NOT_FOUND", "message": "Asset file missing."}
         )
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private"})
+
+
+class CalendarEntry(BaseModel):
+    schedule_id: str
+    content_package_id: str
+    title: str
+    platform: str
+    status: str  # SCHEDULED | OVERDUE | PUBLISHED | FAILED | CANCELLED
+    overdue: bool
+    scheduled_at: str
+    post_url: str | None
+    thumbnail_asset_id: str | None
+
+
+class CalendarResponse(BaseModel):
+    start: str
+    end: str
+    items: list[CalendarEntry]
+
+
+CALENDAR_MAX_SPAN = timedelta(days=93)
+
+
+@router.get("/content/schedules", response_model=CalendarResponse)
+def list_schedules(
+    request: Request,
+    _session: Annotated[SessionPayload, Depends(require_session)],
+    brand: Annotated[str, Query(min_length=1, max_length=128)],
+    start: Annotated[datetime, Query()],
+    end: Annotated[datetime, Query()],
+) -> CalendarResponse:
+    """Every platform post of this brand scheduled in [start, end), for the publishing calendar."""
+    if start.tzinfo is None or end.tzinfo is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"code": "NAIVE_TIME", "message": "start and end must include a timezone."},
+        )
+    if not start < end <= start + CALENDAR_MAX_SPAN:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"code": "BAD_RANGE", "message": "end must be after start and within 93 days."},
+        )
+    now = datetime.now(UTC)
+    with _db(request) as db:
+        brand_id = _brand_id(db, brand)
+        rows = db.execute(
+            select(PublishSchedule, ContentPackage)
+            .join(ContentPackage, ContentPackage.id == PublishSchedule.content_package_id)
+            .where(
+                PublishSchedule.brand_profile_id == brand_id,
+                PublishSchedule.scheduled_at >= start,
+                PublishSchedule.scheduled_at < end,
+            )
+            .order_by(PublishSchedule.scheduled_at, PublishSchedule.platform)
+        ).all()
+        thumbs: dict[uuid.UUID, str] = {}
+        for pkg_id in {p.id for _s, p in rows}:
+            first = db.execute(
+                select(Asset.id)
+                .where(
+                    Asset.content_package_id == pkg_id,
+                    Asset.asset_type == "CAROUSEL_SLIDE",
+                    Asset.status == "ACTIVE",
+                )
+                .order_by(Asset.local_path)
+                .limit(1)
+            ).scalar_one_or_none()
+            if first is not None:
+                thumbs[pkg_id] = str(first)
+        items = [
+            CalendarEntry(
+                schedule_id=str(sched.id),
+                content_package_id=str(pkg.id),
+                title=(pkg.title or pkg.hook or "Untitled").replace("*", "")[:140],
+                platform=sched.platform,
+                status=sched.status,
+                overdue=sched.status == "OVERDUE"
+                or (sched.status == "SCHEDULED" and sched.scheduled_at < now - OVERDUE_AFTER),
+                scheduled_at=sched.scheduled_at.isoformat(),
+                post_url=(
+                    sched.remote_post_id
+                    if (sched.remote_post_id or "").startswith("http")
+                    else None
+                ),
+                thumbnail_asset_id=thumbs.get(pkg.id),
+            )
+            for sched, pkg in rows
+        ]
+    return CalendarResponse(start=start.isoformat(), end=end.isoformat(), items=items)
 
 
 @router.post("/content/carousels/{package_id}/decision", response_model=CarouselSummary)
