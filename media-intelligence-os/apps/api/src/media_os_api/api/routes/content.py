@@ -32,6 +32,7 @@ from media_os_api.db.models import Asset, BrandProfile, ContentPackage, PublishS
 from media_os_api.db.session import session_scope
 from media_os_api.publish.service import (
     OVERDUE_AFTER,
+    RESCHEDULABLE_STATES,
     ScheduleRequestError,
     can_schedule,
     package_schedules,
@@ -459,7 +460,11 @@ def schedule_carousel(
     session: Annotated[SessionPayload, Depends(require_csrf)],
     brand: Annotated[str, Query(min_length=1, max_length=128)],
 ) -> CarouselSummary:
-    """Owner schedules an APPROVED carousel; the worker uploads images, then creates the post."""
+    """Owner schedules an APPROVED carousel; the worker uploads images, then creates the post.
+
+    Also reschedules a carousel whose every earlier platform post failed or was cancelled
+    (package FAILED_RETRYABLE): the worker creates new Postiz posts under a new group id.
+    """
     actor = f"owner:{session.subject}"
     with _db(request) as db:
         brand_id = _brand_id(db, brand)
@@ -469,7 +474,10 @@ def schedule_carousel(
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, {"code": "BRAND_NOT_FOUND", "message": "Unknown brand."}
             )
-        if _scheduling(db, pkg) or _schedules(db, pkg):
+        # Failed / cancelled posts stay as history but do not block a new attempt; any live
+        # row (SCHEDULED, OVERDUE, PUBLISHED) or an in-flight schedule job still does.
+        live = [s for s in package_schedules(db, pkg) if s.status not in RESCHEDULABLE_STATES]
+        if _scheduling(db, pkg) or live:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 {"code": "ALREADY_SCHEDULED", "message": "This carousel is already scheduled."},

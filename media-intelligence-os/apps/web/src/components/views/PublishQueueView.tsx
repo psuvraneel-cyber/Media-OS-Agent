@@ -48,10 +48,12 @@ function ScheduleForm({
   item,
   brand,
   onDone,
+  rescheduling = false,
 }: {
   item: CarouselSummary;
   brand: string;
   onDone: () => void;
+  rescheduling?: boolean;
 }) {
   const [when, setWhen] = useState(defaultSlot());
   const [platforms, setPlatforms] = useState<Platform[]>([...PLATFORMS]);
@@ -106,14 +108,16 @@ function ScheduleForm({
           onClick={() => void submit()}
           className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
         >
-          <Send className="h-4 w-4" aria-hidden="true" /> Schedule
+          <Send className="h-4 w-4" aria-hidden="true" /> {rescheduling ? "Reschedule" : "Schedule"}
         </button>
       </div>
       <p className="text-[11px] text-slate-500">
         Times are in your local time. Postiz publishes at that time; images are uploaded to your
         GitHub Pages media site first. Daily cap: 2 posts per platform.
       </p>
-      {error ? <ErrorBanner title="Could not schedule" message={error} /> : null}
+      {error ? (
+        <ErrorBanner title={rescheduling ? "Could not reschedule" : "Could not schedule"} message={error} />
+      ) : null}
     </div>
   );
 }
@@ -166,7 +170,7 @@ function Row({ item, brand, onChanged }: { item: CarouselSummary; brand: string;
           The earlier post failed or was cancelled. Pick a new time to schedule it again.
         </p>
       ) : null}
-      {canSchedule ? <ScheduleForm item={item} brand={brand} onDone={onChanged} /> : null}
+      {canSchedule ? <ScheduleForm item={item} brand={brand} onDone={onChanged} rescheduling={rescheduling} /> : null}
     </div>
   );
 }

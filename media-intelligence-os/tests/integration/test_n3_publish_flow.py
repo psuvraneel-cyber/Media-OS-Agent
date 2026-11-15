@@ -12,30 +12,37 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
+from media_os_api.auth import create_redis_client, hash_password
 from media_os_api.carousel.brand_kit import NIMONTRON
 from media_os_api.carousel.qa import run_text_qa
 from media_os_api.carousel.schema import CarouselBrief, CarouselDraft
 from media_os_api.carousel.service import create_carousel_package
+from media_os_api.config import load_settings
 from media_os_api.content.taxonomy import HookType, Language
 from media_os_api.db import (
     Asset,
     AuditEvent,
+    AuthSession,
     BrandProfile,
     ChannelAccount,
     ContentPackage,
     ContentStateTransition,
     JobRun,
     OutboxEvent,
+    OwnerUser,
     PublishSchedule,
     create_db_engine,
     create_session_factory,
     session_scope,
 )
 from media_os_api.jobs.errors import PolicyRefusalError, RetryableTaskError
+from media_os_api.main import create_app
 from media_os_api.publish import service as svc
 from media_os_api.publish.media_host import HostedFile
 from media_os_api.publish.postiz import Integration
@@ -294,7 +301,9 @@ def test_request_validates_then_job_schedules_both_platforms(env: dict[str, Any]
 
 
 def test_daily_cap_refuses_second_post_same_day(env: dict[str, Any]) -> None:
-    f, when = env["factory"], _when()
+    # Midday in the brand's timezone, so "+1 hour" never crosses into the next local day.
+    f = env["factory"]
+    when = _when().astimezone(ZoneInfo("Asia/Kolkata")).replace(hour=12, minute=0)
     with session_scope(f) as db:
         pkg = db.get(ContentPackage, env["pid"])
         brand = db.get(BrandProfile, env["bid"])
@@ -610,3 +619,141 @@ def test_failed_post_retried_in_postiz_is_picked_up(env: dict[str, Any]) -> None
         )
         pkg = db.get(ContentPackage, env["pid"])
         assert pkg and pkg.status == "PUBLISHED"
+
+
+# ------------------------------------------------------------------ reschedule via the API
+
+OWNER = "n3-owner"
+PASSWORD = "N3-Strong-Test-Password!2026"
+SECRET = "n3-test-session-secret-0123456789abcdef0123456789abcdef0123"
+ORIGIN = "http://localhost:3000"
+
+
+@pytest.fixture
+def client(env: dict[str, Any]) -> Iterator[TestClient]:
+    redis_url = (os.environ.get("MEDIA_OS_TEST_REDIS_URL") or "").strip()
+    if not redis_url:
+        pytest.skip("MEDIA_OS_TEST_REDIS_URL not set.")
+    rc = create_redis_client(redis_url)
+    for key in rc.scan_iter("media_os:rl:login:*"):
+        rc.delete(key)
+    rc.close()
+    with session_scope(env["factory"]) as db:
+        db.execute(delete(AuthSession))
+        db.execute(delete(OwnerUser))
+    settings = load_settings(
+        {
+            "APP_ENV": "test",
+            "OWNER_USERNAME": OWNER,
+            "OWNER_PASSWORD_HASH": hash_password(PASSWORD),
+            "SESSION_SECRET": SECRET,
+            "COOKIE_SECURE": "false",
+            "CORS_ALLOWED_ORIGINS": ORIGIN,
+            "DATABASE_URL": _db_url(),
+            "REDIS_URL": redis_url,
+        }
+    )
+    with TestClient(create_app(settings)) as c:
+        r = c.post(
+            "/api/v1/auth/login",
+            json={"username": OWNER, "password": PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        assert r.status_code == 200
+        c.headers.update({"X-CSRF-Token": str(r.json()["csrf_token"]), "Origin": ORIGIN})
+        yield c
+
+
+def _api_schedule(c: TestClient, pid: uuid.UUID, when: datetime) -> Any:
+    return c.post(
+        f"/api/v1/content/carousels/{pid}/schedule?brand=brand-app-promo",
+        json={"scheduled_at": when.isoformat(), "platforms": ["INSTAGRAM", "FACEBOOK"]},
+    )
+
+
+def _run_job(env: dict[str, Any], when: datetime) -> dict[str, Any]:
+    with session_scope(env["factory"]) as db:
+        job = db.execute(
+            select(JobRun).where(
+                JobRun.task_name == svc.SCHEDULE_TASK,
+                JobRun.payload["scheduled_at"].astext == when.astimezone(UTC).isoformat(),
+            )
+        ).scalar_one()
+        out = svc.handle_schedule_carousel(db, job, clients=env["clients"])
+        job.status = "SUCCEEDED"  # what the job runner records after the handler returns
+        return out
+
+
+def test_failed_carousel_is_rescheduled_through_the_api(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    f, pid, when = env["factory"], env["pid"], _when()
+    detail_url = f"/api/v1/content/carousels/{pid}?brand=brand-app-promo"
+    assert _api_schedule(client, pid, when).status_code == 200
+    assert _run_job(env, when)["status"] == "SCHEDULED"
+    # A live schedule blocks a second schedule, exactly as before.
+    blocked = _api_schedule(client, pid, when + timedelta(days=1))
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "ALREADY_SCHEDULED"
+
+    # Meta refuses both posts (e.g. OAuthException 200): Postiz marks them ERROR.
+    _backdate(env, 60)
+    for p in env["postiz"].posts:
+        p["state"] = "ERROR"
+    _sync(env)
+    detail = client.get(detail_url).json()
+    assert detail["status"] == "FAILED_RETRYABLE" and detail["can_schedule"] is True
+    assert sorted(s["status"] for s in detail["schedules"]) == ["FAILED", "FAILED"]
+    with session_scope(f) as db:
+        old_keys = {r.idempotency_key for r in db.execute(select(PublishSchedule)).scalars()}
+        old_posts = {r.postiz_post_id for r in db.execute(select(PublishSchedule)).scalars()}
+
+    later = when + timedelta(days=1)
+    res = _api_schedule(client, pid, later)
+    assert res.status_code == 200, res.text
+    assert res.json()["scheduling"] is True
+    # The in-flight job blocks a double click before the worker has run.
+    assert _api_schedule(client, pid, later + timedelta(hours=1)).status_code == 409
+    out = _run_job(env, later)
+    assert out["status"] == "SCHEDULED" and out["platforms"] == ["FACEBOOK", "INSTAGRAM"]
+    assert len(env["postiz"].created) == 4  # two new Postiz posts
+
+    with session_scope(f) as db:
+        rows = list(db.execute(select(PublishSchedule)).scalars())
+        assert sorted((r.platform, r.status) for r in rows) == [
+            ("FACEBOOK", "FAILED"),
+            ("FACEBOOK", "SCHEDULED"),
+            ("INSTAGRAM", "FAILED"),
+            ("INSTAGRAM", "SCHEDULED"),
+        ]
+        new = [r for r in rows if r.status == "SCHEDULED"]
+        assert {r.idempotency_key for r in new}.isdisjoint(old_keys)
+        assert {r.postiz_post_id for r in new}.isdisjoint(old_posts)
+        assert all(r.scheduled_at == later for r in new)
+        moves = [
+            (t.from_status, t.to_status)
+            for t in db.execute(
+                select(ContentStateTransition)
+                .where(ContentStateTransition.content_package_id == pid)
+                .order_by(ContentStateTransition.created_at)
+            ).scalars()
+        ]
+        assert moves[-2:] == [("SCHEDULED", "FAILED_RETRYABLE"), ("FAILED_RETRYABLE", "SCHEDULED")]
+        requested = list(
+            db.execute(
+                select(AuditEvent)
+                .where(AuditEvent.action == "CAROUSEL_SCHEDULE_REQUESTED")
+                .order_by(AuditEvent.timestamp)
+            ).scalars()
+        )
+        assert [a.event_metadata.get("reschedule") for a in requested] == [False, True]
+        scheduled = db.execute(
+            select(AuditEvent).where(AuditEvent.action == "CAROUSEL_SCHEDULED")
+        ).all()
+        assert len(scheduled) == 2
+
+    # Now live again: further schedule attempts are refused while it is SCHEDULED.
+    again = _api_schedule(client, pid, later + timedelta(days=1))
+    assert again.status_code == 409 and again.json()["error"]["code"] == "ALREADY_SCHEDULED"
+    detail = client.get(detail_url).json()
+    assert detail["status"] == "SCHEDULED" and detail["can_schedule"] is False
