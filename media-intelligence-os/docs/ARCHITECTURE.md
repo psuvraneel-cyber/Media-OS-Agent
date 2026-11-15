@@ -63,8 +63,8 @@ flowchart LR
 | **Database & Migrations** | `apps/api/src/media_os_api/db/`, `apps/api/migrations/` | PostgreSQL 17 Alpine + Alembic (`0001_initial_phase4_schema`, `0002_seed_initial_brands`, `0003_domain_integrity_hardening`, `0004_add_brand_topic_assignments`) | **Active in Phase 4 / Pre-Phase 5** |
 | **Broker / Cache** | `infra/docker/compose.app.yml` | Redis 7.2 (`requirepass`, `appendonly`, `noeviction`) | **Active in Phase 4** |
 | **Durable Job Worker & Dispatcher** | `apps/api/src/media_os_api/jobs/` | Celery (`concurrency=1`, JSON-only) + `FOR UPDATE SKIP LOCKED` Outbox & DST-aware Scheduler (`media-os-scheduler`) | **Active in Phase 4** |
-| **Research Ingestion** | `apps/api/src/media_os_api/research/` (`workers/research/` entry point) | Celery `research` queue on `media-os-worker`; httpx + SSRF policy, Redis limiter, defusedxml; registry/checkpoints in PostgreSQL | **Active in Phase 5** (sources OFF until enabled) |
-| **Creative Worker** | `workers/creative/` | Python 3.12 + Celery (`concurrency=1`), HTML/CSS/SVG/Pillow/Playwright, FFmpeg | Phase 7 |
+| **Research Ingestion** | `apps/api/src/media_os_api/research/` | Celery `research` queue on `media-os-worker`; httpx + SSRF policy, Redis limiter, defusedxml; registry/checkpoints in PostgreSQL | **Active in Phase 5** (sources OFF until enabled) |
+| **Creative Worker** | `apps/api/src/media_os_api/carousel/` (runs in the `media-os-creative` container) | Python 3.12 + Celery (`concurrency=1`), headless Chromium (Playwright); FFmpeg planned | **Active (N2 carousels)**; video Phase 7 |
 | **MCP Server** | `services/mcp/` | Controlled Python MCP server calling Backend API | Phase 10 |
 | **AI & Voice Layer** | `apps/api/` adapter | Centralized Gemini Developer API + Gemini TTS client | Phase 7 |
 
@@ -107,7 +107,7 @@ All ports verified against live host listeners, `C:\Media OS Agent\postiz-runtim
 1. **Discovery (Phase 5, implemented):** The PostgreSQL-backed scheduler enqueues per-source fetch jobs (JobRun + OutboxEvent) on the `research` queue; a fetch runs only when the source is `EXPERIMENTAL`/`ENABLED`, owner-approved and the worker kill switch is on (`OFF`/`BLOCKED` sources cannot run). Raw payloads are sanitized as untrusted text, normalized, and stored in PostgreSQL with canonical source URLs and hashes.
 2. **Deduplication & Ranking:** Keyword/semantic similarity + URL canonicalization reject near-duplicates against previously produced or queued topics. Candidate stories are scored by source weight, freshness, and bounded historical category performance.
 3. **Verification & Editorial Selection:** High-ranking candidates enter deep primary-source inspection (e.g., official paper/release/repo) to produce a structured `ResearchPacket` with cited claims.
-4. **Generation & Rendering (`workers/creative`, concurrency = 1):**
+4. **Generation & Rendering (`media-os-creative` container, `creative` queue, concurrency = 1):**
    - Calls centralized Gemini adapter for structured script/slide JSON (subject to daily token/budget caps and circuit breaker).
    - Renders Instagram carousel PNGs via HTML/CSS/SVG + Playwright/Pillow.
    - Generates voiceover via Gemini TTS and composites `9:16` Shorts with FFmpeg.
@@ -126,5 +126,5 @@ All ports verified against live host listeners, `C:\Media OS Agent\postiz-runtim
 ## 6. Hardware Constraint Strategy (`i5-13420H` / `16 GB RAM`)
 
 - **Remote Inference Only:** All LLM and TTS workloads run remotely on Gemini Developer API (no local Ollama or local Whisper models unless strictly required and profiled later).
-- **Single Creative Concurrency:** `workers/creative` processes 1 heavy Playwright/FFmpeg job at a time (`CELERY_CONCURRENCY=1`) to avoid OOM spikes or thermal throttling.
+- **Single Creative Concurrency:** The `media-os-creative` container processes 1 heavy Playwright/FFmpeg job at a time (`CELERY_CONCURRENCY=1`) to avoid OOM spikes or thermal throttling.
 - **Measured Docker Footprint:** Docker Desktop allocates `~7.61 GiB` (`8,166,977,536` bytes) to the Linux engine. Phase 2 verified the 8 running `postiz-runtime` containers (`spotlight` disabled under `debug` profile) stabilize at `~2.8 GiB` WSL used (`~1.23–1.51 GiB` for `postiz-runtime-app` idle, `~2.11 GiB` peak startup, `~4.4–7.0 GB` host `vmmemWSL`). See [`docs/POSTIZ_RESOURCE_PROFILE.md`](./POSTIZ_RESOURCE_PROFILE.md).

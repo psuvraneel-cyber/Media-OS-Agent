@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from media_os_api.carousel.brand_kit import BrandKit
 from media_os_api.carousel.schema import CarouselBrief, CarouselDraft, SlideRole, plain
+from media_os_api.content.caption import CAPTION_MAX, full_caption
 from media_os_api.content.taxonomy import CallToAction, Language
 
 QA_VERSION = "text-v2"
@@ -159,6 +160,18 @@ def _cta(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> Check:
     return _check("call_to_action", problems)
 
 
+def _caption_length(draft: CarouselDraft) -> Check:
+    # Same composition the publisher sends: Bengali, English, then hashtags.
+    parts = [p.strip() for p in (draft.caption_bn, draft.caption_en) if p and p.strip()]
+    length = len(full_caption("\n\n".join(parts), draft.hashtags))
+    if length > CAPTION_MAX:
+        return _check(
+            "caption_length",
+            [f"caption with hashtags is {length} characters; Instagram allows {CAPTION_MAX}"],
+        )
+    return _check("caption_length", [])
+
+
 def _hashtags(draft: CarouselDraft) -> Check:
     bad = [h for h in draft.hashtags if not _HASHTAG.match(h)]
     dupes = len(draft.hashtags) != len({h.lower() for h in draft.hashtags})
@@ -248,6 +261,7 @@ def run_text_qa(kit: BrandKit, brief: CarouselBrief, draft: CarouselDraft) -> Qa
         _pricing(draft),
         _cta(kit, brief, draft),
         _hashtags(draft),
+        _caption_length(draft),
         *_slide_length(draft),
         _stickers(kit, draft),
         _design_match(kit, draft),

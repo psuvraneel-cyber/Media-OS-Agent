@@ -48,7 +48,7 @@ function QueueRow({
       onClick={onSelect}
       aria-pressed={selected}
       className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition ${
-        selected ? "border-amber-500/60 bg-amber-500/10" : "border-slate-800 bg-[#090b10] hover:border-slate-600"
+        selected ? "border-amber-500/60 bg-amber-500/10" : "border-slate-800 bg-[var(--surface-inset)] hover:border-slate-600"
       }`}
     >
       {item.thumbnail_asset_id ? (
@@ -162,7 +162,7 @@ function DetailPanel({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Caption</p>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-[#090b10] p-3 text-xs text-slate-200">
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-3 text-xs text-slate-200">
             {detail.caption}
           </pre>
           <p className="text-xs text-slate-400">{detail.hashtags.join(" ")}</p>
@@ -190,7 +190,7 @@ function DetailPanel({
         </div>
       </div>
 
-      <div className="space-y-2 rounded-lg border border-slate-800 bg-[#090b10] p-4">
+      <div className="space-y-2 rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4">
         <label htmlFor="decision-reason" className="text-xs font-semibold text-slate-300">
           Note (optional; required context for a rejection helps the next draft)
         </label>
@@ -199,7 +199,7 @@ function DetailPanel({
           value={reason}
           onChange={(e) => setReason(e.target.value.slice(0, 500))}
           rows={2}
-          className="w-full rounded-md border border-slate-700 bg-[#05070a] p-2 text-sm text-slate-100"
+          className="w-full rounded-md border border-slate-700 bg-[var(--surface-canvas)] p-2 text-sm text-slate-100"
         />
         {error ? <ErrorBanner title="Decision failed" message={error} /> : null}
         <div className="flex flex-wrap gap-2">

@@ -2,11 +2,8 @@
 
 import React, { useState } from "react";
 import {
-  Bot,
-  CalendarClock,
   Clapperboard,
   FolderKanban,
-  LineChart,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -55,7 +52,7 @@ export function StudioView() {
           })}
         </div>
 
-        <div className="rounded-lg border border-slate-800 bg-[#090b10] p-4 text-xs">
+        <div className="rounded-lg border border-white/[0.05] bg-[var(--surface-inset)] p-4 text-xs">
           <p className="font-semibold text-slate-200">{currentTab.label}</p>
           <p className="mt-1 text-slate-400">{currentTab.summary}</p>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -108,102 +105,35 @@ export function AssetsView() {
   );
 }
 
-export function CalendarView() {
-  const { activeBrand } = useBrandContext();
-  return (
-    <div className="space-y-6">
-      <SurfaceCard
-        title={`Publishing Cadence — ${activeBrand.name}`}
-        subtitle="Multi-brand schedule separation across Instagram Professional and YouTube targets."
-        badge={<DisabledActionButton label="Queue in Postiz" reason="Phase 8" />}
-      >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {["Instagram Professional Slot", "YouTube Channel Slot"].map((slot) => (
-            <div
-              key={slot}
-              className="rounded-lg border border-slate-800 bg-[#090b10] p-4 text-xs"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-slate-200">{slot}</span>
-                <Badge tone="disabled">Not Connected</Badge>
-              </div>
-              <p className="mt-1.5 text-slate-400">
-                Brand Scope: <span className="text-slate-200">{activeBrand.name}</span>
-              </p>
-              <p className="mt-1 text-slate-500">Cadence unlocked in Phase 8 after Postiz channel binding.</p>
-            </div>
-          ))}
-        </div>
-      </SurfaceCard>
-
-      <EmptyState
-        icon={<CalendarClock className="h-5 w-5" aria-hidden="true" />}
-        title={`No scheduled items for ${activeBrand.name}`}
-        description="Automated scheduling and Postiz write operations are disabled in Phase 4."
-        phaseBadge="Not Implemented — Phase 8"
-        brandLabel={activeBrand.name}
-      />
-    </div>
-  );
-}
-
-export function AnalyticsView() {
-  const { activeBrand } = useBrandContext();
-  return (
-    <div className="space-y-6">
-      <SurfaceCard
-        title={`Performance Telemetry — ${activeBrand.name}`}
-        subtitle="Postiz analytics ingestion and content learning signals remain disabled in Phase 4."
-        badge={<Badge tone="disabled">No Fake Charts</Badge>}
-      >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {["Reach", "Engagement Rate", "Saves / Shares", "Short Completion"].map((metric) => (
-            <div key={metric} className="rounded-lg border border-slate-800 bg-[#090b10] p-4">
-              <span className="text-xs text-slate-400">{metric}</span>
-              <p className="mt-2 font-mono text-2xl font-semibold text-slate-500">--</p>
-              <p className="mt-1 text-[11px] text-slate-500">Phase 9 target</p>
-            </div>
-          ))}
-        </div>
-      </SurfaceCard>
-
-      <EmptyState
-        icon={<LineChart className="h-5 w-5" aria-hidden="true" />}
-        title={`No performance records collected for ${activeBrand.name}`}
-        description="Read-only Postiz analytics ingestion and feedback learning loops are deferred to Phase 9."
-        phaseBadge="Not Implemented — Phase 9"
-        brandLabel={activeBrand.name}
-      />
-    </div>
-  );
-}
+export { CalendarView } from "@/components/views/CalendarView";
+export { AnalyticsView } from "@/components/views/AnalyticsView";
 
 const WORKER_SPEC = [
-  { name: "FastAPI Control Plane (media-os-api)", status: "Running (Phase 4)", tone: "live" as const, note: "Serves health, auth, CSRF, PostgreSQL brands & workflow APIs on 127.0.0.1:8000." },
-  { name: "Next.js Operator UI (media-os-web)", status: "Running (Phase 4)", tone: "live" as const, note: "Standalone App Router BFF + UI on 127.0.0.1:3000." },
-  { name: "Celery Worker (media-os-worker)", status: "Running (Phase 4)", tone: "live" as const, note: "JSON-serialized durable JobRun executor (concurrency=1) for internal control/maintenance tasks." },
-  { name: "Persistent Scheduler & Outbox (media-os-scheduler)", status: "Running (Phase 4)", tone: "live" as const, note: "PostgreSQL-backed Asia/Kolkata scheduler, stale-lease sweeper & transactional outbox dispatcher." },
-  { name: "Research Worker (workers/research)", status: "Deferred — Phase 5", tone: "disabled" as const, note: "Source connectors & normalization not yet started." },
-  { name: "Creative & FFmpeg Worker (workers/creative)", status: "Deferred — Phase 7", tone: "disabled" as const, note: "Target Celery concurrency=1 under 16 GB host memory budget." },
-  { name: "Custom MCP Server (services/mcp)", status: "Deferred — Phase 10", tone: "disabled" as const, note: "Custom Media OS MCP tool surface arrives in Phase 10." },
+  { name: "API control plane (media-os-api)", status: "Running", tone: "live" as const, note: "Health, auth, CSRF, brands, content review, publishing and analytics APIs on 127.0.0.1:8000." },
+  { name: "Operator UI (media-os-web)", status: "Running", tone: "live" as const, note: "Next.js App Router BFF + UI on 127.0.0.1:3100." },
+  { name: "Worker (media-os-worker)", status: "Running", tone: "live" as const, note: "Durable JobRun executor for control, research, publishing and analytics-sync queues. Holds AI and Postiz keys." },
+  { name: "Scheduler & outbox (media-os-scheduler)", status: "Running", tone: "live" as const, note: "PostgreSQL-backed Asia/Kolkata scheduler, stale-lease sweeper and transactional outbox dispatcher." },
+  { name: "Creative renderer (media-os-creative)", status: "Running", tone: "live" as const, note: "Headless Chromium on the creative queue renders carousel slides. No AI or publishing keys." },
+  { name: "Research ingestion", status: "Built · sources off", tone: "disabled" as const, note: "Five verified fetchers; schedules disabled until the owner enables them. Reddit is blocked by policy." },
+  { name: "Custom MCP server (services/mcp)", status: "Planned", tone: "disabled" as const, note: "Media OS MCP tool surface is not built yet." },
 ];
 
 export function AgentsView() {
   return (
     <div className="space-y-6">
       <SurfaceCard
-        title="Agent & Worker Process Topology"
-        subtitle="Honest process status under the 16 GB Windows + WSL2 Docker memory ceiling."
-        badge={<Badge tone="live">Phase 4 Durable Jobs Active</Badge>}
+        title="Agent & worker processes"
+        subtitle="Process roles under the 16 GB Windows + WSL2 Docker memory ceiling."
+        badge={<Badge tone="live" dot>Durable jobs active</Badge>}
       >
         <div className="space-y-2.5">
           {WORKER_SPEC.map((worker) => (
             <div
               key={worker.name}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-[#090b10] px-4 py-3 text-xs"
+              className="surface-interactive flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/[0.05] bg-[var(--surface-inset)] px-4 py-3 text-xs"
             >
-              <div>
-                <p className="font-semibold text-slate-200">{worker.name}</p>
+              <div className="min-w-0">
+                <p className="font-medium text-slate-200">{worker.name}</p>
                 <p className="mt-0.5 text-slate-400">{worker.note}</p>
               </div>
               <Badge tone={worker.tone}>{worker.status}</Badge>
@@ -211,13 +141,6 @@ export function AgentsView() {
           ))}
         </div>
       </SurfaceCard>
-
-      <EmptyState
-        icon={<Bot className="h-5 w-5" aria-hidden="true" />}
-        title="Domain Research & Creative Workers Deferred"
-        description="Core durable job execution, transactional outbox, and persistent scheduling are live in Phase 4; research ingestion (Phase 5) and creative/FFmpeg pipelines (Phase 7) remain unimplemented."
-        phaseBadge="Phase 4 Infrastructure Live • Domain Workers Phase 5-10"
-      />
     </div>
   );
 }

@@ -1,22 +1,132 @@
 @import "tailwindcss";
 
+/*
+ * Media OS design system.
+ *
+ * One source of truth for colour, type, spacing, radius, depth and motion. Components use the
+ * semantic tokens below (via `var(--…)` or the Tailwind theme names they feed). The Tailwind
+ * `slate`, `sky` and `emerald` scales are re-pointed at this palette so every existing page picks up
+ * the same charcoal / navy / cyan system without per-file colour edits.
+ *
+ * Spacing follows Tailwind's 4px grid. Ordinary transitions run 150–220ms; chart entrances up to
+ * 600ms. `prefers-reduced-motion` turns all motion off.
+ */
+
+@theme {
+  /* Neutral charcoal scale (replaces Tailwind slate) */
+  --color-slate-50: #f6f7f9;
+  --color-slate-100: #eceef2;
+  --color-slate-200: #d7dae1;
+  --color-slate-300: #b6bbc6;
+  --color-slate-400: #9097a5;
+  --color-slate-500: #6c7282;
+  --color-slate-600: #4a5060;
+  --color-slate-700: #2a2f3a;
+  --color-slate-800: #1b1f28;
+  --color-slate-900: #12151c;
+  --color-slate-950: #0a0c10;
+
+  /* Electric cyan accent (replaces Tailwind sky) */
+  --color-sky-100: #cffafe;
+  --color-sky-200: #a5f3fc;
+  --color-sky-300: #67e8f9;
+  --color-sky-400: #22d3ee;
+  --color-sky-500: #06b6d4;
+  --color-sky-600: #0891b2;
+  --color-sky-700: #0e7490;
+
+  /* Restrained teal-leaning success (replaces Tailwind emerald) */
+  --color-emerald-200: #a7f3e4;
+  --color-emerald-300: #5eead4;
+  --color-emerald-400: #2dd4bf;
+  --color-emerald-500: #14b8a6;
+  --color-emerald-600: #0d9488;
+
+  --font-sans:
+    "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto,
+    "Noto Sans Bengali", "Nirmala UI", "Hind Siliguri", "Vrinda", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --animate-fade-in: fade-in 200ms cubic-bezier(0.2, 0, 0, 1) both;
+  /* `backwards`, not `both`: a retained transform would turn <main> into the containing block
+     for position:fixed descendants (dialogs, drawers). */
+  --animate-fade-up: fade-up 220ms cubic-bezier(0.2, 0, 0, 1) backwards;
+  --animate-scale-in: scale-in 160ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-slide-in-left: slide-in-left 220ms cubic-bezier(0.2, 0, 0, 1) both;
+  --animate-slide-in-right: slide-in-right 240ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
 :root {
   color-scheme: dark;
-  --surface-canvas: #090b10;
-  --surface-sidebar: #0d1118;
-  --surface-panel: #121824;
-  --surface-elevated: #172030;
-  --border-subtle: rgba(148, 163, 184, 0.16);
-  --border-strong: rgba(56, 189, 248, 0.35);
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent-cyan: #38bdf8;
-  --status-emerald: #10b981;
-  --status-amber: #f59e0b;
-  --status-rose: #f43f5e;
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Surfaces: near-black canvas → charcoal panels → navy accents */
+  --surface-canvas: #08090c;
+  --surface-sidebar: #0b0d11;
+  --surface-panel: #0f1217;
+  --surface-elevated: #151922;
+  --surface-inset: #0b0d12;
+  --surface-navy: #0d1522;
+  --surface-hover: rgba(255, 255, 255, 0.035);
+  --surface-active: rgba(34, 211, 238, 0.08);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --border-accent: rgba(34, 211, 238, 0.35);
+
+  /* Text */
+  --text-primary: #eceef2;
+  --text-secondary: #a3a9b6;
+  --text-muted: #6c7282;
+  --text-faint: #4a5060;
+
+  /* Semantic colour */
+  --accent: #22d3ee;
+  --accent-strong: #67e8f9;
+  --accent-soft: rgba(34, 211, 238, 0.12);
+  --success: #2dd4bf;
+  --success-soft: rgba(45, 212, 191, 0.12);
+  --warning: #fbbf24;
+  --warning-soft: rgba(251, 191, 36, 0.12);
+  --danger: #fb7185;
+  --danger-soft: rgba(251, 113, 133, 0.12);
+  --info: #818cf8;
+
+  /* Data visualisation (ordered, colour-blind tolerant) */
+  --chart-1: #22d3ee;
+  --chart-2: #818cf8;
+  --chart-3: #2dd4bf;
+  --chart-4: #fbbf24;
+  --chart-5: #f472b6;
+  --chart-grid: rgba(255, 255, 255, 0.05);
+  --chart-axis: #6c7282;
+
+  /* Platform identity (muted, used only as small markers) */
+  --platform-instagram: #e879a6;
+  --platform-facebook: #6b8afd;
+  --platform-youtube: #f87171;
+
+  /* Radius & depth */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-sm: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 24px 48px -16px rgba(0, 0, 0, 0.7);
+
+  /* Layout */
+  --sidebar-width: 15rem;
+  --header-height: 3.5rem;
+  --content-max: 88rem;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+
+  --font-sans-stack: var(--font-sans);
 }
 
 * {
@@ -28,9 +138,19 @@ body {
   background-color: var(--surface-canvas);
   color: var(--text-primary);
   font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01", "tnum" 0;
   min-height: 100%;
   margin: 0;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Bengali script needs taller line boxes; never clip conjuncts or matras. */
+:lang(bn),
+.bn {
+  line-height: 1.7;
+  font-family: "Noto Sans Bengali", "Nirmala UI", "Hind Siliguri", "Vrinda", var(--font-sans);
 }
 
 code,
@@ -39,24 +159,177 @@ pre,
   font-family: var(--font-mono);
 }
 
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
 :focus-visible {
-  outline: 2px solid var(--accent-cyan);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: rgba(34, 211, 238, 0.28);
+}
+
+/* Thin, quiet scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
 .skip-link {
   position: absolute;
   left: -9999px;
   top: 0;
-  z-index: 50;
-  background: #0ea5e9;
-  color: #090b10;
+  z-index: 60;
+  background: var(--accent);
+  color: #05080c;
   font-weight: 600;
   padding: 0.65rem 1rem;
-  border-radius: 0.375rem;
+  border-radius: var(--radius-md);
 }
 
 .skip-link:focus {
   left: 1rem;
   top: 1rem;
+}
+
+/* ---------------------------------------------------------------- reusable surface classes */
+
+.surface {
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.surface-interactive {
+  transition:
+    border-color var(--duration-base) var(--ease-out),
+    background-color var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+
+.surface-interactive:hover {
+  border-color: var(--border-default);
+  background-color: #11151b;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-md);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+.chart-line {
+  stroke-dasharray: var(--path-length, 2000);
+  stroke-dashoffset: 0;
+  animation: draw-line 600ms var(--ease-out) both;
+}
+
+.chart-area {
+  animation: fade-in 500ms var(--ease-out) both;
+  transition: d 300ms var(--ease-out);
+}
+
+.bar-fill {
+  transform-origin: left center;
+  animation: grow-x 450ms var(--ease-out) both;
+  transition: width 300ms var(--ease-out);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes draw-line {
+  from {
+    stroke-dashoffset: var(--path-length, 2000);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes grow-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -26,11 +26,12 @@ const APPROVED: CarouselSummary = {
   hook: "বিয়ের কার্ডে ভুল বানান?", language: "BN_EN", pillar: "wedding_season",
   hook_type: "PAIN_POINT", slide_count: 6, qa_passed: true, qa_warnings: 0, score_total: 79,
   score_label: "Heuristic v0", thumbnail_asset_id: "a1", created_at: "2026-11-14T10:00:00Z",
-  schedules: [], scheduling: false,
+  schedules: [], scheduling: false, can_schedule: true,
 };
 
 const SCHEDULED: CarouselSummary = {
   ...APPROVED, id: "c2", status: "PUBLISHED", hook: "Did you spell everyone's name right?",
+  can_schedule: false,
   schedules: [{ platform: "INSTAGRAM", status: "PUBLISHED", scheduled_at: "2026-11-18T13:30:00Z",
                 timezone: "Asia/Kolkata", post_url: "https://www.instagram.com/p/abc/" }],
 };
@@ -41,7 +42,25 @@ function json(body: unknown, status = 200): Response {
 
 afterEach(() => vi.restoreAllMocks());
 
+const CANCELLED: CarouselSummary = {
+  ...APPROVED, id: "c3", status: "FAILED_RETRYABLE", hook: "Cancelled in Postiz",
+  can_schedule: true,
+  schedules: [{ platform: "INSTAGRAM", status: "CANCELLED", scheduled_at: "2026-11-16T13:30:00Z",
+                timezone: "Asia/Kolkata", post_url: null }],
+};
+
 describe("PublishQueueView", () => {
+  it("offers to reschedule a carousel whose earlier post was cancelled", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => json({ items: [CANCELLED] }));
+    render(
+      <BrandProvider brands={[BRAND]} initialBrandId={APP}>
+        <PublishQueueView />
+      </BrandProvider>,
+    );
+    expect(await screen.findByText(/earlier post failed or was cancelled/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Schedule/ })).toBeInTheDocument();
+  });
+
   it("schedules an approved carousel to the chosen platforms and shows published links", async () => {
     const calls: { url: string; method: string; body?: string }[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {

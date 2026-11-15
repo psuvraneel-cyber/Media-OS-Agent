@@ -46,7 +46,7 @@ export function IntegrationsView({
         }
       >
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
-          <div className="rounded-lg border border-slate-800 bg-[#090b10] p-4">
+          <div className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-slate-200">Application PostgreSQL &amp; Redis</span>
               <Badge tone={systemStatus?.persistent_storage ? "live" : "blocked"}>
@@ -59,7 +59,7 @@ export function IntegrationsView({
             </p>
           </div>
 
-          <div className="rounded-lg border border-slate-800 bg-[#090b10] p-4">
+          <div className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-slate-200">Postiz Standalone (v2.25.3)</span>
               <Badge tone={systemStatus?.postiz.status === "reachable" ? "live" : "blocked"}>
@@ -74,7 +74,7 @@ export function IntegrationsView({
             </p>
           </div>
 
-          <div className="rounded-lg border border-slate-800 bg-[#090b10] p-4">
+          <div className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-slate-200">Gemini Developer API &amp; R2 Media</span>
               <Badge tone="disabled">Phase 7 / Owner Approved</Badge>
@@ -96,7 +96,7 @@ export function IntegrationsView({
             {brandChannels.map((ch) => (
               <div
                 key={ch.channel_id}
-                className="rounded-lg border border-slate-800 bg-[#090b10] p-4 text-xs"
+                className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4 text-xs"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-slate-100">{ch.display_label}</span>

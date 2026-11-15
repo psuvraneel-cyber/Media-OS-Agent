@@ -664,6 +664,10 @@ class PublishSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "platform IN ('INSTAGRAM', 'FACEBOOK', 'YOUTUBE')",
             name="publish_schedule_platform_valid",
         ),
+        CheckConstraint(
+            "metrics_status IS NULL OR metrics_status IN ('OK', 'NO_DATA', 'MISSING', 'ERROR')",
+            name="publish_schedule_metrics_status_valid",
+        ),
         Index("ix_publish_schedules_brand_status", "brand_profile_id", "status"),
         Index("ix_publish_schedules_scheduled_at", "scheduled_at"),
     )
@@ -683,10 +687,24 @@ class PublishSchedule(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="DRAFT")
     idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Views analytics sync bookkeeping (migration 0008). Status values:
+    # OK (metrics stored), NO_DATA (platform returned nothing), MISSING (post removed on the
+    # platform), ERROR (last attempt failed; detail holds the code).
+    metrics_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    metrics_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    metrics_detail: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class MetricsSnapshot(UUIDPrimaryKeyMixin, Base):
-    """Per-brand, per-channel metrics record with explicit API/YouTube retention policies."""
+    """DEPRECATED (migration 0008): unused; do not write new code against it.
+
+    Post analytics live in `PostMetricObservation` (which also supports Facebook). This table is
+    kept only because its retention columns and `db/retention.py` encode the YouTube API
+    data-refresh policy (30 days), which must be carried over to post analytics when YouTube is
+    connected (roadmap N6). Drop it then.
+    """
 
     __tablename__ = "metrics_snapshots"
     __table_args__ = (
@@ -745,6 +763,64 @@ class MetricsSnapshot(UUIDPrimaryKeyMixin, Base):
         nullable=False,
         default=utc_now,
         server_default=func.now(),
+    )
+
+
+class PostMetricObservation(UUIDPrimaryKeyMixin, Base):
+    """One timestamped platform-reported value for one published post (migration 0008).
+
+    Values are stored exactly as the platform reports them (lifetime cumulative for Meta post
+    insights); increments are derived at read time by `media_os_api.analytics.engine`, never by
+    summing observations. One row per (schedule, metric, observed hour) keeps ingestion idempotent.
+    """
+
+    __tablename__ = "post_metric_observations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["channel_account_id", "brand_profile_id"],
+            ["channel_accounts.id", "channel_accounts.brand_profile_id"],
+            ondelete="RESTRICT",
+            name="fk_post_metric_obs_channel_brand",
+        ),
+        ForeignKeyConstraint(
+            ["content_package_id", "brand_profile_id"],
+            ["content_packages.id", "content_packages.brand_profile_id"],
+            ondelete="RESTRICT",
+            name="fk_post_metric_obs_content_brand",
+        ),
+        UniqueConstraint(
+            "publish_schedule_id",
+            "metric_key",
+            "observed_at",
+            name="uq_post_metric_obs_schedule_metric_time",
+        ),
+        CheckConstraint(
+            "platform IN ('INSTAGRAM', 'FACEBOOK', 'YOUTUBE')", name="post_metric_platform_valid"
+        ),
+        CheckConstraint("value_kind IN ('CUMULATIVE', 'PERIOD')", name="post_metric_kind_valid"),
+        CheckConstraint("value >= 0", name="post_metric_value_non_negative"),
+        Index("ix_post_metric_obs_brand_observed", "brand_profile_id", "observed_at"),
+    )
+
+    brand_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("brand_profiles.id", ondelete="RESTRICT"), nullable=False
+    )
+    channel_account_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    content_package_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    publish_schedule_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("publish_schedules.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    metric_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="CUMULATIVE")
+    value: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_label: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, server_default=func.now()
     )
 
 

@@ -19,6 +19,7 @@ const LANGUAGE_LABEL: Record<string, string> = { BN: "Bengali", EN: "English", B
 function statusTone(status: string): BadgeTone {
   if (status === "PUBLISHED") return "live";
   if (status === "SCHEDULED") return "info";
+  if (status === "OVERDUE") return "prototype";
   if (status === "FAILED" || status === "CANCELLED") return "blocked";
   return "prototype";
 }
@@ -80,7 +81,7 @@ function ScheduleForm({
   };
 
   return (
-    <div className="mt-3 space-y-2 rounded-lg border border-slate-800 bg-[#05070a] p-3">
+    <div className="mt-3 space-y-2 rounded-lg border border-slate-800 bg-[var(--surface-canvas)] p-3">
       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
         <label className="flex items-center gap-2">
           <CalendarClock className="h-4 w-4" aria-hidden="true" />
@@ -90,7 +91,7 @@ function ScheduleForm({
             aria-label="Post time"
             value={when}
             onChange={(e) => setWhen(e.target.value)}
-            className="rounded-md border border-slate-700 bg-[#0b0e14] px-2 py-1 text-slate-100"
+            className="rounded-md border border-slate-700 bg-[var(--surface-inset)] px-2 py-1 text-slate-100"
           />
         </label>
         {PLATFORMS.map((p) => (
@@ -121,9 +122,11 @@ function Row({ item, brand, onChanged }: { item: CarouselSummary; brand: string;
   const thumb = item.thumbnail_asset_id
     ? `/api/v1/content/assets/${encodeURIComponent(item.thumbnail_asset_id)}/file?brand=${encodeURIComponent(brand)}`
     : null;
-  const canSchedule = item.status === "QA_PASSED" && !item.scheduling && item.schedules.length === 0;
+  // The API decides (QA-passed, or every earlier platform post failed or was cancelled).
+  const canSchedule = item.can_schedule && !item.scheduling;
+  const rescheduling = canSchedule && item.schedules.length > 0;
   return (
-    <div className="rounded-lg border border-slate-800 bg-[#090b10] p-3">
+    <div className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-3">
       <div className="flex items-start gap-3">
         {thumb ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -143,7 +146,7 @@ function Row({ item, brand, onChanged }: { item: CarouselSummary; brand: string;
           {item.schedules.length > 0 ? (
             <ul className="mt-2 space-y-1 text-xs text-slate-300">
               {item.schedules.map((s) => (
-                <li key={s.platform} className="flex flex-wrap items-center gap-2">
+                <li key={`${s.platform}-${s.scheduled_at}`} className="flex flex-wrap items-center gap-2">
                   <Badge tone={statusTone(s.status)}>{s.status}</Badge>
                   <span>{s.platform === "INSTAGRAM" ? "Instagram" : "Facebook"}</span>
                   <span className="text-slate-500">{fmt(s.scheduled_at)}</span>
@@ -158,6 +161,11 @@ function Row({ item, brand, onChanged }: { item: CarouselSummary; brand: string;
           ) : null}
         </div>
       </div>
+      {rescheduling ? (
+        <p className="mt-3 text-xs text-amber-300/90">
+          The earlier post failed or was cancelled. Pick a new time to schedule it again.
+        </p>
+      ) : null}
       {canSchedule ? <ScheduleForm item={item} brand={brand} onDone={onChanged} /> : null}
     </div>
   );

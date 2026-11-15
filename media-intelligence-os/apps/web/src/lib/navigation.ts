@@ -1,4 +1,4 @@
-export type NavGroupId = "operations" | "production" | "intelligence";
+export type NavGroupId = "intelligence" | "production" | "performance" | "system";
 
 export interface NavRouteItem {
   id: string;
@@ -22,10 +22,13 @@ export interface NavRouteItem {
     | "terminal";
 }
 
+// Grouped by what the owner is doing, not by delivery phase. Phase stays in route metadata and
+// appears only as a quiet label in the page header.
 export const NAV_GROUPS: ReadonlyArray<{ id: NavGroupId; label: string }> = [
-  { id: "operations", label: "Intelligence" },
-  { id: "production", label: "Production" },
-  { id: "intelligence", label: "System & Ops" },
+  { id: "intelligence", label: "Intelligence" },
+  { id: "production", label: "Content production" },
+  { id: "performance", label: "Performance" },
+  { id: "system", label: "System" },
 ];
 
 export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
@@ -33,9 +36,9 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     id: "dashboard",
     href: "/dashboard",
     label: "Overview",
-    shortDesc: "Control plane status, phase readiness & brand workspace summary",
-    group: "operations",
-    targetPhase: "Phase 4 Active",
+    shortDesc: "Health, audience attention and pipeline status for the selected brand",
+    group: "intelligence",
+    targetPhase: "Live",
     iconName: "layout-dashboard",
   },
   {
@@ -43,8 +46,8 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     href: "/research",
     label: "Research",
     shortDesc: "Approved source registry & topic discovery queue",
-    group: "operations",
-    targetPhase: "Phase 5 Target",
+    group: "intelligence",
+    targetPhase: "Phase 5 · sources off",
     iconName: "radar",
   },
   {
@@ -52,8 +55,8 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     href: "/topics",
     label: "Topics",
     shortDesc: "Editorial backlog, deduplication & story scoring rubric",
-    group: "operations",
-    targetPhase: "Phase 5-6 Target",
+    group: "intelligence",
+    targetPhase: "Phase 5–6",
     iconName: "list-filter",
   },
   {
@@ -62,7 +65,7 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     label: "Studio",
     shortDesc: "Script drafting, carousel layouts & narrated vertical video builder",
     group: "production",
-    targetPhase: "Phase 7 Target",
+    targetPhase: "N2 · CLI generation",
     iconName: "clapperboard",
   },
   {
@@ -71,16 +74,16 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     label: "Assets",
     shortDesc: "Brand-isolated media assets, renders & audio artifacts",
     group: "production",
-    targetPhase: "Phase 7 Target",
+    targetPhase: "Phase 7",
     iconName: "folder-kanban",
   },
   {
     id: "calendar",
     href: "/calendar",
     label: "Calendar",
-    shortDesc: "Brand-scoped Instagram & YouTube publishing cadence",
+    shortDesc: "Scheduled and published posts by day, with overdue warnings",
     group: "production",
-    targetPhase: "Phase 8 Target",
+    targetPhase: "N3 live",
     iconName: "calendar-clock",
   },
   {
@@ -89,43 +92,43 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     label: "Approvals",
     shortDesc: "Human-in-the-loop factual, editorial & visual QA sign-off",
     group: "production",
-    targetPhase: "Phase 6-8 Target",
+    targetPhase: "N2–N3 live",
     iconName: "shield-check",
   },
   {
     id: "analytics",
     href: "/analytics",
     label: "Analytics",
-    shortDesc: "Postiz performance ingestion & feedback learning signals",
-    group: "intelligence",
-    targetPhase: "Phase 9 Target",
+    shortDesc: "Platform-reported views and engagement for published posts",
+    group: "performance",
+    targetPhase: "N5 · views live",
     iconName: "line-chart",
-  },
-  {
-    id: "agents",
-    href: "/agents",
-    label: "Agents",
-    shortDesc: "Celery workers, transactional outbox, persistent scheduler & MCP",
-    group: "intelligence",
-    targetPhase: "Phase 4 Active",
-    iconName: "bot",
   },
   {
     id: "integrations",
     href: "/integrations",
     label: "Integrations",
     shortDesc: "Postiz standalone boundary, service health & channel slots",
-    group: "intelligence",
-    targetPhase: "Phase 4 / 8",
+    group: "system",
+    targetPhase: "N3 live",
     iconName: "plug",
+  },
+  {
+    id: "agents",
+    href: "/agents",
+    label: "Agents",
+    shortDesc: "Celery workers, transactional outbox, persistent scheduler & MCP",
+    group: "system",
+    targetPhase: "Phase 4 live",
+    iconName: "bot",
   },
   {
     id: "settings",
     href: "/settings",
     label: "Settings",
     shortDesc: "Persisted BrandProfile specs & owner security posture",
-    group: "intelligence",
-    targetPhase: "Phase 4 Live",
+    group: "system",
+    targetPhase: "Live",
     iconName: "sliders-horizontal",
   },
   {
@@ -133,8 +136,8 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     href: "/logs",
     label: "Runtime Logs",
     shortDesc: "Sanitized request telemetry & correlation IDs",
-    group: "intelligence",
-    targetPhase: "Phase 4 Live",
+    group: "system",
+    targetPhase: "Live",
     iconName: "terminal",
   },
 ];

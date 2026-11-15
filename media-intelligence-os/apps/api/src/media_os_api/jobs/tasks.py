@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_os_api.analytics.sync import SYNC_METRICS_TASK, handle_sync_post_metrics
 from media_os_api.carousel.render_job import RENDER_TASK, handle_render_carousel
 from media_os_api.config import Settings, load_settings
 from media_os_api.db.models import JobRun
@@ -18,6 +19,7 @@ from media_os_api.db.session import create_db_engine_from_settings, create_sessi
 from media_os_api.jobs.celery_app import celery_app
 from media_os_api.jobs.errors import PermanentTaskError
 from media_os_api.jobs.ledger import TaskHandler, execute_durable_job
+from media_os_api.jobs.purge import PURGE_TASK, handle_purge_job_history
 from media_os_api.jobs.routing import (
     CREATIVE_CELERY_TASK,
     CREATIVE_LEASE_SECONDS,
@@ -106,6 +108,8 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     RENDER_TASK: handle_render_carousel,  # executes only in the creative container
     SCHEDULE_TASK: handle_schedule_carousel,  # N3: worker only (GitHub + Postiz credentials)
     SYNC_TASK: handle_sync_status,
+    SYNC_METRICS_TASK: handle_sync_post_metrics,  # worker only (Postiz credentials)
+    PURGE_TASK: handle_purge_job_history,
 }
 
 
