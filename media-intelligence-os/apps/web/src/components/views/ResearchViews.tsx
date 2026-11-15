@@ -1,7 +1,13 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ExternalLink, ListFilter, Radar, RefreshCw } from "lucide-react";
+import {
+  ExternalLink,
+  ListFilter,
+  Radar,
+  RefreshCw,
+  Sparkles,
+} from "lucide-react";
 
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -77,7 +83,7 @@ function errorText(err: unknown, fallback: string): string {
 
 function ItemRow({ item }: { item: ResearchSourceItem }) {
   return (
-    <li className="space-y-1 rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-3 text-xs">
+    <li className="space-y-1 rounded-lg border border-white/[0.06] bg-[var(--surface-inset)] p-3 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="info">{item.provider}</Badge>
         <SafeExternalLink href={item.canonical_url}>
@@ -157,7 +163,7 @@ export function ResearchView() {
       {error && <ErrorBanner message={error} />}
 
       <SurfaceCard
-        title="Research Sources"
+        icon={<Radar />} title="Research Sources"
         subtitle="Official APIs and feeds only. A live fetch needs the source mode, owner approval and the worker kill switch."
         badge={
           <div className="flex items-center gap-2">
@@ -170,7 +176,7 @@ export function ResearchView() {
               type="button"
               onClick={refresh}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg btn-press border border-white/[0.1] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200 hover:border-white/[0.18] hover:bg-white/[0.08] disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
               <span>Refresh</span>
@@ -184,7 +190,7 @@ export function ResearchView() {
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase">
+                <tr className="border-b border-white/[0.06] text-[11px] text-slate-400 uppercase">
                   <th className="py-2 pr-3 font-medium">Source</th>
                   <th className="py-2 pr-3 font-medium">Mode</th>
                   <th className="py-2 pr-3 font-medium">Approved</th>
@@ -193,7 +199,7 @@ export function ResearchView() {
                   <th className="py-2 font-medium">Schedule</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/70">
+              <tbody className="rows-in divide-y divide-white/[0.05]">
                 {sources.items.map((s) => (
                   <tr key={s.source} data-testid={`source-${s.source}`}>
                     <td className="py-2 pr-3">
@@ -229,7 +235,7 @@ export function ResearchView() {
       </SurfaceCard>
 
       <SurfaceCard
-        title="Recently Discovered"
+        icon={<Sparkles />} title="Recently Discovered"
         subtitle={
           items ? `${items.total} shared source items (newest first, all brands).` : "Shared source items."
         }
@@ -248,7 +254,7 @@ export function ResearchView() {
                 type="button"
                 onClick={() => void loadMore()}
                 disabled={loadingMore}
-                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                className="rounded-lg border border-white/[0.1] px-3 py-1.5 text-xs text-slate-200 hover:border-white/[0.18] hover:bg-white/[0.08] disabled:opacity-50"
               >
                 {loadingMore ? "Loading…" : "Load more"}
               </button>
@@ -319,7 +325,7 @@ export function TopicsView() {
       {error && <ErrorBanner message={error} />}
 
       <SurfaceCard
-        title={`Topics — ${activeBrand.name}`}
+        icon={<ListFilter />} title={`Topics — ${activeBrand.name}`}
         subtitle="Shared topic clusters with this brand's own editorial assignment. Other brands' decisions are never shown here."
         badge={
           <label className="flex items-center gap-2 text-xs text-slate-300">
@@ -328,7 +334,7 @@ export function TopicsView() {
               aria-label="Editorial status filter"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+              className="rounded-md border border-white/[0.1] bg-[var(--surface-inset)] px-2 py-1 text-xs"
             >
               <option value="">All</option>
               {EDITORIAL_STATUSES.map((s) => (
@@ -349,7 +355,7 @@ export function TopicsView() {
                 <button
                   type="button"
                   onClick={() => void openTopic(t.topic_cluster_id)}
-                  className="w-full space-y-1 rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-3 text-left text-xs hover:border-slate-600"
+                  className="w-full space-y-1 rounded-lg border border-white/[0.06] bg-[var(--surface-inset)] p-3 text-left text-xs hover:border-slate-600"
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={editorialTone(t.assignment.editorial_status)}>

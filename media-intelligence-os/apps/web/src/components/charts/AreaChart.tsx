@@ -122,8 +122,14 @@ export function AreaChart({
       >
         <defs>
           <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity="0.22" />
-            <stop offset="100%" stopColor={color} stopOpacity="0" />
+            <stop offset="0%" style={{ stopColor: color, stopOpacity: 0.32 }} />
+            <stop offset="55%" style={{ stopColor: "var(--chart-2)", stopOpacity: 0.08 }} />
+            <stop offset="100%" style={{ stopColor: color, stopOpacity: 0 }} />
+          </linearGradient>
+          <linearGradient id={`${gradientId}-stroke`} x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" style={{ stopColor: "var(--chart-2)" }} />
+            <stop offset="60%" style={{ stopColor: color }} />
+            <stop offset="100%" style={{ stopColor: "var(--accent-strong)" }} />
           </linearGradient>
         </defs>
         {ticks.map((t) => {
@@ -168,18 +174,40 @@ export function AreaChart({
         {points.length > 0 && (
           <>
             <path key={`a-${area.length}`} d={area} fill={`url(#${gradientId})`} className="chart-area" />
-            <path
-              key={`l-${points.length}-${max}`}
-              d={path}
-              fill="none"
-              stroke={color}
-              strokeWidth="2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-              className="chart-line"
-              pathLength={2000}
-              style={{ ["--path-length" as string]: 2000 }}
-            />
+            <g className="chart-glow">
+              <path
+                key={`l-${points.length}-${max}`}
+                d={path}
+                fill="none"
+                stroke={`url(#${gradientId}-stroke)`}
+                strokeWidth="2.25"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                className="chart-line"
+                pathLength={2000}
+                style={{ ["--path-length" as string]: 2000 }}
+              />
+            </g>
+            {/* Live "latest value" marker */}
+            {hover === null && (
+              <g>
+                <circle
+                  cx={xs[xs.length - 1]}
+                  cy={ys[ys.length - 1]}
+                  r="3.5"
+                  fill={color}
+                  className="chart-pulse motion-reduce:hidden"
+                />
+                <circle
+                  cx={xs[xs.length - 1]}
+                  cy={ys[ys.length - 1]}
+                  r="3.5"
+                  fill="var(--accent-strong)"
+                  stroke="var(--surface-panel)"
+                  strokeWidth="2"
+                />
+              </g>
+            )}
           </>
         )}
         {hover !== null && xs[hover] !== undefined && (
@@ -189,16 +217,26 @@ export function AreaChart({
               x2={xs[hover]}
               y1={PAD.top}
               y2={PAD.top + innerH}
-              stroke="rgba(255,255,255,0.18)"
-              strokeDasharray="3 3"
+              stroke={`url(#${gradientId}-stroke)`}
+              strokeOpacity="0.55"
+              strokeWidth="1"
             />
-            <circle cx={xs[hover]} cy={ys[hover]} r="4" fill="var(--surface-canvas)" stroke={color} strokeWidth="2" />
+            <line
+              x1={PAD.left}
+              x2={W - PAD.right}
+              y1={ys[hover]}
+              y2={ys[hover]}
+              stroke="rgba(255,255,255,0.08)"
+              strokeDasharray="2 4"
+            />
+            <circle cx={xs[hover]} cy={ys[hover]} r="9" fill={color} opacity="0.15" />
+            <circle cx={xs[hover]} cy={ys[hover]} r="4.5" fill="var(--surface-canvas)" stroke={color} strokeWidth="2.25" />
           </g>
         )}
       </svg>
       {active && hover !== null && (
         <div
-          className="animate-scale-in pointer-events-none absolute top-0 z-10 -translate-x-1/2 rounded-lg border border-white/[0.1] bg-[var(--surface-elevated)] px-2.5 py-1.5 text-xs shadow-[var(--shadow-lg)]"
+          className="glass animate-scale-in pointer-events-none absolute top-0 z-10 -translate-x-1/2 rounded-lg px-3 py-2 text-xs transition-[left] duration-150 ease-out"
           style={{ left: `${Math.min(88, Math.max(12, (xs[hover] / W) * 100))}%` }}
           role="status"
         >
@@ -253,7 +291,11 @@ export function BarList({
             <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.05]">
               <div
                 className="bar-fill h-full rounded-full"
-                style={{ width: `${pct}%`, background: item.color ?? "var(--chart-1)" }}
+                style={{
+                  width: `${pct}%`,
+                  background: `linear-gradient(90deg, color-mix(in srgb, ${item.color ?? "var(--chart-1)"} 55%, transparent), ${item.color ?? "var(--chart-1)"})`,
+                  boxShadow: `0 0 10px color-mix(in srgb, ${item.color ?? "var(--chart-1)"} 45%, transparent)`,
+                }}
               />
             </div>
           </li>

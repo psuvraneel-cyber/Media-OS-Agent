@@ -2,7 +2,14 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plug, RefreshCw, Shield, Terminal } from "lucide-react";
+import {
+  Plug,
+  RefreshCw,
+  Share2,
+  Shield,
+  SlidersHorizontal,
+  Terminal,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { DisabledActionButton } from "@/components/ui/DisabledActionButton";
@@ -37,7 +44,7 @@ export function IntegrationsView({
       {errorMessage && <ErrorBanner message={errorMessage} />}
 
       <SurfaceCard
-        title="External & Infrastructure Boundaries"
+        icon={<Plug />} title="External & Infrastructure Boundaries"
         subtitle="Postiz remains completely separate in postiz-runtime; application PostgreSQL and Redis run on isolated media-os-net."
         badge={
           <Badge tone={systemStatus?.postiz.status === "reachable" ? "live" : "blocked"}>
@@ -45,8 +52,8 @@ export function IntegrationsView({
           </Badge>
         }
       >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
-          <div className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4">
+        <div className="stagger-children grid grid-cols-1 gap-3 md:grid-cols-3 text-xs">
+          <div className="surface-interactive tilt rounded-lg border border-white/[0.08] bg-[var(--surface-inset)] p-4">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-slate-200">Application PostgreSQL &amp; Redis</span>
               <Badge tone={systemStatus?.persistent_storage ? "live" : "blocked"}>
@@ -59,7 +66,7 @@ export function IntegrationsView({
             </p>
           </div>
 
-          <div className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4">
+          <div className="surface-interactive tilt rounded-lg border border-white/[0.08] bg-[var(--surface-inset)] p-4">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-slate-200">Postiz Standalone (v2.25.3)</span>
               <Badge tone={systemStatus?.postiz.status === "reachable" ? "live" : "blocked"}>
@@ -70,33 +77,33 @@ export function IntegrationsView({
               {systemStatus?.postiz.detail ?? "Probed read-only without exposing API secrets."}
             </p>
             <p className="mt-1 text-[11px] text-slate-500">
-              OAuth &amp; publishing writes deferred to Phase 8.
+              Posts publish through the Postiz public API from the worker; channel OAuth stays inside Postiz.
             </p>
           </div>
 
-          <div className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4">
+          <div className="surface-interactive tilt rounded-lg border border-white/[0.08] bg-[var(--surface-inset)] p-4">
             <div className="flex items-center justify-between gap-2">
-              <span className="font-semibold text-slate-200">Gemini Developer API &amp; R2 Media</span>
-              <Badge tone="disabled">Phase 7 / Owner Approved</Badge>
+              <span className="font-semibold text-slate-200">AI providers</span>
+              <Badge tone="info">Server-side only</Badge>
             </div>
             <p className="mt-1.5 text-slate-400">
-              Centralized Gemini provider adapter &amp; optional public HTTPS media storage remain disabled in Phase 4.
+              AI generation runs in the worker through a multi-provider router. Provider keys never reach the browser.
             </p>
           </div>
         </div>
       </SurfaceCard>
 
       <SurfaceCard
-        title={`Channel Accounts — ${activeBrand.name}`}
+        icon={<Share2 />} title={`Channel Accounts — ${activeBrand.name}`}
         subtitle="Persisted PostgreSQL ChannelAccount rows filtered strictly to the active brand."
         badge={<DisabledActionButton label="Bind Postiz Channel" reason="Phase 8" />}
       >
         {brandChannels.length > 0 ? (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="stagger-children grid grid-cols-1 gap-3 md:grid-cols-2">
             {brandChannels.map((ch) => (
               <div
                 key={ch.channel_id}
-                className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-4 text-xs"
+                className="rounded-lg border border-white/[0.06] bg-[var(--surface-inset)] p-4 text-xs"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-semibold text-slate-100">{ch.display_label}</span>
@@ -178,7 +185,7 @@ export function SettingsView({
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <SurfaceCard
-          title={`BrandProfile Spec — ${activeBrand.name}`}
+          icon={<SlidersHorizontal />} title={`BrandProfile Spec — ${activeBrand.name}`}
           subtitle="Persisted PostgreSQL brand configuration matching PRD & ADR-014."
           badge={
             <Badge tone={activeBrand.data_origin === "postgresql" ? "live" : "prototype"}>
@@ -230,7 +237,7 @@ export function SettingsView({
                     type="button"
                     onClick={handleToggleActivation}
                     disabled={toggling}
-                    className="rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                    className="rounded-lg btn-press border border-white/[0.1] bg-white/[0.04] px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-white/[0.18] hover:bg-white/[0.08] disabled:opacity-50"
                   >
                     {toggling
                       ? "Updating..."
@@ -245,7 +252,7 @@ export function SettingsView({
         </SurfaceCard>
 
         <SurfaceCard
-          title="Owner Session & Security Posture"
+          icon={<Shield />} title="Owner Session & Security Posture"
           subtitle="PostgreSQL session persistence, Redis rate limiting, and CSRF guarantees."
           badge={
             <Badge tone="live">
@@ -287,6 +294,26 @@ export function SettingsView({
   );
 }
 
+/** Colour-codes audit actions by domain so the trail scans at a glance. */
+function actionTone(action: string, outcome: string): string {
+  if (outcome !== "SUCCESS" || action.includes("FAILED") || action.includes("REJECT")) {
+    return "border-rose-400/25 bg-rose-400/10 text-rose-300";
+  }
+  if (action.startsWith("AUTH_") || action.startsWith("OWNER_")) {
+    return "border-indigo-400/25 bg-indigo-400/10 text-indigo-300";
+  }
+  if (action.includes("SCHEDULE") || action.includes("PUBLISH")) {
+    return "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
+  }
+  if (action.startsWith("CAROUSEL_") || action.startsWith("CONTENT_")) {
+    return "border-sky-400/25 bg-sky-400/10 text-sky-300";
+  }
+  if (action.startsWith("BRAND_")) {
+    return "border-amber-400/20 bg-amber-400/10 text-amber-200";
+  }
+  return "border-white/[0.08] bg-white/[0.03] text-slate-300";
+}
+
 export function LogsView({
   initialLogs,
   initialAuditEvents = null,
@@ -325,7 +352,7 @@ export function LogsView({
       {error && <ErrorBanner message={error} />}
 
       <SurfaceCard
-        title="Persisted Security & Brand Audit Trail (PostgreSQL)"
+        icon={<Shield />} title="Persisted Security & Brand Audit Trail (PostgreSQL)"
         subtitle="Durable 365-day audit log of owner authentication, brand updates, and workflow state transitions."
         badge={
           <div className="flex items-center gap-2">
@@ -334,7 +361,7 @@ export function LogsView({
               type="button"
               onClick={handleRefresh}
               disabled={refreshing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg btn-press border border-white/[0.1] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200 hover:border-white/[0.18] hover:bg-white/[0.08] disabled:opacity-50"
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
@@ -349,7 +376,7 @@ export function LogsView({
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase">
+                <tr className="border-b border-white/[0.06] text-[11px] text-slate-400 uppercase">
                   <th className="py-2 pr-3 font-medium">Timestamp</th>
                   <th className="py-2 pr-3 font-medium">Action</th>
                   <th className="py-2 pr-3 font-medium">Actor</th>
@@ -357,23 +384,39 @@ export function LogsView({
                   <th className="py-2 font-medium">Outcome</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/70 font-mono text-[11px]">
+              <tbody className="rows-in divide-y divide-white/[0.05] font-mono text-[11px]">
                 {auditEvents.items.map((evt) => (
-                  <tr key={evt.id} className="hover:bg-slate-800/35">
-                    <td className="py-2 pr-3 whitespace-nowrap text-slate-400">
+                  <tr key={evt.id}>
+                    <td className="py-2 pr-3 pl-2 whitespace-nowrap text-slate-500">
                       {evt.timestamp_utc}
                     </td>
-                    <td className="py-2 pr-3 font-semibold text-sky-300">{evt.action}</td>
+                    <td className="py-2 pr-3">
+                      <span
+                        className={`inline-flex rounded-md border px-1.5 py-0.5 font-semibold ${actionTone(evt.action, evt.outcome)}`}
+                      >
+                        {evt.action}
+                      </span>
+                    </td>
                     <td className="py-2 pr-3 text-slate-200">{evt.actor_id}</td>
-                    <td className="py-2 pr-3 text-slate-300">
+                    <td className="py-2 pr-3 text-slate-400">
                       {evt.target_type}:{evt.target_id.slice(0, 24)}
                     </td>
                     <td className="py-2">
                       <span
-                        className={
-                          evt.outcome === "SUCCESS" ? "text-emerald-300" : "text-amber-300"
-                        }
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide ${
+                          evt.outcome === "SUCCESS"
+                            ? "border-emerald-400/20 bg-emerald-400/10 text-emerald-300"
+                            : "border-amber-400/25 bg-amber-400/10 text-amber-300"
+                        }`}
                       >
+                        <span
+                          aria-hidden="true"
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            evt.outcome === "SUCCESS"
+                              ? "bg-emerald-400 shadow-[0_0_6px_rgba(45,212,191,0.9)]"
+                              : "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.9)]"
+                          }`}
+                        />
                         {evt.outcome}
                       </span>
                     </td>
@@ -391,7 +434,7 @@ export function LogsView({
       </SurfaceCard>
 
       <SurfaceCard
-        title="Sanitized HTTP Correlation Trace"
+        icon={<Terminal />} title="Sanitized HTTP Correlation Trace"
         subtitle={
           logs?.note ??
           "Ephemeral in-memory telemetry for current container uptime (secrets redacted)."
@@ -403,7 +446,7 @@ export function LogsView({
               type="button"
               onClick={handleRefresh}
               disabled={refreshing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/80 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-lg btn-press border border-white/[0.1] bg-white/[0.04] px-2.5 py-1 text-xs font-medium text-slate-200 hover:border-white/[0.18] hover:bg-white/[0.08] disabled:opacity-50"
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
@@ -418,7 +461,7 @@ export function LogsView({
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-800 text-[11px] text-slate-400 uppercase">
+                <tr className="border-b border-white/[0.06] text-[11px] text-slate-400 uppercase">
                   <th className="py-2 pr-3 font-medium">Timestamp</th>
                   <th className="py-2 pr-3 font-medium">Request ID</th>
                   <th className="py-2 pr-3 font-medium">Method &amp; Route</th>
@@ -426,9 +469,9 @@ export function LogsView({
                   <th className="py-2 font-medium">Duration</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/70 font-mono text-[11px]">
+              <tbody className="rows-in divide-y divide-white/[0.05] font-mono text-[11px]">
                 {logs.items.map((item, idx) => (
-                  <tr key={`${item.request_id}-${idx}`} className="hover:bg-slate-800/35">
+                  <tr key={`${item.request_id}-${idx}`} className="hover:bg-white/[0.02]">
                     <td className="py-2 pr-3 whitespace-nowrap text-slate-400">
                       {item.timestamp_utc}
                     </td>

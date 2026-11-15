@@ -1,7 +1,13 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import { CalendarClock, ExternalLink, ImageOff, RefreshCw, Send } from "lucide-react";
+import {
+  CalendarClock,
+  ExternalLink,
+  ImageOff,
+  RefreshCw,
+  Send,
+} from "lucide-react";
 
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -81,7 +87,7 @@ function ScheduleForm({
   };
 
   return (
-    <div className="mt-3 space-y-2 rounded-lg border border-slate-800 bg-[var(--surface-canvas)] p-3">
+    <div className="mt-3 space-y-2 rounded-lg border border-white/[0.06] bg-[var(--surface-canvas)] p-3">
       <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
         <label className="flex items-center gap-2">
           <CalendarClock className="h-4 w-4" aria-hidden="true" />
@@ -91,7 +97,7 @@ function ScheduleForm({
             aria-label="Post time"
             value={when}
             onChange={(e) => setWhen(e.target.value)}
-            className="rounded-md border border-slate-700 bg-[var(--surface-inset)] px-2 py-1 text-slate-100"
+            className="rounded-md border border-white/[0.1] bg-[var(--surface-inset)] px-2 py-1 text-slate-100"
           />
         </label>
         {PLATFORMS.map((p) => (
@@ -126,13 +132,13 @@ function Row({ item, brand, onChanged }: { item: CarouselSummary; brand: string;
   const canSchedule = item.can_schedule && !item.scheduling;
   const rescheduling = canSchedule && item.schedules.length > 0;
   return (
-    <div className="rounded-lg border border-slate-800 bg-[var(--surface-inset)] p-3">
+    <div className="rounded-lg border border-white/[0.06] bg-[var(--surface-inset)] p-3">
       <div className="flex items-start gap-3">
         {thumb ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={thumb} alt="" className="h-24 w-20 flex-none rounded object-cover" />
         ) : (
-          <div className="flex h-24 w-20 flex-none items-center justify-center rounded bg-slate-900">
+          <div className="flex h-24 w-20 flex-none items-center justify-center rounded bg-[var(--surface-inset)]">
             <ImageOff className="h-4 w-4 text-slate-500" aria-hidden="true" />
           </div>
         )}
@@ -201,7 +207,7 @@ export function PublishQueueView() {
   return (
     <div className="space-y-4">
       <SurfaceCard
-        title={`Approved — ready to post (${activeBrand.name})`}
+        icon={<Send />} title={`Approved — ready to post (${activeBrand.name})`}
         subtitle="Pick a time and channels. Nothing is posted until you press Schedule."
         badge={<Badge tone="live">Instagram + Facebook via Postiz</Badge>}
       >
@@ -209,7 +215,7 @@ export function PublishQueueView() {
           <button
             type="button"
             onClick={reload}
-            className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-300"
+            className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.1] px-2.5 py-1 text-xs text-slate-300"
           >
             <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Refresh
           </button>
