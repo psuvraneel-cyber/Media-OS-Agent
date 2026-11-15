@@ -295,7 +295,11 @@ def request_schedule(
         target_type="content_package",
         target_id=str(pkg.id),
         outcome="SUCCESS",
-        metadata={"scheduled_at": when.astimezone(UTC).isoformat(), "platforms": chosen},
+        metadata={
+            "scheduled_at": when.astimezone(UTC).isoformat(),
+            "platforms": chosen,
+            "reschedule": is_reschedule(pkg, schedules),
+        },
     )
     return job
 

@@ -58,7 +58,50 @@ describe("PublishQueueView", () => {
       </BrandProvider>,
     );
     expect(await screen.findByText(/earlier post failed or was cancelled/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Schedule/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reschedule" })).toBeInTheDocument();
+  });
+
+  it("reschedules a carousel whose posts failed on every platform", async () => {
+    const FAILED: CarouselSummary = {
+      ...CANCELLED, id: "c4", hook: "Failed on Meta",
+      schedules: [
+        { platform: "FACEBOOK", status: "FAILED", scheduled_at: "2026-11-15T13:30:00Z",
+          timezone: "Asia/Kolkata", post_url: null },
+        { platform: "INSTAGRAM", status: "FAILED", scheduled_at: "2026-11-15T13:30:00Z",
+          timezone: "Asia/Kolkata", post_url: null },
+      ],
+    };
+    const posts: { url: string; body: string }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if ((init?.method ?? "GET").toUpperCase() === "POST") {
+        posts.push({ url, body: init?.body as string });
+        return json({ ...FAILED, scheduling: true, can_schedule: false });
+      }
+      return json({ items: [FAILED] });
+    });
+    render(
+      <BrandProvider brands={[BRAND]} initialBrandId={APP}>
+        <PublishQueueView />
+      </BrandProvider>,
+    );
+    const button = await screen.findByRole("button", { name: "Reschedule" });
+    expect(screen.getAllByText("FAILED")).toHaveLength(2);
+    await userEvent.click(button);
+    expect(posts).toHaveLength(1);
+    expect(posts[0].url).toContain("/content/carousels/c4/schedule");
+    expect(JSON.parse(posts[0].body).platforms).toEqual(["INSTAGRAM", "FACEBOOK"]);
+  });
+
+  it("labels the button Schedule (not Reschedule) for a first-time post", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => json({ items: [APPROVED] }));
+    render(
+      <BrandProvider brands={[BRAND]} initialBrandId={APP}>
+        <PublishQueueView />
+      </BrandProvider>,
+    );
+    expect(await screen.findByRole("button", { name: "Schedule" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reschedule" })).not.toBeInTheDocument();
   });
 
   it("schedules an approved carousel to the chosen platforms and shows published links", async () => {
