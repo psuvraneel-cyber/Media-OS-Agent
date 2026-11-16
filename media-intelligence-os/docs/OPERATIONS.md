@@ -127,7 +127,10 @@ There are two layers, and both run every 5 minutes.
   - Postiz not answering;
   - a disabled Instagram or Facebook channel;
   - the 15-min status sync having stopped.
-- **`notify.daily_digest`, 21:00 IST:** what went out, what failed, what's next, and the review queue.
+- **`notify.daily_digest`, 22:00 IST (the nightly report):** what went out, what failed, what's next, the review queue, and the **last 7 days of platform numbers** (views, likes and reactions, comments, shares, saves, reach), compared with the 7 days before, plus the top post.
+  - Totals across platforms only add metrics that mean the same everywhere; reach and unique viewers stay per platform.
+  - `analytics.sync_post_metrics.nightly` (21:40 IST, `force_recent`) refreshes every post up to 30 days old first, so the numbers are about 20 min old.
+  - Facebook comments and shares aren't available through Postiz for photo posts; YouTube appears once a channel is connected.
 - **De-duplication:** alerts are durable jobs keyed by the event, so each event is sent once and a Telegram outage only delays them.
 - **Configuration:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `MEDIA_OS_DASHBOARD_URL` in the runtime `.env`, worker only. When the token or chat ID is empty, alerts are skipped and nothing else changes.
 

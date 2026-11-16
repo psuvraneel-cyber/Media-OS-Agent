@@ -222,18 +222,21 @@ def sync_status(db: Session) -> dict[str, Any]:
         .order_by(JobRun.updated_at.desc())
         .limit(1)
     ).first()
-    enabled = db.execute(
-        select(ScheduleDefinition.is_enabled).where(
-            ScheduleDefinition.task_name == SYNC_METRICS_TASK
-        )
-    ).scalar_one_or_none()
+    # Several schedules can run the same sync (every 6 h, plus the 21:40 IST nightly refresh).
+    flags = list(
+        db.execute(
+            select(ScheduleDefinition.is_enabled).where(
+                ScheduleDefinition.task_name == SYNC_METRICS_TASK
+            )
+        ).scalars()
+    )
     return {
         "last_success_at": _iso(last_ok[0]) if last_ok else None,
         "last_attempt_at": _iso(last_any[1]) if last_any else None,
         "last_status": last_any[0] if last_any else None,
         "last_error_code": last_any[2] if last_any else None,
-        "schedule_enabled": bool(enabled),
-        "schedule_configured": enabled is not None,
+        "schedule_enabled": any(flags),
+        "schedule_configured": bool(flags),
         "source": "Postiz public API · GET /analytics/post/{id}",
     }
 
@@ -815,3 +818,142 @@ def pipeline_summary(db: Session, brand_id: uuid.UUID) -> dict[str, Any]:
 
 
 __all__ = ["pipeline_summary", "post_detail", "posts_report", "sync_status", "views_report"]
+
+
+# ------------------------------------------------------------------ nightly report: last N days
+
+# Order in which the report lists metrics. Reach / unique viewers / plays are per-platform only:
+# each platform defines them differently, so they are never added up across platforms.
+REPORT_METRICS = (
+    "views",
+    "likes",
+    "reactions",
+    "comments",
+    "shares",
+    "saves",
+    "reach",
+    "unique_viewers",
+    "plays",
+)
+CROSS_PLATFORM = ("views", "likes_reactions", "comments", "shares", "saves")
+
+
+@dataclass(frozen=True)
+class MetricTotal:
+    key: str
+    value: float
+    previous: float | None
+    approximate: bool
+
+    @property
+    def growth(self) -> float | None:
+        return growth_pct(self.value, self.previous)
+
+
+@dataclass(frozen=True)
+class PlatformTotals:
+    platform: str
+    posts: int
+    metrics: tuple[MetricTotal, ...]
+
+
+@dataclass(frozen=True)
+class TopPost:
+    title: str
+    platform: str
+    engagement: float
+    views: float
+    url: str | None
+
+
+@dataclass(frozen=True)
+class PeriodTotals:
+    start: datetime
+    end: datetime
+    platforms: tuple[PlatformTotals, ...]
+    overall: tuple[MetricTotal, ...]
+    top_post: TopPost | None
+    data_as_of: datetime | None
+    platforms_seen: frozenset[str]
+
+
+def period_totals(db: Session, *, now: datetime, days: int = 7) -> PeriodTotals:
+    """Totals of every platform-reported metric gained in the last `days`, across all brands.
+
+    Platforms report lifetime counters; the engine attributes each increase to the time between
+    two readings, so "last 7 days" includes new likes on older posts and excludes what happened
+    before. The previous `days` are computed the same way for the comparison.
+    """
+    from datetime import timedelta
+
+    from media_os_api.db.models import BrandProfile
+
+    window = Window(now - timedelta(days=days), now)
+    prev = Window(now - timedelta(days=2 * days), now - timedelta(days=days))
+    posts: list[PlatformPost] = []
+    for brand_id in db.execute(select(BrandProfile.id)).scalars():
+        posts.extend(_load_posts(db, brand_id))
+
+    def total(group: Sequence[PlatformPost], key: str, w: Window) -> tuple[float, bool, bool]:
+        value, approx, present = 0.0, False, False
+        for p in group:
+            if key in p.incs:
+                present = True
+                v, a = p.metric_in(key, w)
+                value += v
+                approx = approx or a
+        return value, approx, present
+
+    platforms: list[PlatformTotals] = []
+    sums: dict[str, list[float]] = {k: [0.0, 0.0] for k in CROSS_PLATFORM}
+    seen_cross: set[str] = set()
+    approx_cross: dict[str, bool] = {k: False for k in CROSS_PLATFORM}
+    for platform in sorted({p.schedule.platform for p in posts}):
+        group = [p for p in posts if p.schedule.platform == platform]
+        metrics: list[MetricTotal] = []
+        for key in REPORT_METRICS:
+            value, approx, present = total(group, key, window)
+            if not present:
+                continue
+            before, _a, _p = total(group, key, prev)
+            metrics.append(MetricTotal(key, value, before, approx))
+            cross = "likes_reactions" if key in ("likes", "reactions") else key
+            if cross in sums:
+                sums[cross][0] += value
+                sums[cross][1] += before
+                seen_cross.add(cross)
+                approx_cross[cross] = approx_cross[cross] or approx
+        platforms.append(PlatformTotals(platform, len(group), tuple(metrics)))
+
+    overall = tuple(
+        MetricTotal(k, sums[k][0], sums[k][1], approx_cross[k])
+        for k in CROSS_PLATFORM
+        if k in seen_cross
+    )
+
+    best: TopPost | None = None
+    best_rank = (0.0, 0.0)
+    for p in posts:
+        eng, _ = p.engagement_in(window)
+        views, _ = p.metric_in(VIEWS, window)
+        rank = (eng or 0.0, views)
+        if rank > best_rank:
+            url = p.schedule.remote_post_id
+            best = TopPost(
+                title=_post_title(p.package),
+                platform=p.schedule.platform,
+                engagement=eng or 0.0,
+                views=views,
+                url=url if (url or "").startswith("http") else None,
+            )
+            best_rank = rank
+    lasts = [p.last_observed_at for p in posts if p.last_observed_at]
+    return PeriodTotals(
+        start=window.start,
+        end=window.end,
+        platforms=tuple(platforms),
+        overall=overall,
+        top_post=best,
+        data_as_of=max(lasts) if lasts else None,
+        platforms_seen=frozenset(p.schedule.platform for p in posts),
+    )

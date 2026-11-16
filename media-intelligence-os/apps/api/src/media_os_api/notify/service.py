@@ -1,4 +1,4 @@
-"""Owner alerts: queue them durably, send them, watch publishing, and send a daily digest.
+"""Owner alerts: queue them durably, send them, watch publishing, and send the nightly report.
 
 * `queue_alert` turns an alert into a durable job (`media_os.notify.telegram`). The job key is
   the alert key, so the same alert is never sent twice (e.g. the watchdog and the status sync both
@@ -8,7 +8,8 @@
 * `handle_watchdog` (every 5 min) checks what the 15-min status sync can't: a post still queued in
   Postiz 10 min after its time (the publishing worker is down), Postiz not answering, a disabled
   channel, and the status sync itself having stopped.
-* `handle_daily_digest` (21:00 IST) summarises the day.
+* `handle_daily_digest` (22:00 IST, the nightly report) summarises the day and the last 7 days of
+  platform numbers (views, likes and reactions, comments, shares, saves, reach).
 
 Alert texts live in `notify.messages`. Nothing here changes content or publishing state.
 """
@@ -344,6 +345,11 @@ def handle_daily_digest(
         .select_from(ContentPackage)
         .where(ContentPackage.status == "QA_PASSED", ContentPackage.approval_status == "PENDING")
     ).scalar_one()
+    # Last 7 days of platform numbers. Imported here: analytics.service imports the publish
+    # service, which imports this module.
+    from media_os_api.analytics.service import period_totals
+
+    totals = period_totals(session, now=now, days=7)
     queue_alert(
         session,
         key=f"digest:{local_day.isoformat()}:{job.id}",
@@ -354,6 +360,7 @@ def handle_daily_digest(
             upcoming=upcoming,
             awaiting_review=int(awaiting),
             dashboard_url=dashboard_url(),
+            totals=totals,
         ),
         severity="info",
         silent=True,
@@ -363,4 +370,5 @@ def handle_daily_digest(
         "failed": len(failed),
         "upcoming": len(upcoming),
         "awaiting_review": int(awaiting),
+        "week": {m.key: round(m.value) for m in totals.overall},
     }

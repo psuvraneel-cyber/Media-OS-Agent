@@ -264,3 +264,58 @@ def test_send_handler_sends_and_maps_errors() -> None:
 
     with pytest.raises(PermanentTaskError):
         handle_send_telegram(None, _job(text="  "), telegram=lambda: fake)  # type: ignore[arg-type,return-value]
+
+
+# ------------------------------------------------------------------ nightly report
+
+
+def test_metrics_block_formats_totals_growth_and_notes() -> None:
+    from media_os_api.analytics.service import MetricTotal, PeriodTotals, PlatformTotals, TopPost
+
+    now = datetime(2026, 11, 16, 16, 30, tzinfo=UTC)
+    totals = PeriodTotals(
+        start=now,
+        end=now,
+        platforms=(
+            PlatformTotals(
+                "INSTAGRAM",
+                3,
+                (MetricTotal("views", 1234, 1000, False), MetricTotal("likes", 56, None, False)),
+            ),
+        ),
+        overall=(MetricTotal("views", 1234, 1000, False),),
+        top_post=TopPost("Hook *one*", "INSTAGRAM", 40, 900, "https://www.instagram.com/p/x/"),
+        data_as_of=now,
+        platforms_seen=frozenset({"INSTAGRAM"}),
+    )
+    text = "\n".join(msg.metrics_block(totals))
+    assert "All platforms:</b> Views 1,234 (▲23%)" in text
+    assert "<b>Instagram</b> (3 posts): Views 1,234 (▲23%) · Likes 56" in text
+    assert "Top post:</b> Hook one (Instagram, 40 interactions)" in text
+    assert "YouTube isn't connected" in text and "numbers as of 16 Nov, 10:00 PM IST" in text
+    assert "Facebook" not in text
+
+
+def test_metrics_block_without_data() -> None:
+    assert "No published posts with numbers yet." in "\n".join(msg.metrics_block(None))
+
+
+def test_nightly_refresh_rechecks_recent_posts_only() -> None:
+    from datetime import timedelta
+
+    from media_os_api.analytics.sync import is_due
+    from media_os_api.db.models import PublishSchedule
+
+    now = datetime(2026, 11, 16, 16, 10, tzinfo=UTC)
+    recent = PublishSchedule(
+        scheduled_at=now - timedelta(days=3), metrics_checked_at=now - timedelta(hours=2)
+    )
+    just_read = PublishSchedule(
+        scheduled_at=now - timedelta(days=3), metrics_checked_at=now - timedelta(minutes=20)
+    )
+    old = PublishSchedule(
+        scheduled_at=now - timedelta(days=60), metrics_checked_at=now - timedelta(hours=2)
+    )
+    assert not is_due(recent, now) and is_due(recent, now, force_recent=True)
+    assert not is_due(just_read, now, force_recent=True)  # read in the last hour
+    assert not is_due(old, now, force_recent=True)  # older than 30 days keeps its tier
