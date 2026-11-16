@@ -62,6 +62,9 @@ PAUSE_SECONDS = 1.0
 # stored per hour and upserted, so an extra run never double-counts.
 FORCE_RECENT_MAX_AGE = timedelta(days=30)
 FORCE_RECENT_MIN_GAP = timedelta(hours=1)
+# "Sync now" in the dashboard (payload `trigger: manual`): the owner wants fresh numbers now, so
+# only posts read in the last couple of minutes are skipped.
+MANUAL_MIN_GAP = timedelta(minutes=2)
 
 
 def check_interval(age: timedelta, status: str | None) -> timedelta:
@@ -73,15 +76,21 @@ def check_interval(age: timedelta, status: str | None) -> timedelta:
     return max(interval, STATUS_FLOOR.get(status or "", timedelta(0)))
 
 
-def is_due(sched: PublishSchedule, now: datetime, *, force_recent: bool = False) -> bool:
+def is_due(
+    sched: PublishSchedule,
+    now: datetime,
+    *,
+    force_recent: bool = False,
+    min_gap: timedelta = FORCE_RECENT_MIN_GAP,
+) -> bool:
     if sched.metrics_checked_at is None:
         return True
     if (
         force_recent
         and now - sched.scheduled_at <= FORCE_RECENT_MAX_AGE
-        and now - sched.metrics_checked_at >= FORCE_RECENT_MIN_GAP
+        and now - sched.metrics_checked_at >= min_gap
     ):
-        return True  # nightly refresh before the 22:00 report
+        return True  # nightly refresh before the 22:00 report, or Sync now
     interval = check_interval(now - sched.scheduled_at, sched.metrics_status)
     return now - sched.metrics_checked_at >= interval
 
@@ -132,7 +141,9 @@ def handle_sync_post_metrics(
         ).scalars()
     )
     force_recent = bool((job.payload or {}).get("force_recent"))
-    due = [s for s in published if is_due(s, current, force_recent=force_recent)]
+    manual = (job.payload or {}).get("trigger") == "manual"
+    gap = MANUAL_MIN_GAP if manual else FORCE_RECENT_MIN_GAP
+    due = [s for s in published if is_due(s, current, force_recent=force_recent, min_gap=gap)]
     # Never-checked first, then the longest-waiting.
     due.sort(key=lambda s: (s.metrics_checked_at is not None, s.metrics_checked_at or current))
     batch = due[:MAX_POSTS_PER_RUN]
