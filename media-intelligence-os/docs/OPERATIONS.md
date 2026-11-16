@@ -112,6 +112,36 @@ Migration `0004_add_brand_topic_assignments` establishes the multi-brand editori
 
 ---
 
+### Owner alerts and self-healing (Telegram)
+
+There are two layers, and both run every 5 minutes.
+
+**In-app (Media OS worker), alerts only:**
+- **Queued from the publish status sync:**
+  - post **published**: quiet message with the link;
+  - post **failed**: Meta and Postiz errors explained in plain words, for example "Meta blocked the app";
+  - post **overdue**.
+- **Job that gave up:** any durable job that ends `FAILED_FINAL`.
+- **`notify.watchdog`, every 5 min:**
+  - a post still queued in Postiz 10 min after its time (its publishing worker is down);
+  - Postiz not answering;
+  - a disabled Instagram or Facebook channel;
+  - the 15-min status sync having stopped.
+- **`notify.daily_digest`, 21:00 IST:** what went out, what failed, what's next, and the review queue.
+- **De-duplication:** alerts are durable jobs keyed by the event, so each event is sent once and a Telegram outage only delays them.
+- **Configuration:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `MEDIA_OS_DASHBOARD_URL` in the runtime `.env`, worker only. When the token or chat ID is empty, alerts are skipped and nothing else changes.
+
+**Host (`infra/ops/windows/watchdog.ps1`, Task Scheduler), repairs:**
+- restarts `postiz-runtime-app` when its worker has no live Temporal pollers for about 10 min, or is crash-looping;
+- restarts any watched container that stays unhealthy;
+- warns when Docker Desktop is down.
+
+It has a 15-min cooldown per container and never stops or removes anything. See `infra/ops/windows/README.md` for install, pause and dry-run.
+
+**Postiz startup gate.** `postiz-runtime/docker-compose.yaml` makes the Postiz app wait for Temporal before starting. Docker ignores `depends_on` when Docker Desktop restarts containers itself, which is what silently broke publishing on 16 Nov 2026.
+
+**One limit code can't fix.** The PC must be on and awake at posting times. Turn on "Start Docker Desktop when you sign in" and avoid sleep during posting windows.
+
 ## 4. Storage Locations & Retention
 
 - **Repository Root:** `C:\Media OS Agent\media-intelligence-os\`
