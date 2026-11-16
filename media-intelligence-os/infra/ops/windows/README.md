@@ -32,8 +32,18 @@ powershell -ExecutionPolicy Bypass -File install-watchdog.ps1
 powershell -ExecutionPolicy Bypass -File install-watchdog.ps1 -Uninstall
 ```
 
-- The task runs as you, only while you're signed in, and needs no admin rights.
-- It points at this folder, so install it from your main checkout (`C:\Media OS Agent\media-intelligence-os\infra\ops\windows`), not from a worktree.
+- This installs two tasks: **Media OS Watchdog** (the self-healer, every 5 min) and **Media OS Restart Requests** (every minute, see below). Re-running it updates both.
+- The tasks run as you, only while you're signed in, and need no admin rights.
+- They point at this folder, so install from your main checkout (`C:\Media OS Agent\media-intelligence-os\infra\ops\windows`), not from a worktree.
+
+## Restart Postiz from the dashboard
+
+The small ↻ icon on the dashboard's **Postiz gateway** tile restarts Postiz. The dashboard never touches Docker; it only records a request (`ops_requests` table). `ops-requests.ps1`, run every minute by the **Media OS Restart Requests** task, picks it up and runs `docker restart postiz-runtime-app`. It records the outcome, which the dashboard shows, and messages you on Telegram.
+
+- Only that one action exists, and a click while a request is waiting reuses it.
+- A request not picked up within 15 minutes (PC asleep, Docker down) is marked expired rather than run late.
+- A second restart within 2 minutes of the last is refused, to give Postiz time to start.
+- The pause file below pauses this too.
 
 ## Pause, check, test
 

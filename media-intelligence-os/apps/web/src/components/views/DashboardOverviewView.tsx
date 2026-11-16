@@ -34,6 +34,7 @@ import {
   ViewsTrendChart,
 } from "@/components/analytics/ViewsPanels";
 import { BrandLogoEditor } from "@/components/shell/BrandLogoEditor";
+import { PostizRestartButton } from "@/components/shell/PostizRestartButton";
 import { Badge, StatusDot, type BadgeTone } from "@/components/ui/Badge";
 import { ErrorBanner, Skeleton } from "@/components/ui/FeedbackStates";
 import { SectionHeader, SurfaceCard } from "@/components/ui/SurfaceCard";
@@ -62,6 +63,8 @@ interface HealthItem {
   value: string;
   detail: string;
   tone: BadgeTone;
+  /** Small control shown at the top right of the tile (e.g. Restart Postiz). */
+  action?: React.ReactNode;
 }
 
 const HEALTH_ICONS: Record<string, LucideIcon> = {
@@ -281,6 +284,7 @@ function healthItems(
           : status?.postiz.status === "unreachable"
             ? "blocked"
             : "disabled",
+      action: status ? <PostizRestartButton /> : undefined,
     },
     {
       label: "Research ingestion",
@@ -301,13 +305,14 @@ function healthItems(
 
 function HealthStrip({ items }: { items: HealthItem[] }) {
   return (
-    <section aria-label="System health" className="surface overflow-hidden">
+    <section aria-label="System health" className="surface">
       <ul className="stagger-children grid grid-cols-1 divide-y divide-white/[0.05] sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-5 lg:divide-x">
         {items.map((h, i) => (
           <li
             key={h.label}
-            className={`group/health min-w-0 px-4 py-3.5 transition-colors duration-200 hover:bg-white/[0.02] ${i >= 2 ? "sm:border-t sm:border-white/[0.05] lg:border-t-0" : ""}`}
+            className={`group/health relative min-w-0 px-4 py-3.5 transition-colors duration-200 hover:bg-white/[0.02] ${i >= 2 ? "sm:border-t sm:border-white/[0.05] lg:border-t-0" : ""}`}
           >
+            {h.action && <div className="absolute top-2.5 right-2.5">{h.action}</div>}
             <div className="flex items-start gap-3">
               {(() => {
                 const Icon = HEALTH_ICONS[h.label] ?? Activity;

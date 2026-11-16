@@ -1531,3 +1531,47 @@ def test_account_totals_are_stored_daily_served_and_reported(
             db.execute(
                 delete(JobRun).where(JobRun.task_name == "media_os.analytics.sync_account_metrics")
             )
+
+
+# ------------------------------------------------------------------ restart Postiz (dashboard)
+
+
+def test_restart_postiz_request_is_recorded_once_and_reported(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    from media_os_api.db.models import OpsRequest
+
+    try:
+        assert client.get("/api/v1/system/postiz/restart").json()["status"] is None
+        first = client.post("/api/v1/system/postiz/restart")
+        assert first.status_code == 202 and first.json()["status"] == "PENDING"
+        # A second click while it's waiting reuses the same request.
+        again = client.post("/api/v1/system/postiz/restart")
+        assert again.json()["id"] == first.json()["id"]
+        with session_scope(env["factory"]) as db:
+            rows = list(db.execute(select(OpsRequest)).scalars())
+            assert len(rows) == 1 and rows[0].action == "RESTART_POSTIZ"
+            # What the Windows helper does once Docker has restarted the container.
+            rows[0].status, rows[0].finished_at = "DONE", datetime.now(UTC)
+            rows[0].requested_at = datetime.now(UTC) - timedelta(minutes=10)
+            rows[0].result_detail = "Postiz restarted."
+        done = client.get("/api/v1/system/postiz/restart").json()
+        assert done["status"] == "DONE" and done["detail"] == "Postiz restarted."
+        # Straight after a restart, another one is refused.
+        soon = client.post("/api/v1/system/postiz/restart")
+        assert soon.status_code == 409 and soon.json()["error"]["code"] == "JUST_RESTARTED"
+        # A request nobody picks up is flagged so the page can say so.
+        with session_scope(env["factory"]) as db:
+            db.add(
+                OpsRequest(
+                    action="RESTART_POSTIZ",
+                    status="PENDING",
+                    requested_by="owner:t",
+                    requested_at=datetime.now(UTC) - timedelta(minutes=5),
+                )
+            )
+        assert client.get("/api/v1/system/postiz/restart").json()["helper_late"] is True
+    finally:
+        with session_scope(env["factory"]) as db:
+            db.execute(delete(OpsRequest))
+            db.execute(delete(AuditEvent).where(AuditEvent.action == "POSTIZ_RESTART_REQUESTED"))

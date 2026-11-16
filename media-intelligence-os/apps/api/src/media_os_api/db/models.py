@@ -1074,3 +1074,30 @@ class AccountMetricSnapshot(UUIDPrimaryKeyMixin, Base):
     value: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
     observed_on: Mapped[date] = mapped_column(Date, nullable=False)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OpsRequest(UUIDPrimaryKeyMixin, Base):
+    """An owner-requested host action (migration 0013), carried out by the Windows helper task.
+
+    The API only records the request; it never touches Docker. Only allow-listed actions exist.
+    """
+
+    __tablename__ = "ops_requests"
+    __table_args__ = (
+        CheckConstraint("action IN ('RESTART_POSTIZ')", name="ops_request_action_valid"),
+        CheckConstraint(
+            "status IN ('PENDING', 'RUNNING', 'DONE', 'FAILED', 'EXPIRED')",
+            name="ops_request_status_valid",
+        ),
+        Index("ix_ops_requests_status_requested", "status", "requested_at"),
+    )
+
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    requested_by: Mapped[str] = mapped_column(String(128), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, server_default=func.now()
+    )
+    picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
