@@ -32,11 +32,14 @@ if (-not (Test-Path $launcher)) { throw "Missing $launcher" }
 
 $user = "$env:USERDOMAIN\$env:USERNAME"
 $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"{0}"' -f $launcher)
-# Start at sign-in, then every 5 minutes for as long as you're signed in.
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
+# Every 5 minutes, starting now and after every sign-in. Two triggers are needed: a repeating
+# "at log on" trigger only begins repeating after the *next* sign-in, so on its own the task
+# wouldn't run again today; the time-based one covers the current session.
 $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
     -RepetitionInterval (New-TimeSpan -Minutes 5)
-$trigger.Repetition = $repeat.Repetition
+$atLogOn = New-ScheduledTaskTrigger -AtLogOn -User $user
+$atLogOn.Repetition = $repeat.Repetition
+$trigger = @($repeat, $atLogOn)
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 4)
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited

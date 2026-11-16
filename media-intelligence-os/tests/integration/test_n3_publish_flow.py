@@ -911,3 +911,61 @@ def test_watchdog_reports_when_status_checks_stop(env: dict[str, Any]) -> None:
     assert out["sync"].startswith("stale")
     (alert,) = _alerts(env, "sync-stale")
     assert "status checks have stopped" in alert.payload["text"]
+
+
+def test_nightly_report_adds_up_the_last_7_days(env: dict[str, Any]) -> None:
+    from decimal import Decimal
+
+    from media_os_api.db import PostMetricObservation
+
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM", "FACEBOOK"]), clients=env["clients"]
+        )
+    now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
+    published_at = now - timedelta(days=3)
+    # Lifetime counters as the platforms report them: two readings per post.
+    readings = {
+        "INSTAGRAM": {"views": (100, 300), "likes": (10, 25), "comments": (1, 3)},
+        "FACEBOOK": {"reactions": (4, 9), "unique_viewers": (50, 80)},
+    }
+    try:
+        with session_scope(f) as db:
+            for row in db.execute(select(PublishSchedule)).scalars():
+                row.status, row.scheduled_at = "PUBLISHED", published_at
+                for key, (first, last) in readings[row.platform].items():
+                    for at, value in (
+                        (now - timedelta(days=2), first),
+                        (now - timedelta(hours=1), last),
+                    ):
+                        db.add(
+                            PostMetricObservation(
+                                brand_profile_id=row.brand_profile_id,
+                                channel_account_id=row.channel_account_id,
+                                content_package_id=row.content_package_id,
+                                publish_schedule_id=row.id,
+                                platform=row.platform,
+                                metric_key=key,
+                                value_kind="CUMULATIVE",
+                                value=Decimal(value),
+                                observed_at=at,
+                                source="test",
+                            )
+                        )
+        with session_scope(f) as db:
+            out = notify.handle_daily_digest(
+                db, JobRun(id=uuid.uuid4(), task_name=notify.DIGEST_TASK, payload={}), now=now
+            )
+        # Views only from Instagram; likes (IG) + reactions (FB) together; reach-type metrics
+        # (unique viewers) are never added across platforms.
+        assert out["week"] == {"views": 300, "likes_reactions": 34, "comments": 3}
+        (alert,) = _alerts(env, "digest")
+        text = alert.payload["text"]
+        assert "Last 7 days" in text and "Likes &amp; reactions 34" in text
+        assert "<b>Facebook</b> (1 posts): Reactions 9 · Unique viewers 80" in text
+        assert "Facebook comments and shares aren't available" in text
+        assert "YouTube isn't connected" in text
+    finally:
+        with session_scope(f) as db:
+            db.execute(delete(PostMetricObservation))

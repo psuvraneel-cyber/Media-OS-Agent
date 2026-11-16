@@ -12,8 +12,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from html import escape
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:  # type-only: analytics.service imports publish → notify (import cycle)
+    from media_os_api.analytics.service import PeriodTotals
 
 PLATFORM_LABEL = {"INSTAGRAM": "Instagram", "FACEBOOK": "Facebook", "YOUTUBE": "YouTube"}
 IST = ZoneInfo("Asia/Kolkata")
@@ -188,6 +191,73 @@ class DigestItem:
     note: str | None = None
 
 
+CROSS_LABEL = {
+    "views": "Views",
+    "likes_reactions": "Likes & reactions",
+    "comments": "Comments",
+    "shares": "Shares",
+    "saves": "Saves",
+}
+
+
+def number(value: float) -> str:
+    return f"{round(value):,}"
+
+
+def change(current: float, growth: float | None) -> str:
+    if growth is None:
+        return ""
+    if growth == 0:
+        return " (=)"
+    arrow = "▲" if growth > 0 else "▼"
+    return f" ({arrow}{abs(growth):.0f}%)"
+
+
+def metrics_block(totals: PeriodTotals | None, *, days: int = 7) -> list[str]:
+    """The 'last N days' numbers for the nightly report (lines of Telegram HTML)."""
+    from media_os_api.analytics.metrics import METRIC_LABELS
+
+    lines = [f"\n📈 <b>Last {days} days</b> (vs the {days} days before)"]
+    if totals is None or not totals.platforms:
+        lines.append("No published posts with numbers yet.")
+        return lines
+    if totals.overall:
+        lines.append(
+            "<b>All platforms:</b> "
+            + " · ".join(
+                f"{e(CROSS_LABEL[m.key])} {number(m.value)}{change(m.value, m.growth)}"
+                for m in totals.overall
+            )
+        )
+    for p in totals.platforms:
+        parts = [
+            f"{e(METRIC_LABELS.get(m.key, m.key))} {number(m.value)}{change(m.value, m.growth)}"
+            for m in p.metrics
+        ]
+        body = " · ".join(parts) if parts else "no numbers yet"
+        lines.append(f"• <b>{e(platform(p.platform))}</b> ({p.posts} posts): {body}")
+    if totals.top_post and (totals.top_post.engagement or totals.top_post.views):
+        t = totals.top_post
+        link = f' · <a href="{e(t.url)}">link</a>' if t.url else ""
+        score = (
+            f"{number(t.engagement)} interactions" if t.engagement else f"{number(t.views)} views"
+        )
+        where = f"{e(platform(t.platform))}, {score}"
+        lines.append(f"🏆 <b>Top post:</b> {e(short(t.title, 60))} ({where}){link}")
+    notes = []
+    if "FACEBOOK" in totals.platforms_seen:
+        notes.append("Facebook comments and shares aren't available through Postiz")
+    if "YOUTUBE" not in totals.platforms_seen:
+        notes.append("YouTube isn't connected")
+    if totals.data_as_of:
+        notes.append(f"numbers as of {when_ist(totals.data_as_of)} IST")
+    if any(m.approximate for p in totals.platforms for m in p.metrics):
+        notes.append("≈ some values are split across a period edge")
+    if notes:
+        lines.append(f"<i>{e('; '.join(notes))}.</i>")
+    return lines
+
+
 def daily_digest(
     *,
     day: datetime,
@@ -196,9 +266,11 @@ def daily_digest(
     upcoming: Iterable[DigestItem],
     awaiting_review: int,
     dashboard_url: str,
+    totals: PeriodTotals | None = None,
 ) -> str:
+    """The 22:00 IST nightly report: today's activity plus the last 7 days of numbers."""
     pub, bad, nxt = list(published), list(failed), list(upcoming)
-    lines = [f"📊 <b>Media OS · {e(day.astimezone(IST).strftime('%a %d %b'))}</b>"]
+    lines = [f"📊 <b>Media OS nightly report · {e(day.astimezone(IST).strftime('%a %d %b'))}</b>"]
     lines.append(f"\n<b>Posted today:</b> {len(pub)}")
     for item in pub[:10]:
         link = f' · <a href="{e(item.url)}">link</a>' if item.url else ""
@@ -219,4 +291,5 @@ def daily_digest(
         )
     if not pub and not nxt:
         lines.append("\nNothing posted today and nothing scheduled for tomorrow.")
+    lines.extend(metrics_block(totals))
     return "\n".join(lines)
