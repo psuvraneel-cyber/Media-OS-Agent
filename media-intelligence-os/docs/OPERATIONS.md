@@ -155,6 +155,7 @@ There are two layers, and both run every 5 minutes.
 **Host (`infra/ops/windows/watchdog.ps1`, Task Scheduler), repairs:**
 - restarts `postiz-runtime-app` when its worker has no live Temporal pollers for about 10 min, or is crash-looping;
 - restarts any watched container that stays unhealthy, and starts any that has stopped;
+- restarts the dashboard or API container when it is healthy but Windows can no longer reach its port (Docker lost the port link, which leaves the desktop app on "Media OS isn't reachable yet");
 - **watches the watcher:** if Media OS's own `notify.watchdog` hasn't succeeded for 15 min, it tells you directly on Telegram and restarts `media-os-worker` and `media-os-scheduler`;
 - warns when Docker Desktop is down;
 - **dead man's switch (optional):** pings `HEALTHCHECKS_PING_URL` (Healthchecks.io) every run. If the pings stop because the PC is off, asleep or offline, Healthchecks.io alerts you on Telegram from outside.

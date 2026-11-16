@@ -21,6 +21,9 @@
   5. Optional dead man's switch: when HEALTHCHECKS_PING_URL (https://hc-ping.com/...) is in the
      runtime .env, every run pings it. If the pings stop (PC off, asleep, offline, Task Scheduler
      broken), Healthchecks.io alerts you on Telegram from outside.
+  6. The dashboard (127.0.0.1:3100) or API (127.0.0.1:8000) is healthy inside Docker but Windows
+     can't reach it two checks in a row: Docker lost the port link after its Linux layer
+     restarted. Fix: restart that container, which rebuilds the link.
 
   Every action is logged and sent to Telegram (when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are
   in the runtime .env). Restarts have a 15-minute cooldown per container so a broken container is
@@ -55,6 +58,11 @@ $Watched = @(
     'media-os-api', 'media-os-web', 'media-os-worker', 'media-os-scheduler', 'media-os-creative',
     'media-os-postgres', 'media-os-redis', 'postiz-runtime-app', 'postiz-runtime-postgres',
     'postiz-runtime-redis', 'postiz-runtime-temporal'
+)
+# Published ports Windows must be able to reach (the desktop app opens the dashboard).
+$HostPorts = @(
+    @{ Container = 'media-os-web'; Url = 'http://127.0.0.1:3100/login' },
+    @{ Container = 'media-os-api'; Url = 'http://127.0.0.1:8000/health/live' }
 )
 
 New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
@@ -122,6 +130,19 @@ function Get-ContainerState([string]$Name) {
     if (-not $r.Ok) { return $null }
     $parts = $r.Output.Trim().Split('|')
     return [pscustomobject]@{ Status = $parts[0]; Health = $(if ($parts.Count -gt 1) { $parts[1] } else { '' }) }
+}
+
+function Test-HostPort([string]$Url) {
+    # Any HTTP answer, even an error status, means the port link works. Only a refused or timed-out
+    # connection counts as unreachable.
+    try {
+        Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 5 -MaximumRedirection 0 | Out-Null
+        return $true
+    } catch [System.Net.WebException] {
+        return ($null -ne $_.Exception.Response)
+    } catch {
+        return $false
+    }
 }
 
 function Send-Ping([string]$Suffix = '') {
@@ -314,7 +335,29 @@ if ($pg -and $pg.Status -eq 'running' -and $scheduler -and $scheduler.Status -eq
     }
 }
 
+# 4. Can Windows actually reach the dashboard and the API? After Docker's Linux layer restarts,
+#    Docker can lose the 127.0.0.1 port links while the containers stay healthy, so the desktop
+#    app shows "Media OS isn't reachable yet". Restarting the container rebuilds the link.
+foreach ($check in $HostPorts) {
+    $s = Get-ContainerState $check.Container
+    $key = "portDown_$($check.Container)"
+    if (-not ($s -and $s.Status -eq 'running' -and $s.Health -eq 'healthy')) {
+        Set-Prop $state $key 0  # not running or not healthy yet: the checks above handle that
+        continue
+    }
+    if (Test-HostPort $check.Url) {
+        Set-Prop $state $key 0
+        continue
+    }
+    $count = [int](Get-Prop $state $key 0) + 1
+    Set-Prop $state $key $count
+    if ($count -ge 2) {
+        Restart-Container $check.Container ("{0} is healthy but Windows can't reach it at {1} (Docker lost the port link), so the dashboard won't open." -f $check.Container, $check.Url) $state
+        Set-Prop $state $key 0
+    }
+}
+
 $state | ConvertTo-Json | Set-Content $StateFile -Encoding utf8
 
-# 4. Dead man's switch: tell Healthchecks.io the PC and the self-healer are alive.
+# 5. Dead man's switch: tell Healthchecks.io the PC and the self-healer are alive.
 Send-Ping
