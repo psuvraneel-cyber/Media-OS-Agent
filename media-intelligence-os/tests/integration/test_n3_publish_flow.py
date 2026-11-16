@@ -161,11 +161,13 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
     engine = create_db_engine(_db_url(), pool_size=4, max_overflow=2)
     factory = create_session_factory(engine)
     monkeypatch.setenv("MEDIA_OS_MEDIA_ROOT", str(tmp_path))
+    monkeypatch.setenv("MEDIA_OS_UPLOADS_ROOT", str(tmp_path / "uploads"))
     with session_scope(factory) as db:
         brand = db.execute(
             select(BrandProfile).where(BrandProfile.slug == "brand-app-promo")
         ).scalar_one()
         saved = (list(brand.content_pillars), dict(brand.publishing_preferences or {}))
+        saved_identity = dict(brand.visual_identity or {})
         brand.content_pillars = PILLARS
         brand.publishing_preferences = {**saved[1], "daily_caps": {"INSTAGRAM": 1, "FACEBOOK": 1}}
         brief = CarouselBrief(
@@ -215,9 +217,12 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
         with session_scope(factory) as db:
             ids = list(
                 db.execute(
-                    select(ContentPackage.id).where(ContentPackage.format == "CAROUSEL")
+                    select(ContentPackage.id).where(
+                        ContentPackage.format.in_(("CAROUSEL", "REEL", "POST"))
+                    )
                 ).scalars()
             )
+            db.execute(delete(Asset).where(Asset.asset_type.in_(("BRAND_LOGO", "UPLOAD_IMAGE"))))
             db.execute(delete(PublishSchedule))
             db.execute(
                 delete(ChannelAccount).where(ChannelAccount.postiz_integration_id.is_not(None))
@@ -234,10 +239,15 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
                 jobs = select(JobRun.id).where(JobRun.task_name.like(pattern))
                 db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(jobs)))
                 db.execute(delete(JobRun).where(JobRun.task_name.like(pattern)))
-            db.execute(delete(AuditEvent).where(AuditEvent.action.like("CAROUSEL_%")))
+            manual = select(JobRun.id).where(JobRun.idempotency_key.like("analytics:manual:%"))
+            db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(manual)))
+            db.execute(delete(JobRun).where(JobRun.idempotency_key.like("analytics:manual:%")))
+            for prefix in ("CAROUSEL_%", "REEL_%", "POST_%", "BRAND_LOGO_%", "ANALYTICS_SYNC_%"):
+                db.execute(delete(AuditEvent).where(AuditEvent.action.like(prefix)))
             restored = db.get(BrandProfile, bid)
             assert restored is not None
             restored.content_pillars, restored.publishing_preferences = saved
+            restored.visual_identity = saved_identity
         engine.dispose()
 
 
@@ -1130,3 +1140,304 @@ def test_bot_answers_the_owner_only_and_remembers_its_place(env: dict[str, Any])
             ids = select(JobRun.id).where(JobRun.task_name == commands.COMMANDS_TASK)
             db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(ids)))
             db.execute(delete(JobRun).where(JobRun.task_name == commands.COMMANDS_TASK))
+
+
+# ------------------------------------------------------------------ owner reels (Studio)
+
+BRAND_Q = "brand=brand-app-promo"
+
+
+def _upload(c: TestClient, data: bytes, name: str = "Wedding reel.mp4") -> Any:
+    return c.post(
+        f"/api/v1/content/reels/upload?{BRAND_Q}&filename={name}",
+        content=data,
+        headers={"Content-Type": "video/mp4"},
+    )
+
+
+def test_owner_reel_upload_approve_batch_schedule_and_publish(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    from tests.mp4_fixtures import make_mp4
+
+    first = _upload(client, make_mp4(15))
+    second = _upload(client, make_mp4(20), "Second.mp4")
+    assert first.status_code == 201 and second.status_code == 201, first.text
+    reel = first.json()
+    assert reel["format"] == "REEL" and reel["status"] == "QA_PASSED"
+    assert reel["approval_status"] == "PENDING" and reel["title"] == "Wedding reel"
+    assert reel["duration_seconds"] == pytest.approx(15) and reel["video_asset_id"]
+
+    # The video plays back from the uploads volume, with Range support.
+    vid = client.get(f"/api/v1/content/assets/{reel['video_asset_id']}/file?{BRAND_Q}")
+    assert vid.status_code == 200 and vid.headers["content-type"] == "video/mp4"
+    part = client.get(
+        f"/api/v1/content/assets/{reel['video_asset_id']}/file?{BRAND_Q}",
+        headers={"Range": "bytes=0-7"},
+    )
+    assert part.status_code == 206 and len(part.content) == 8
+
+    # Cover frame becomes the thumbnail.
+    cover = client.put(
+        f"/api/v1/content/reels/{reel['id']}/poster?{BRAND_Q}",
+        content=b"\xff\xd8\xff\xe0" + b"0" * 100,
+        headers={"Content-Type": "image/jpeg"},
+    )
+    assert cover.status_code == 200 and cover.json()["thumbnail_asset_id"]
+
+    edit = client.patch(
+        f"/api/v1/content/studio/{reel['id']}?{BRAND_Q}",
+        json={"caption": "Our new card", "hashtags": ["biye", "#Nimontron"]},
+    )
+    assert edit.status_code == 200 and edit.json()["hashtags"] == ["#biye", "#Nimontron"]
+
+    listed = client.get(f"/api/v1/content/studio?{BRAND_Q}").json()["items"]
+    assert {r["id"] for r in listed} == {reel["id"], second.json()["id"]}
+    # Owner reels are reviewed in Studio, not in the carousel review queue.
+    review = client.get(f"/api/v1/content/carousels?{BRAND_Q}&queue=review").json()["items"]
+    assert reel["id"] not in {r["id"] for r in review}
+
+    for pid in (reel["id"], second.json()["id"]):
+        ok = client.post(
+            f"/api/v1/content/carousels/{pid}/decision?{BRAND_Q}", json={"decision": "APPROVE"}
+        )
+        assert ok.status_code == 200
+    # After approval the caption is locked.
+    assert (
+        client.patch(f"/api/v1/content/studio/{reel['id']}?{BRAND_Q}", json={"caption": "x"})
+    ).status_code == 409
+    publish_q = client.get(f"/api/v1/content/carousels?{BRAND_Q}&queue=publish").json()["items"]
+    assert reel["id"] in {r["id"] for r in publish_q}
+
+    # Batch: the env caps each platform at 1 post a day, so the second reel on the same day is
+    # refused with a reason while the first is scheduled.
+    when = _when()
+    batch = client.post(
+        f"/api/v1/content/schedule-batch?{BRAND_Q}",
+        json={
+            "platforms": ["INSTAGRAM", "FACEBOOK"],
+            "items": [
+                {"package_id": reel["id"], "scheduled_at": when.isoformat()},
+                {
+                    "package_id": second.json()["id"],
+                    "scheduled_at": (when + timedelta(minutes=30)).isoformat(),
+                },
+            ],
+        },
+    )
+    assert batch.status_code == 200, batch.text
+    out = batch.json()
+    assert out["scheduled"] == 1
+    assert [r["ok"] for r in out["results"]] == [True, False]
+    assert out["results"][1]["code"] == "DAILY_CAP"
+
+    # The worker hosts the video itself (not slides) and hands Postiz an .mp4 URL.
+    assert _run_job(env, when)["status"] == "SCHEDULED"
+    host, postiz = env["host"], env["postiz"]
+    (path, data) = host.published[-1]
+    assert path.endswith("/reel.mp4") and isinstance(data, Path) and data.is_file()
+    assert all(c["images"] == [f"https://o.github.io/m/{path}"] for c in postiz.created)
+    assert (
+        "Our new card" in postiz.created[0]["caption"] and "#biye" in postiz.created[0]["caption"]
+    )
+
+    # A scheduled reel can't be removed; an unscheduled one can, and its file goes.
+    assert client.delete(f"/api/v1/content/studio/{reel['id']}?{BRAND_Q}").status_code == 409
+    gone = client.delete(f"/api/v1/content/studio/{second.json()['id']}?{BRAND_Q}")
+    assert gone.status_code == 204
+    left = client.get(f"/api/v1/content/studio?{BRAND_Q}").json()["items"]
+    assert [r["id"] for r in left] == [reel["id"]]
+    with session_scope(env["factory"]) as db:
+        removed = db.execute(
+            select(Asset).where(
+                Asset.content_package_id == uuid.UUID(second.json()["id"]),
+                Asset.asset_type == "REEL_VIDEO",
+            )
+        ).scalar_one()
+        assert removed.status == "DELETED"
+        from media_os_api.content.uploads import resolve_asset_path
+
+        p = resolve_asset_path(removed.local_path)
+        assert p is not None and not p.exists()
+
+
+def test_bad_uploads_are_refused_or_flagged(env: dict[str, Any], client: TestClient) -> None:
+    from tests.mp4_fixtures import make_mp4
+
+    not_video = _upload(client, b"\x89PNG\r\n\x1a\n" + b"0" * 100, "x.mp4")
+    assert not_video.status_code == 201
+    flagged = not_video.json()
+    # Kept so the owner sees why, but it can never be approved.
+    assert flagged["qa_passed"] is False and flagged["status"] == "RENDERED"
+    refused = client.post(
+        f"/api/v1/content/carousels/{flagged['id']}/decision?{BRAND_Q}",
+        json={"decision": "APPROVE"},
+    )
+    assert refused.status_code == 409
+    short = _upload(client, make_mp4(1))
+    assert short.json()["qa_passed"] is False
+    too_big = client.post(
+        f"/api/v1/content/reels/upload?{BRAND_Q}",
+        content=b"0" * 10,
+        headers={"Content-Type": "video/mp4", "Content-Length": str(200 * 1024 * 1024)},
+    )
+    assert too_big.status_code == 413
+
+
+def test_brand_logo_set_shown_and_removed(env: dict[str, Any], client: TestClient) -> None:
+    png = _png()
+    r = client.put(
+        "/api/v1/brands/brand-app-promo/logo", content=png, headers={"Content-Type": "image/png"}
+    )
+    assert r.status_code == 200
+    logo_id = r.json()["logo_asset_id"]
+    brand = client.get("/api/v1/brands/brand-app-promo").json()
+    assert brand["visual_identity"]["logo_asset_id"] == logo_id
+    img = client.get(f"/api/v1/content/assets/{logo_id}/file?{BRAND_Q}")
+    assert img.status_code == 200 and img.content == png
+    lib = client.get(f"/api/v1/content/library?{BRAND_Q}&kind=BRAND_LOGO").json()["items"]
+    assert [i["asset_id"] for i in lib] == [logo_id]
+
+    # Replacing keeps one logo; the old file is retired.
+    r2 = client.put(
+        "/api/v1/brands/brand-app-promo/logo", content=png, headers={"Content-Type": "image/png"}
+    )
+    assert r2.json()["logo_asset_id"] != logo_id
+    assert client.get(f"/api/v1/content/assets/{logo_id}/file?{BRAND_Q}").status_code == 404
+    bad = client.put(
+        "/api/v1/brands/brand-app-promo/logo",
+        content=b"GIF89a",
+        headers={"Content-Type": "image/gif"},
+    )
+    assert bad.status_code == 422
+    assert client.delete("/api/v1/brands/brand-app-promo/logo").json() == {"logo_asset_id": None}
+    brand = client.get("/api/v1/brands/brand-app-promo").json()
+    assert "logo_asset_id" not in brand["visual_identity"]
+
+
+def test_sync_now_queues_one_forced_analytics_run(env: dict[str, Any], client: TestClient) -> None:
+    a = client.post(f"/api/v1/analytics/sync?{BRAND_Q}")
+    b = client.post(f"/api/v1/analytics/sync?{BRAND_Q}")
+    assert a.status_code == 202 and b.status_code == 202
+    assert (
+        a.json()["job_id"] == b.json()["job_id"]
+        or a.json()["queued_at"][:16] != b.json()["queued_at"][:16]
+    )
+    with session_scope(env["factory"]) as db:
+        job = db.get(JobRun, uuid.UUID(a.json()["job_id"]))
+        assert job is not None and job.payload["force_recent"] is True
+        assert job.queue_name == "research"
+    assert set(client.get("/api/v1/analytics/sync").json()) >= {"last_success_at", "last_status"}
+
+
+# ------------------------------------------------------------------ owner photo posts & carousels
+
+
+def _jpeg(w: int = 1080, h: int = 1350, color: tuple[int, int, int] = (20, 90, 160)) -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), color).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def _stage(c: TestClient, data: bytes, mime: str = "image/jpeg") -> str:
+    r = c.post(
+        f"/api/v1/content/images/upload?{BRAND_Q}", content=data, headers={"Content-Type": mime}
+    )
+    assert r.status_code == 201, r.text
+    return str(r.json()["asset_id"])
+
+
+def test_owner_carousel_keeps_the_chosen_order_and_publishes(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    colors = [(200, 0, 0), (0, 200, 0), (0, 0, 200)]
+    ids = [_stage(client, _jpeg(color=c)) for c in colors]
+    ids.append(_stage(client, _png(), "image/png"))  # mixed formats are fine
+    order = [ids[2], ids[0], ids[3], ids[1]]
+    made = client.post(
+        f"/api/v1/content/posts?{BRAND_Q}", json={"asset_ids": order, "title": "Menu cards"}
+    )
+    assert made.status_code == 201, made.text
+    post = made.json()
+    assert post["format"] == "CAROUSEL" and post["status"] == "QA_PASSED"
+    assert post["slide_asset_ids"] == order and post["thumbnail_asset_id"] == order[0]
+    assert post["title"] == "Menu cards" and post["slide_count"] == 4
+    # Staged images are used up: they can't go into a second post.
+    again = client.post(f"/api/v1/content/posts?{BRAND_Q}", json={"asset_ids": [ids[0]]})
+    assert again.status_code == 409
+
+    # Reviewed in Studio, not in the generated-carousel review queue.
+    review = client.get(f"/api/v1/content/carousels?{BRAND_Q}&queue=review").json()["items"]
+    assert post["id"] not in {r["id"] for r in review}
+    studio = client.get(f"/api/v1/content/studio?{BRAND_Q}").json()["items"]
+    assert post["id"] in {r["id"] for r in studio}
+
+    client.patch(f"/api/v1/content/studio/{post['id']}?{BRAND_Q}", json={"caption": "New menus"})
+    ok = client.post(
+        f"/api/v1/content/carousels/{post['id']}/decision?{BRAND_Q}", json={"decision": "APPROVE"}
+    )
+    assert ok.status_code == 200
+    when = _when()
+    assert _api_schedule(client, uuid.UUID(post["id"]), when).status_code == 200
+    assert _run_job(env, when)["status"] == "SCHEDULED"
+
+    # Hosted as JPEGs in the chosen order.
+    from PIL import Image
+
+    hosted = env["host"].published[-4:]
+    assert [p.rsplit("/", 1)[1] for p, _ in hosted] == [
+        "slide-01.jpg",
+        "slide-02.jpg",
+        "slide-03.jpg",
+        "slide-04.jpg",
+    ]
+    first = Image.open(io.BytesIO(hosted[0][1])).convert("RGB").getpixel((5, 5))
+    assert isinstance(first, tuple) and first[2] > 150  # the blue image went first
+    assert all(d[:3] == b"\xff\xd8\xff" for _, d in hosted)
+    assert len(env["postiz"].created[-1]["images"]) == 4
+
+
+def test_owner_single_photo_post_and_bad_images(env: dict[str, Any], client: TestClient) -> None:
+    one = _stage(client, _jpeg(1080, 1080))
+    made = client.post(f"/api/v1/content/posts?{BRAND_Q}", json={"asset_ids": [one]})
+    assert made.status_code == 201
+    post = made.json()
+    assert post["format"] == "POST" and post["qa_passed"] is True
+
+    client.post(
+        f"/api/v1/content/carousels/{post['id']}/decision?{BRAND_Q}", json={"decision": "APPROVE"}
+    )
+    when = _when()
+    assert _api_schedule(client, uuid.UUID(post["id"]), when).status_code == 200
+    assert _run_job(env, when)["status"] == "SCHEDULED"
+    assert len(env["postiz"].created[-1]["images"]) == 1
+
+    # A very tall image is allowed but flagged (Instagram crops it).
+    tall = _stage(client, _jpeg(600, 1600))
+    flagged = client.post(f"/api/v1/content/posts?{BRAND_Q}", json={"asset_ids": [tall]}).json()
+    assert flagged["qa_passed"] is True
+    assert any(c["name"] == "aspect_ratio" for c in flagged["qa_report"]["checks"])
+
+    bad = client.post(
+        f"/api/v1/content/images/upload?{BRAND_Q}",
+        content=b"GIF89a....",
+        headers={"Content-Type": "image/gif"},
+    )
+    assert bad.status_code == 422
+    eleven = [_stage(client, _jpeg(200, 250)) for _ in range(11)]
+    too_many = client.post(f"/api/v1/content/posts?{BRAND_Q}", json={"asset_ids": eleven})
+    assert too_many.status_code == 422
+
+    # Removing deletes the uploaded files.
+    removed = client.delete(f"/api/v1/content/studio/{flagged['id']}?{BRAND_Q}")
+    assert removed.status_code == 204
+    with session_scope(env["factory"]) as db:
+        slide = db.execute(
+            select(Asset).where(Asset.content_package_id == uuid.UUID(flagged["id"]))
+        ).scalar_one()
+        from media_os_api.content.uploads import resolve_asset_path
+
+        path = resolve_asset_path(slide.local_path)
+        assert slide.status == "DELETED" and path is not None and not path.exists()

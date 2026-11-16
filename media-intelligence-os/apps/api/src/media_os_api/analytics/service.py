@@ -192,7 +192,7 @@ def _thumbnail_ids(db: Session, package_ids: set[uuid.UUID]) -> dict[uuid.UUID, 
         select(Asset.content_package_id, Asset.id, Asset.local_path)
         .where(
             Asset.content_package_id.in_(package_ids),
-            Asset.asset_type == "CAROUSEL_SLIDE",
+            Asset.asset_type.in_(("CAROUSEL_SLIDE", "REEL_POSTER")),
             Asset.status == "ACTIVE",
         )
         .order_by(Asset.content_package_id, Asset.local_path)

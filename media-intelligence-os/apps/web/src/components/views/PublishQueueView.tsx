@@ -149,7 +149,11 @@ function Row({ item, brand, onChanged }: { item: CarouselSummary; brand: string;
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-slate-100">{item.hook ?? item.title}</p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            <Badge tone="info">{LANGUAGE_LABEL[item.language ?? ""] ?? item.language ?? "—"}</Badge>
+            {item.format === "REEL" || item.format === "POST" || !item.language ? (
+              <Badge tone="info">{item.format === "REEL" ? "Reel" : item.format === "POST" ? "Photo" : "Carousel"}</Badge>
+            ) : (
+              <Badge tone="info">{LANGUAGE_LABEL[item.language ?? ""] ?? item.language ?? "—"}</Badge>
+            )}
             <Badge tone={statusTone(item.status)}>{item.status}</Badge>
             {item.scheduling ? <Badge tone="prototype">Uploading & scheduling…</Badge> : null}
           </div>

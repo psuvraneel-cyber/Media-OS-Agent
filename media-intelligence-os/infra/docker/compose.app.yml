@@ -41,8 +41,11 @@ services:
       POSTIZ_BASE_URL: ${POSTIZ_BASE_URL:-http://host.docker.internal:4007}
       SOURCE_REDDIT_STATUS: ${SOURCE_REDDIT_STATUS:-BLOCKED}
       MEDIA_OS_MEDIA_ROOT: /data/media
+      MEDIA_OS_UPLOADS_ROOT: /data/uploads
     volumes:
       - media_os_media:/data/media:ro
+      # Owner uploads (reels, cover frames, brand logo): written by the API only.
+      - media_os_uploads:/data/uploads
     ports:
       - "127.0.0.1:8000:8000"
     extra_hosts:
@@ -243,8 +246,11 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       MEDIA_OS_DASHBOARD_URL: ${MEDIA_OS_DASHBOARD_URL:-http://127.0.0.1:3100}
+      MEDIA_OS_UPLOADS_ROOT: /data/uploads
     volumes:
       - media_os_media:/data/media:ro
+      # Read-only: the worker hosts approved reels on GitHub Pages before scheduling them.
+      - media_os_uploads:/data/uploads:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -452,6 +458,8 @@ volumes:
     name: media_os_redisdata
   media_os_media:
     name: media_os_media
+  media_os_uploads:
+    name: media_os_uploads
 
 networks:
   media-os-net:

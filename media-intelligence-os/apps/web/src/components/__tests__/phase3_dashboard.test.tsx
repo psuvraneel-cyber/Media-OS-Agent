@@ -304,8 +304,8 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
       screen.getByText("No connected social channels for Technology & AI"),
     ).toBeInTheDocument();
 
-    const brandSelect = screen.getByLabelText("Active Brand Profile");
-    await user.selectOptions(brandSelect, BRAND_APP_ID);
+    await user.click(screen.getByRole("button", { name: "Active Brand Profile" }));
+    await user.click(screen.getByRole("option", { name: /App Promotion/ }));
 
     expect(
       screen.getByText("No connected social channels for App Promotion"),
@@ -335,7 +335,9 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
       withInactive,
     );
 
-    expect(screen.getByRole("option", { name: /App Promotion.*\[Inactive\]/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Active Brand Profile" }));
+    expect(screen.getByRole("option", { name: /App Promotion.*Inactive/i })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: /^Activate Brand$/i }));
 
     await waitFor(() => {
@@ -385,8 +387,11 @@ describe("Media Intelligence OS Dashboard (Phase 4 Persistence)", () => {
     );
 
     expect(screen.getByText("No performance records collected for Technology & AI")).toBeInTheDocument();
-    expect(screen.getByText(/App Promotion/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Generate with Gemini/i })).toBeDisabled();
+    // Studio and Assets: real upload and library screens, empty for a new brand.
+    expect(screen.getByRole("button", { name: /Upload reels/i })).toBeInTheDocument();
+    expect(await screen.findByText("Nothing waiting for review")).toBeInTheDocument();
+    expect(screen.getByText("Brand logo")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Refresh analytics/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open Postiz/i })).toHaveAttribute(
       "href",
       "http://localhost:4007",

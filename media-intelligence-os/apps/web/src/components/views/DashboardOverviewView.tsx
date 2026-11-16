@@ -33,6 +33,7 @@ import {
   ViewsHero,
   ViewsTrendChart,
 } from "@/components/analytics/ViewsPanels";
+import { BrandLogoEditor } from "@/components/shell/BrandLogoEditor";
 import { Badge, StatusDot, type BadgeTone } from "@/components/ui/Badge";
 import { ErrorBanner, Skeleton } from "@/components/ui/FeedbackStates";
 import { SectionHeader, SurfaceCard } from "@/components/ui/SurfaceCard";
@@ -586,10 +587,13 @@ export function DashboardOverviewView({
             <StatusDot tone={activeBrand.active ? "live" : "disabled"} />
             Brand workspace
           </p>
-          <h1 className="text-gradient mt-1.5 text-[1.75rem] leading-tight font-semibold sm:text-[2.25rem]">
-            {activeBrand.name}
-          </h1>
-          <p className="mt-1 text-[13px] text-slate-400">{activeBrand.niche}</p>
+          <div className="mt-2 flex items-center gap-4">
+            <BrandLogoEditor brand={activeBrand} size={60} />
+            <h1 className="text-gradient min-w-0 text-[1.75rem] leading-tight font-semibold sm:text-[2.25rem]">
+              {activeBrand.name}
+            </h1>
+          </div>
+          <p className="mt-1.5 text-[13px] text-slate-400">{activeBrand.niche}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
@@ -672,7 +676,7 @@ export function DashboardOverviewView({
           )}
           {report && (
             <div className="mt-5 border-t border-white/[0.05] pt-3">
-              <SyncLine sync={report.sync} report={report} />
+              <SyncLine sync={report.sync} report={report} onSynced={views.reload} />
             </div>
           )}
         </div>

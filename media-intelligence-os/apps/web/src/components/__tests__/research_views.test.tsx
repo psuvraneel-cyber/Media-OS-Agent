@@ -225,11 +225,13 @@ describe("Research and Topics views (Phase 5, M6)", () => {
     expect(screen.getByText("PENDING_EVALUATION", { selector: "span" })).toBeInTheDocument();
     expect(fetchSpy.mock.calls[0][0]).toBe(`/api/v1/topics?brand=${APP}&limit=50`);
 
-    await user.selectOptions(screen.getByLabelText("Editorial status filter"), "REJECTED");
+    await user.click(screen.getByRole("button", { name: "Editorial status filter" }));
+    await user.click(screen.getByRole("option", { name: "Rejected" }));
     await screen.findByText("No topics for App Promotion");
     expect(fetchSpy.mock.calls[1][0]).toBe(`/api/v1/topics?brand=${APP}&limit=50&editorial_status=REJECTED`);
 
-    await user.selectOptions(screen.getByLabelText("Editorial status filter"), "");
+    await user.click(screen.getByRole("button", { name: "Editorial status filter" }));
+    await user.click(screen.getByRole("option", { name: "All" }));
     await user.click(await screen.findByText("Shared paper topic"));
     await screen.findByText("Provenance (2)");
     expect(fetchSpy.mock.calls[3][0]).toBe(

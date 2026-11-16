@@ -96,7 +96,16 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
     assert not [k for k in creative["environment"] if k.startswith(secret_markers)]
     mounts = {v["target"]: v.get("read_only", False) for v in creative["volumes"]}
     assert mounts == {"/brand-assets/brand-app-promo": True, "/data/media": False}
-    assert {v["target"]: v.get("read_only", False) for v in api["volumes"]} == {"/data/media": True}
+    # The API reads rendered media and is the only writer of owner uploads; the worker reads both.
+    assert {v["target"]: v.get("read_only", False) for v in api["volumes"]} == {
+        "/data/media": True,
+        "/data/uploads": False,
+    }
+    assert {v["target"]: v.get("read_only", False) for v in worker["volumes"]} == {
+        "/data/media": True,
+        "/data/uploads": True,
+    }
+    assert "/data/uploads" not in mounts  # the renderer never sees uploads
     assert "creative" not in worker["command"][-1]
 
     # Strict loopback-only host bindings for web and api
@@ -120,7 +129,12 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
     assert "media-os-baseline-net" not in networks
 
     volumes = cfg.get("volumes", {})
-    assert sorted(volumes.keys()) == ["media_os_media", "media_os_pgdata", "media_os_redisdata"]
+    assert sorted(volumes.keys()) == [
+        "media_os_media",
+        "media_os_pgdata",
+        "media_os_redisdata",
+        "media_os_uploads",
+    ]
 
     # Web must communicate internally over docker network without hardcoded secrets
     web_env = web["environment"]

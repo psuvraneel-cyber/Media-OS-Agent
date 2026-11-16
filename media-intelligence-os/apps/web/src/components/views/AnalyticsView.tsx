@@ -24,6 +24,7 @@ import {
   VIEWS_TOOLTIP,
   ViewsTrendChart,
 } from "@/components/analytics/ViewsPanels";
+import { SyncNowButton } from "@/components/analytics/SyncNowButton";
 import { AreaChart, BarList } from "@/components/charts/AreaChart";
 import { Badge } from "@/components/ui/Badge";
 import { DeltaPill, InfoTip, SegmentedControl, Select } from "@/components/ui/Controls";
@@ -122,6 +123,12 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
     };
   }
 
+  const reloadAll = () => {
+    views.reload();
+    posts.reload();
+    pipeline.reload();
+  };
+
   const noPosts = report !== null && report.totals.published_posts === 0;
   const filtered = Boolean(platform || account || format);
 
@@ -156,11 +163,13 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
             options={[
               { value: "", label: "All formats" },
               { value: "CAROUSEL", label: "Carousel" },
+              { value: "POST", label: "Photo post" },
               { value: "REEL", label: "Reel" },
               { value: "SHORT", label: "Short" },
               { value: "LONG_VIDEO", label: "Long video" },
             ]}
           />
+          <SyncNowButton variant="chip" onSynced={reloadAll} />
         </div>
       </div>
 
@@ -200,7 +209,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
           />
           {report && (
             <div className="px-1">
-              <SyncLine sync={report.sync} report={report} />
+              <SyncLine sync={report.sync} report={report} onSynced={reloadAll} />
             </div>
           )}
         </>
@@ -421,7 +430,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
                     ))}
                   </ul>
                   <div className="mt-4">
-                    <SyncLine sync={report.sync} report={report} />
+                    <SyncLine sync={report.sync} report={report} onSynced={reloadAll} />
                   </div>
                 </>
               ) : (

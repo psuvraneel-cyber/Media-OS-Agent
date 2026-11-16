@@ -112,6 +112,17 @@ Migration `0004_add_brand_topic_assignments` establishes the multi-brand editori
 
 ---
 
+### Studio: the owner's own reels, photos and carousels, brand logo, Sync now
+
+- **Photos and carousels.** Images (PNG, JPEG or WebP, up to 8 MB each) are staged one by one, then become one post: 1 image is a photo post (`POST`), 2–10 a carousel, in the order the owner set. Checks flag shapes Instagram would crop. At publish time images are converted to JPEG with phone rotation applied, and capped at 2160 px. Owner uploads are marked by `qa_report.version` starting `owner-`, so they're reviewed in Studio and kept out of the generated-carousel review queue.
+- **Upload → approve → schedule.** Studio takes MP4 reels (up to 95 MB, 3 s–15 min; 9:16 recommended). Each upload becomes a `REEL` content package, checked on arrival (real MP4 with a video track, size, length, aspect ratio). It waits for the owner's approval, using the same decision endpoint as carousels. Captions and hashtags are editable until approval. Approved reels can be scheduled one at a time from Approvals, or in a batch from Studio (first time + spacing). Each item goes through the usual checks: 20 min lead time, 30-day window, daily cap, 5-min spacing. Requests still waiting for the worker count toward the cap and spacing too.
+- **Publishing.** The worker commits the video to the GitHub Pages media repo and gives Postiz the `.mp4` URL. Postiz posts a single MP4 as an Instagram Reel and a Facebook video reel. Big files are streamed, never held in memory.
+- **Storage.** Uploads live on the `media_os_uploads` volume: written by the API only, read-only for the worker, never by the renderer. Removing a reel deletes its file. Hosted videos stay in the public media repo's history; GitHub recommends keeping a repo under about 1 GB, so roughly 25–30 reels of 30–40 MB.
+- **Brand logo.** `PUT /api/v1/brands/{brand}/logo` (PNG, JPEG or WebP, up to 5 MB) is stored as a `BRAND_LOGO` asset and referenced from `visual_identity.logo_asset_id`. It's shown beside the brand name and in the brand switcher.
+- **Sync now.** `POST /api/v1/analytics/sync` queues the forced 30-day metrics sync (one job per minute however often it's clicked). The dashboard waits for it to finish, then reloads the numbers.
+
+---
+
 ### Owner alerts and self-healing (Telegram)
 
 There are two layers, and both run every 5 minutes.

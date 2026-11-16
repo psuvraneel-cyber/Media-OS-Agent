@@ -39,7 +39,7 @@ def get_views(
     platform: PlatformParam = None,
     account: Annotated[uuid.UUID | None, Query()] = None,
     content_format: Annotated[
-        Literal["CAROUSEL", "REEL", "SHORT", "LONG_VIDEO"] | None, Query(alias="format")
+        Literal["CAROUSEL", "REEL", "POST", "SHORT", "LONG_VIDEO"] | None, Query(alias="format")
     ] = None,
 ) -> dict[str, Any]:
     with _db(request) as db:
@@ -66,7 +66,7 @@ def list_posts(
     platform: PlatformParam = None,
     account: Annotated[uuid.UUID | None, Query()] = None,
     content_format: Annotated[
-        Literal["CAROUSEL", "REEL", "SHORT", "LONG_VIDEO"] | None, Query(alias="format")
+        Literal["CAROUSEL", "REEL", "POST", "SHORT", "LONG_VIDEO"] | None, Query(alias="format")
     ] = None,
     sort: Annotated[Literal["views", "engagement_rate", "published"], Query()] = "views",
     page: Annotated[int, Query(ge=1, le=10_000)] = 1,

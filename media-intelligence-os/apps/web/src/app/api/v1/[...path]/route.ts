@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getInternalApiBaseUrl } from "@/lib/server-api";
 
+function isMediaType(contentType: string | null): boolean {
+  return /^(video|image)\//.test(contentType ?? "") || contentType === "application/octet-stream";
+}
+
 async function proxyRequest(
   request: NextRequest,
   context: { params: Promise<{ path: string[] }> },
@@ -25,7 +29,7 @@ async function proxyRequest(
   const targetUrl = `${getInternalApiBaseUrl()}${targetPath}${search}`;
 
   const forwardHeaders = new Headers();
-  for (const name of ["content-type", "cookie", "x-csrf-token", "x-request-id", "origin"]) {
+  for (const name of ["content-type", "cookie", "x-csrf-token", "x-request-id", "origin", "range"]) {
     const val = request.headers.get(name);
     if (val) {
       forwardHeaders.set(name, val);
@@ -33,8 +37,10 @@ async function proxyRequest(
   }
 
   const method = request.method.toUpperCase();
-  const body =
-    method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
+  const hasBody = method !== "GET" && method !== "HEAD";
+  // Uploads (reels, images) are streamed straight through, so a large video never sits in memory.
+  const streamUpload = hasBody && isMediaType(request.headers.get("content-type")) && request.body !== null;
+  const body = !hasBody ? undefined : streamUpload ? request.body : await request.arrayBuffer();
 
   try {
     const upstream = await fetch(targetUrl, {
@@ -43,14 +49,25 @@ async function proxyRequest(
       body,
       redirect: "manual",
       cache: "no-store",
-    });
+      ...(streamUpload ? { duplex: "half" } : {}),
+    } as RequestInit);
 
-    const responseBody = await upstream.arrayBuffer();
     const outHeaders = new Headers();
     const contentType = upstream.headers.get("content-type");
     if (contentType) {
       outHeaders.set("content-type", contentType);
     }
+    // Videos stream back with Range support, so the player can seek without a full download.
+    const streamDownload = contentType?.startsWith("video/") ?? false;
+    if (streamDownload) {
+      for (const name of ["content-length", "content-range", "accept-ranges", "cache-control"]) {
+        const val = upstream.headers.get(name);
+        if (val) {
+          outHeaders.set(name, val);
+        }
+      }
+    }
+    const responseBody = streamDownload ? upstream.body : await upstream.arrayBuffer();
     const requestId = upstream.headers.get("x-request-id");
     if (requestId) {
       outHeaders.set("x-request-id", requestId);

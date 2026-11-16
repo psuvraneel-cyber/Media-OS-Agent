@@ -11,28 +11,28 @@
 
 from __future__ import annotations
 
-import os
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from media_os_api.auth import SessionPayload, require_csrf, require_session
 from media_os_api.carousel.service import RecheckError, recheck_package
+from media_os_api.content.uploads import OWNER_QA_PREFIX, resolve_asset_path
 from media_os_api.db.models import Asset, BrandProfile, ContentPackage, PublishSchedule
 from media_os_api.db.session import session_scope
 from media_os_api.publish.service import (
     OVERDUE_AFTER,
     RESCHEDULABLE_STATES,
+    SCHEDULABLE_FORMATS,
     ScheduleRequestError,
     can_schedule,
     package_schedules,
@@ -43,6 +43,9 @@ from media_os_api.services.audit_service import record_audit_event
 from media_os_api.workflow.state_machine import ContentLifecycleStatus, transition_content_status
 
 router = APIRouter(tags=["content"])
+
+SERVABLE_TYPES = ("image/png", "image/jpeg", "image/webp", "video/mp4")
+THUMBNAIL_TYPES = ("CAROUSEL_SLIDE", "REEL_POSTER")
 
 REVIEW_STATUSES = ("QA_PASSED", "RENDERED", "DRAFTED")
 PUBLISH_STATUSES = (
@@ -80,6 +83,7 @@ class SlideAsset(BaseModel):
 
 class CarouselSummary(BaseModel):
     id: str
+    format: str = "CAROUSEL"  # CAROUSEL | REEL
     status: str
     approval_status: str
     title: str | None
@@ -148,19 +152,21 @@ def _brand_id(db: Session, ref: str) -> uuid.UUID:
 
 def _package(db: Session, brand_id: uuid.UUID, package_id: uuid.UUID) -> ContentPackage:
     pkg = db.get(ContentPackage, package_id)
-    if pkg is None or pkg.brand_profile_id != brand_id or pkg.format != "CAROUSEL":
+    if pkg is None or pkg.brand_profile_id != brand_id or pkg.format not in SCHEDULABLE_FORMATS:
         raise HTTPException(
-            status.HTTP_404_NOT_FOUND, {"code": "NOT_FOUND", "message": "Carousel not found."}
+            status.HTTP_404_NOT_FOUND, {"code": "NOT_FOUND", "message": "Post not found."}
         )
     return pkg
 
 
 def _slide_assets(db: Session, pkg: ContentPackage) -> list[Asset]:
+    """A carousel's slides, or a reel's cover frame: the first one is the thumbnail."""
+    kind = "REEL_POSTER" if pkg.format == "REEL" else "CAROUSEL_SLIDE"
     rows = db.execute(
         select(Asset)
         .where(
             Asset.content_package_id == pkg.id,
-            Asset.asset_type == "CAROUSEL_SLIDE",
+            Asset.asset_type == kind,
             Asset.status == "ACTIVE",
         )
         .order_by(Asset.local_path)
@@ -207,6 +213,7 @@ def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
     score = pkg.score or {}
     return {
         "id": str(pkg.id),
+        "format": pkg.format,
         "status": pkg.status,
         "approval_status": pkg.approval_status,
         "title": pkg.title,
@@ -234,11 +241,18 @@ def list_carousels(
 ) -> CarouselList:
     with _db(request) as db:
         brand_id = _brand_id(db, brand)
+        # Review covers generated carousels (owner reels are reviewed in Studio); the publish
+        # queue holds every approved carousel and reel.
         stmt = select(ContentPackage).where(
-            ContentPackage.brand_profile_id == brand_id, ContentPackage.format == "CAROUSEL"
+            ContentPackage.brand_profile_id == brand_id,
+            ContentPackage.format.in_(SCHEDULABLE_FORMATS),
         )
         if queue == "review":
             stmt = stmt.where(
+                ContentPackage.format == "CAROUSEL",
+                func.coalesce(ContentPackage.qa_report["version"].astext, "").not_like(
+                    f"{OWNER_QA_PREFIX}%"
+                ),
                 ContentPackage.status.in_(REVIEW_STATUSES),
                 ContentPackage.approval_status == "PENDING",
             )
@@ -299,18 +313,23 @@ def get_asset_file(
     with _db(request) as db:
         brand_id = _brand_id(db, brand)
         asset = db.get(Asset, asset_id)
-        if asset is None or asset.brand_profile_id != brand_id or asset.mime_type != "image/png":
+        if (
+            asset is None
+            or asset.brand_profile_id != brand_id
+            or asset.status != "ACTIVE"
+            or asset.mime_type not in SERVABLE_TYPES
+        ):
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, {"code": "NOT_FOUND", "message": "Asset not found."}
             )
-        relative = asset.local_path
-    root = Path(os.environ.get("MEDIA_OS_MEDIA_ROOT", "/data/media")).resolve()
-    path = (root / relative).resolve()
-    if not path.is_relative_to(root) or not path.is_file():
+        relative, mime = asset.local_path, asset.mime_type
+    path = resolve_asset_path(relative)
+    if path is None or not path.is_file():
         raise HTTPException(
             status.HTTP_404_NOT_FOUND, {"code": "NOT_FOUND", "message": "Asset file missing."}
         )
-    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private"})
+    # Videos are streamed with Range support, so the browser can seek without downloading all.
+    return FileResponse(path, media_type=mime, headers={"Cache-Control": "private"})
 
 
 class CalendarEntry(BaseModel):
@@ -372,7 +391,7 @@ def list_schedules(
                 select(Asset.id)
                 .where(
                     Asset.content_package_id == pkg_id,
-                    Asset.asset_type == "CAROUSEL_SLIDE",
+                    Asset.asset_type.in_(THUMBNAIL_TYPES),
                     Asset.status == "ACTIVE",
                 )
                 .order_by(Asset.local_path)
