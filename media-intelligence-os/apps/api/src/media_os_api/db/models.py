@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -11,6 +11,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -1029,3 +1030,47 @@ class OutboxEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class AccountMetricSnapshot(UUIDPrimaryKeyMixin, Base):
+    """Account-wide totals for one connected channel over a rolling window (migration 0012).
+
+    Read daily from Postiz's channel analytics. Unlike post metrics, these cover every post on the
+    account, including ones published outside Media OS. One row per (channel, metric, window,
+    IST day); a later read the same day replaces the value.
+    """
+
+    __tablename__ = "account_metric_snapshots"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["channel_account_id", "brand_profile_id"],
+            ["channel_accounts.id", "channel_accounts.brand_profile_id"],
+            ondelete="CASCADE",
+            name="fk_account_metric_channel_brand",
+        ),
+        UniqueConstraint(
+            "channel_account_id",
+            "metric_key",
+            "window_days",
+            "observed_on",
+            name="uq_account_metric_channel_metric_window_day",
+        ),
+        CheckConstraint(
+            "platform IN ('INSTAGRAM', 'FACEBOOK', 'YOUTUBE')", name="account_metric_platform_valid"
+        ),
+        CheckConstraint("window_days IN (7, 30)", name="account_metric_window_valid"),
+        CheckConstraint("value >= 0", name="account_metric_value_non_negative"),
+        Index("ix_account_metric_brand_day", "brand_profile_id", "observed_on"),
+    )
+
+    brand_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("brand_profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    channel_account_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    metric_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    raw_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    window_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    observed_on: Mapped[date] = mapped_column(Date, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

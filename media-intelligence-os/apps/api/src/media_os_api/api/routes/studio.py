@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from media_os_api.analytics.account import ACCOUNT_TASK
 from media_os_api.analytics.service import sync_status
 from media_os_api.analytics.sync import SYNC_METRICS_TASK
 from media_os_api.api.routes.content import (
@@ -662,6 +663,16 @@ def sync_now(
             payload={"trigger": "manual", "force_recent": True},
             idempotency_key=f"analytics:manual:{bucket}",
             queue_name=queue_for_task(SYNC_METRICS_TASK),
+            maximum_attempts=2,
+        )
+        # Account-wide totals too (all posts on the account, including ones posted directly).
+        enqueue_durable_job(
+            db,
+            task_name=ACCOUNT_TASK,
+            task_type="ANALYTICS_SYNC",
+            payload={"trigger": "manual"},
+            idempotency_key=f"analytics:account:manual:{bucket}",
+            queue_name=queue_for_task(ACCOUNT_TASK),
             maximum_attempts=2,
         )
         if created:

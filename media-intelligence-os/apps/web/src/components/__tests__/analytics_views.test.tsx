@@ -11,7 +11,7 @@ vi.mock("next/navigation", () => ({
 
 import { AnalyticsView } from "@/components/views/AnalyticsView";
 import type { PipelineSummary, PostsPage, ViewsReport } from "@/lib/analytics";
-import { pipelinePath, postsPath, viewsPath } from "@/lib/analytics-paths";
+import { accountPath, pipelinePath, postsPath, viewsPath } from "@/lib/analytics-paths";
 import { BrandProvider } from "@/lib/brand-context";
 import type { BrandProfileSummary } from "@/lib/types";
 
@@ -29,6 +29,26 @@ const BRANDS: BrandProfileSummary[] = [
     content_pillars: [],
   } as unknown as BrandProfileSummary,
 ];
+
+const ACCOUNT = {
+  window_days: 7 as const,
+  combined: { views: 11, new_followers: 1 },
+  channels: [
+    {
+      channel_id: "ig",
+      platform: "INSTAGRAM",
+      name: "Nimontron IG",
+      observed_on: "2026-11-16",
+      observed_at: "2026-11-16T16:05:00+00:00",
+      metrics: { views: 4321, likes: 87 },
+      display: [
+        { key: "views", label: "Views", value: 4321 },
+        { key: "likes", label: "Likes", value: 87 },
+        { key: "new_followers", label: "New followers", value: null },
+      ],
+    },
+  ],
+};
 
 const SYNC = {
   last_success_at: "2026-11-15T10:00:00+00:00",
@@ -160,6 +180,7 @@ function renderView() {
         initialViews={{ path: viewsPath(BRAND, "30d"), data: report(1234) }}
         initialPosts={{ path: postsPath(BRAND, "30d", "views", 1, {}, 10), data: POSTS }}
         initialPipeline={{ path: pipelinePath(BRAND), data: PIPELINE }}
+        initialAccount={{ path: accountPath(BRAND), data: ACCOUNT }}
       />
     </BrandProvider>,
   );
@@ -205,6 +226,7 @@ describe("Views analytics page", () => {
             data: { ...POSTS, total: 2, items: [POST, noData] },
           }}
           initialPipeline={{ path: pipelinePath(BRAND), data: PIPELINE }}
+          initialAccount={{ path: accountPath(BRAND), data: ACCOUNT }}
         />
       </BrandProvider>,
     );
@@ -259,5 +281,19 @@ describe("Views analytics page", () => {
     await waitFor(() => expect(within(dialog).getAllByText("1,500").length).toBeGreaterThan(0));
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("Whole-account totals", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows account-wide numbers per platform, including posts made outside Media OS", () => {
+    vi.spyOn(globalThis, "fetch");
+    renderView();
+    const card = screen.getByRole("region", { name: "Whole account" });
+    expect(within(card).getByText(/including ones posted directly/i)).toBeInTheDocument();
+    expect(within(card).getByText("4,321")).toBeInTheDocument();
+    expect(within(card).getByText("Nimontron IG")).toBeInTheDocument();
+    expect(within(card).getByText(/Instagram can run up to 2 days behind/)).toBeInTheDocument();
   });
 });

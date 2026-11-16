@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from media_os_api.analytics.account import ACCOUNT_TASK, handle_sync_account_metrics
 from media_os_api.analytics.sync import SYNC_METRICS_TASK, handle_sync_post_metrics
 from media_os_api.carousel.render_job import RENDER_TASK, handle_render_carousel
 from media_os_api.config import Settings, load_settings
@@ -118,6 +119,7 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     SCHEDULE_TASK: handle_schedule_carousel,  # N3: worker only (GitHub + Postiz credentials)
     SYNC_TASK: handle_sync_status,
     SYNC_METRICS_TASK: handle_sync_post_metrics,  # worker only (Postiz credentials)
+    ACCOUNT_TASK: handle_sync_account_metrics,  # worker only (Postiz credentials)
     PURGE_TASK: handle_purge_job_history,
     # Owner alerts (worker only: holds TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID and the Postiz key).
     NOTIFY_TASK: handle_send_telegram,

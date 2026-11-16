@@ -2,6 +2,7 @@
 
 from media_os_api.db.base import Base, utc_now
 from media_os_api.db.models import (
+    AccountMetricSnapshot,
     Asset,
     AuditEvent,
     AuthSession,
@@ -68,6 +69,7 @@ __all__ = [
     "OutboxEvent",
     "OwnerUser",
     "PostMetricObservation",
+    "AccountMetricSnapshot",
     "PublishSchedule",
     "ResearchPacket",
     "ResearchSource",
