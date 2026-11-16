@@ -3,6 +3,8 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, Info, Minus } from "lucide-react";
 
+import { Dropdown } from "@/components/ui/Dropdown";
+
 /* ------------------------------------------------------------------ animated number */
 
 /** True when motion should be skipped: the user asked for reduced motion, or the environment
@@ -159,21 +161,12 @@ export function Select({
   const autoId = useId();
   const selectId = id ?? autoId;
   return (
-    <label htmlFor={selectId} className="flex flex-col gap-1">
-      <span className="text-[11px] font-medium text-slate-500">{label}</span>
-      <select
-        id={selectId}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-8 min-w-[9rem] rounded-lg border border-white/[0.08] bg-[var(--surface-inset)] px-2.5 text-xs text-slate-200 transition-colors hover:border-white/[0.14] focus:border-sky-400/60 focus:outline-none"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="flex flex-col gap-1">
+      <label htmlFor={selectId} className="text-[11px] font-medium text-slate-500">
+        {label}
+      </label>
+      <Dropdown id={selectId} ariaLabel={label} value={value} onChange={onChange} options={options} />
+    </div>
   );
 }
 

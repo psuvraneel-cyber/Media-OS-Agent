@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { AnimatedNumber, DeltaPill, InfoTip, SegmentedControl } from "@/components/ui/Controls";
 import { Skeleton } from "@/components/ui/FeedbackStates";
 import { RANGE_LABEL, RANGE_OPTIONS, type RangeKey, type SyncStatus, type ViewsReport } from "@/lib/analytics";
+import { SyncNowButton } from "@/components/analytics/SyncNowButton";
 import { assetUrl } from "@/lib/analytics-paths";
 import {
   PLATFORM_LABEL,
@@ -57,12 +58,22 @@ export function RangeControl({
   );
 }
 
-export function SyncLine({ sync, report }: { sync: SyncStatus; report?: ViewsReport | null }) {
+export function SyncLine({
+  sync,
+  report,
+  onSynced,
+}: {
+  sync: SyncStatus;
+  report?: ViewsReport | null;
+  /** When given, shows a working "Sync now" button that reloads the page's data afterwards. */
+  onSynced?: () => void;
+}) {
   const failed = sync.last_status && !["SUCCEEDED", "PENDING", "RUNNING", "DISPATCHED"].includes(sync.last_status);
   return (
-    <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+      {onSynced && <SyncNowButton onSynced={onSynced} />}
       <span className="inline-flex items-center gap-1">
-        <RefreshCw className="h-3 w-3" aria-hidden="true" />
+        {!onSynced && <RefreshCw className="h-3 w-3" aria-hidden="true" />}
         Last analytics sync:{" "}
         <span className="text-slate-300" title={sync.last_success_at ?? undefined}>
           {sync.last_success_at ? relativeTime(sync.last_success_at) : "never"}
@@ -83,7 +94,7 @@ export function SyncLine({ sync, report }: { sync: SyncStatus; report?: ViewsRep
           Tracked since {formatDate(report.coverage.tracking_since)}
         </span>
       )}
-    </p>
+    </div>
   );
 }
 

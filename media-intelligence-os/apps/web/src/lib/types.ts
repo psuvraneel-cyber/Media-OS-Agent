@@ -235,6 +235,7 @@ export interface QaCheck {
 
 export interface CarouselSummary {
   id: string;
+  format?: "CAROUSEL" | "REEL" | "POST";
   status: string;
   approval_status: string;
   title: string | null;
@@ -275,4 +276,50 @@ export interface CarouselDetail extends CarouselSummary {
   qa_report: { passed?: boolean; checks?: QaCheck[] } | null;
   score: { total?: number; label?: string; suggestion?: string | null } | null;
   post_tags: Record<string, unknown> | null;
+}
+
+export interface ReelItem extends CarouselSummary {
+  caption: string | null;
+  hashtags: string[];
+  slide_asset_ids: string[];
+  video_asset_id: string | null;
+  duration_seconds: number | null;
+  width: number | null;
+  height: number | null;
+  file_size: number | null;
+  qa_report: { passed: boolean; checks: { name: string; status: string; detail: string }[] } | null;
+}
+
+export interface ReelListResponse {
+  items: ReelItem[];
+}
+
+export interface BatchScheduleResult {
+  package_id: string;
+  scheduled_at: string;
+  ok: boolean;
+  code: string | null;
+  message: string | null;
+}
+
+export interface BatchScheduleResponse {
+  scheduled: number;
+  results: BatchScheduleResult[];
+}
+
+export interface LibraryItem {
+  asset_id: string;
+  kind: "BRAND_LOGO" | "REEL_VIDEO" | "REEL_POSTER" | "CAROUSEL_SLIDE";
+  mime_type: string;
+  file_size: number;
+  width: number | null;
+  height: number | null;
+  duration_seconds: number | null;
+  content_package_id: string | null;
+  title: string | null;
+  created_at: string;
+}
+
+export interface LibraryResponse {
+  items: LibraryItem[];
 }

@@ -70,6 +70,7 @@ PROVIDER_TO_PLATFORM = {
 MIN_LEAD = timedelta(minutes=20)  # GitHub Pages build + Postiz queueing
 MAX_LEAD = timedelta(days=30)
 ACTIVE_SCHEDULE_STATES = ("SCHEDULED", "PUBLISHED")
+SCHEDULABLE_FORMATS = ("CAROUSEL", "REEL", "POST")
 RESCHEDULABLE_STATES = ("FAILED", "CANCELLED")
 # Two carousels on one channel must be at least this far apart: retry recovery identifies a
 # carousel's Postiz post by channel + minute, so near-simultaneous posts would be confused.
@@ -78,6 +79,7 @@ OVERDUE_AFTER = timedelta(minutes=30)
 FAILED_RECHECK_WINDOW = timedelta(days=14)
 PENDING_SCHEDULE_STATES = ("SCHEDULED", "OVERDUE")
 JPEG_QUALITY = 90
+MAX_IMAGE_EDGE = 2160  # Instagram shows at most 1440 px wide; keeps uploads well under 8 MB
 GROUP_NAMESPACE = uuid.UUID("b5f2a3c4-6d1e-4f7a-9b8c-0d1e2f3a4b5c")
 
 
@@ -191,7 +193,7 @@ def is_reschedule(pkg: ContentPackage, schedules: list[PublishSchedule]) -> bool
 
 
 def can_schedule(pkg: ContentPackage, schedules: list[PublishSchedule]) -> bool:
-    if pkg.format != "CAROUSEL" or pkg.approval_status != "APPROVED":
+    if pkg.format not in SCHEDULABLE_FORMATS or pkg.approval_status != "APPROVED":
         return False
     if pkg.status == ContentLifecycleStatus.QA_PASSED.value:
         return not any(s.status in ACTIVE_SCHEDULE_STATES for s in schedules)
@@ -217,6 +219,32 @@ def slot_taken(
     )
 
 
+IN_FLIGHT_JOB_STATES = ("PENDING", "DISPATCHED", "RUNNING", "FAILED_RETRYABLE")
+
+
+def queued_schedules(
+    session: Session, brand_id: uuid.UUID, exclude_package: uuid.UUID
+) -> list[tuple[datetime, set[str]]]:
+    """Schedule requests the worker hasn't turned into Postiz posts yet (time, platforms), so a
+    batch of requests can't overbook a day or a slot before any of them is processed."""
+    rows = session.execute(
+        select(JobRun.payload).where(
+            JobRun.task_name == SCHEDULE_TASK,
+            JobRun.brand_profile_id == brand_id,
+            JobRun.status.in_(IN_FLIGHT_JOB_STATES),
+            JobRun.payload["content_package_id"].astext != str(exclude_package),
+        )
+    ).scalars()
+    out: list[tuple[datetime, set[str]]] = []
+    for payload in rows:
+        try:
+            when = datetime.fromisoformat(str((payload or {})["scheduled_at"]))
+        except (KeyError, ValueError):
+            continue
+        out.append((when, set((payload or {}).get("platforms") or [])))
+    return out
+
+
 # --------------------------------------------------------------------------- API side
 
 
@@ -233,8 +261,10 @@ def request_schedule(
     now = now or datetime.now(UTC)
     if when.tzinfo is None:
         raise ScheduleRequestError("Time must include a timezone.", code="NAIVE_TIME")
-    if pkg.format != "CAROUSEL":
-        raise ScheduleRequestError("Only carousels can be scheduled.", code="NOT_CAROUSEL")
+    if pkg.format not in SCHEDULABLE_FORMATS:
+        raise ScheduleRequestError(
+            "Only carousels and reels can be scheduled.", code="NOT_CAROUSEL"
+        )
     schedules = package_schedules(session, pkg)
     if not can_schedule(pkg, schedules):
         raise ScheduleRequestError(
@@ -262,10 +292,19 @@ def request_schedule(
     chosen = [p for p in PLATFORMS if p in set(platforms)]
     if not chosen:
         raise ScheduleRequestError("Choose Instagram and/or Facebook.", code="NO_PLATFORM")
+    queued = queued_schedules(session, brand.id, pkg.id)
+    day_start, day_end = local_day_bounds(when, brand.timezone)
     for platform in chosen:
-        if scheduled_count(session, brand.id, platform, when, brand.timezone) >= daily_cap(
-            brand, platform
-        ):
+        waiting = [t for t, ps in queued if platform in ps]
+        same_day = sum(1 for t in waiting if day_start <= t < day_end)
+        if any(abs(t - when) < SLOT_GAP for t in waiting):
+            raise ScheduleRequestError(
+                f"Another post is scheduled on {platform.title()} within 5 minutes of that time.",
+                code="SLOT_TAKEN",
+            )
+        if scheduled_count(
+            session, brand.id, platform, when, brand.timezone
+        ) + same_day >= daily_cap(brand, platform):
             raise ScheduleRequestError(
                 f"{platform.title()} already has {daily_cap(brand, platform)} posts that day "
                 "(daily cap).",
@@ -314,10 +353,13 @@ def media_root() -> Path:
 
 
 def to_jpeg(png_bytes: bytes) -> bytes:
-    from PIL import Image
+    from PIL import Image, ImageOps
 
     with Image.open(io.BytesIO(png_bytes)) as im:
-        rgb = im.convert("RGB")
+        # Phone photos store their rotation in EXIF; apply it before EXIF is dropped.
+        rgb = ImageOps.exif_transpose(im).convert("RGB")
+        if max(rgb.size) > MAX_IMAGE_EDGE:
+            rgb.thumbnail((MAX_IMAGE_EDGE, MAX_IMAGE_EDGE), Image.Resampling.LANCZOS)
         out = io.BytesIO()
         rgb.save(out, format="JPEG", quality=JPEG_QUALITY, optimize=True, progressive=True)
         return out.getvalue()
@@ -364,18 +406,38 @@ def _slides(session: Session, pkg: ContentPackage) -> list[bytes]:
         )
         .order_by(Asset.local_path)
     ).scalars()
-    root = media_root().resolve()
+    from media_os_api.content.uploads import resolve_asset_path
+
     out = []
     for a in assets:
-        path = (root / a.local_path).resolve()
-        if not path.is_relative_to(root) or not path.is_file():
+        # Rendered slides live on the media volume; the owner's own images on the uploads one.
+        path = resolve_asset_path(a.local_path)
+        if path is None or not path.is_file():
             raise PermanentTaskError(f"Slide file missing: {a.local_path}", code="SLIDE_MISSING")
         out.append(path.read_bytes())
-    if not 2 <= len(out) <= 10:
+    low = 1 if pkg.format == "POST" else 2
+    if not low <= len(out) <= 10:
         raise PermanentTaskError(
-            f"Instagram carousels need 2-10 slides, found {len(out)}.", code="SLIDE_COUNT"
+            f"Expected {low}-10 images for this {pkg.format.lower()}, found {len(out)}.",
+            code="SLIDE_COUNT",
         )
     return out
+
+
+def _reel_video(session: Session, pkg: ContentPackage) -> Path:
+    from media_os_api.content.uploads import REEL_VIDEO, resolve_asset_path
+
+    asset = session.execute(
+        select(Asset).where(
+            Asset.content_package_id == pkg.id,
+            Asset.asset_type == REEL_VIDEO,
+            Asset.status == "ACTIVE",
+        )
+    ).scalar()
+    path = resolve_asset_path(asset.local_path) if asset else None
+    if path is None or not path.is_file():
+        raise PermanentTaskError("Reel video file missing.", code="REEL_MISSING")
+    return path
 
 
 def _advance(
@@ -471,18 +533,23 @@ def handle_schedule_carousel(
                     f"Another post is scheduled on {platform} within 5 minutes.", code="SLOT_TAKEN"
                 )
 
-        jpegs = [to_jpeg(b) for b in _slides(session, pkg)]
         stamp = when.astimezone(ZoneInfo(brand.timezone)).strftime("%Y-%m")
         prefix = f"{brand.slug}/{stamp}/{pkg.id}/v{pkg.version}"
-        files = [(f"{prefix}/slide-{i:02d}.jpg", data) for i, data in enumerate(jpegs, 1)]
-        hosted = host.publish(
-            files, message=f"Carousel {pkg.id} v{pkg.version} ({len(files)} slides)"
-        )
+        files: list[tuple[str, bytes | Path]]
+        if pkg.format == "REEL":
+            # Postiz sends a single .mp4 to Instagram as a Reel and to Facebook as a video reel.
+            files = [(f"{prefix}/reel.mp4", _reel_video(session, pkg))]
+            message = f"Reel {pkg.id} v{pkg.version}"
+        else:
+            jpegs = [to_jpeg(b) for b in _slides(session, pkg)]
+            files = [(f"{prefix}/slide-{i:02d}.jpg", data) for i, data in enumerate(jpegs, 1)]
+            message = f"Carousel {pkg.id} v{pkg.version} ({len(files)} slides)"
+        hosted = host.publish(files, message=message)
         host.wait_until_live(hosted)
 
         if pkg.status == ContentLifecycleStatus.QA_PASSED.value:
             _advance(
-                session, pkg, ContentLifecycleStatus.POSTIZ_DRAFT, "Images live on GitHub Pages"
+                session, pkg, ContentLifecycleStatus.POSTIZ_DRAFT, "Media live on GitHub Pages"
             )
 
         group = group_id(pkg.id, when)

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { Dropdown } from "@/components/ui/Dropdown";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner, LoadingSkeleton } from "@/components/ui/FeedbackStates";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
@@ -328,22 +329,24 @@ export function TopicsView() {
         icon={<ListFilter />} title={`Topics — ${activeBrand.name}`}
         subtitle="Shared topic clusters with this brand's own editorial assignment. Other brands' decisions are never shown here."
         badge={
-          <label className="flex items-center gap-2 text-xs text-slate-300">
+          <div className="flex items-center gap-2 text-xs text-slate-300">
             <span>Status</span>
-            <select
-              aria-label="Editorial status filter"
+            <Dropdown
+              ariaLabel="Editorial status filter"
+              size="sm"
+              align="end"
+              minWidth="11rem"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-md border border-white/[0.1] bg-[var(--surface-inset)] px-2 py-1 text-xs"
-            >
-              <option value="">All</option>
-              {EDITORIAL_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={setStatusFilter}
+              options={[
+                { value: "", label: "All" },
+                ...EDITORIAL_STATUSES.map((s) => ({
+                  value: s,
+                  label: s.charAt(0) + s.slice(1).toLowerCase().replaceAll("_", " "),
+                })),
+              ]}
+            />
+          </div>
         }
       >
         {loading ? (

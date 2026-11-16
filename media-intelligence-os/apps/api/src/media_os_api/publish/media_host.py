@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import base64
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -33,6 +34,23 @@ class MediaHostError(RuntimeError):
 class HostedFile:
     path: str  # repo path, e.g. nimontron/2026-11/<id>/slide-01.jpg
     url: str  # public URL
+
+
+_BLOB_HEAD = b'{"encoding":"base64","content":"'
+_BLOB_TAIL = b'"}'
+_READ = 3 * 1024 * 1024  # a multiple of 3, so each chunk encodes without padding
+
+
+def _blob_body_length(path: Path) -> int:
+    return len(_BLOB_HEAD) + 4 * ((path.stat().st_size + 2) // 3) + len(_BLOB_TAIL)
+
+
+def _blob_body(path: Path) -> Iterator[bytes]:
+    yield _BLOB_HEAD
+    with path.open("rb") as f:
+        while chunk := f.read(_READ):
+            yield base64.b64encode(chunk)
+    yield _BLOB_TAIL
 
 
 def _check_repo(repo: str) -> str:
@@ -117,7 +135,7 @@ class GitHubPagesHost:
             )
         return resp.json() if resp.content else None
 
-    def publish(self, files: list[tuple[str, bytes]], message: str) -> list[HostedFile]:
+    def publish(self, files: Sequence[tuple[str, bytes | Path]], message: str) -> list[HostedFile]:
         """Commit all files in one commit on the Pages branch. Idempotent for identical content."""
         if not files:
             raise ValueError("Nothing to publish.")
@@ -127,11 +145,27 @@ class GitHubPagesHost:
         head = self._call("GET", f"/git/commits/{head_sha}")
         tree = []
         for path, data in files:
-            blob = self._call(
-                "POST",
-                "/git/blobs",
-                json={"content": base64.b64encode(data).decode("ascii"), "encoding": "base64"},
-            )
+            if isinstance(data, Path):
+                # Large files (reels) are streamed as base64 JSON so they never sit in memory.
+                blob = self._call(
+                    "POST",
+                    "/git/blobs",
+                    content=_blob_body(data),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Content-Length": str(_blob_body_length(data)),
+                    },
+                    timeout=httpx.Timeout(600.0, connect=10.0),
+                )
+            else:
+                blob = self._call(
+                    "POST",
+                    "/git/blobs",
+                    json={
+                        "content": base64.b64encode(data).decode("ascii"),
+                        "encoding": "base64",
+                    },
+                )
             tree.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
         new_tree = self._call(
             "POST", "/git/trees", json={"base_tree": head["tree"]["sha"], "tree": tree}
@@ -152,17 +186,18 @@ class GitHubPagesHost:
     def wait_until_live(
         self, files: list[HostedFile], *, timeout_s: float = 420.0, every_s: float = 15.0
     ) -> None:
-        """Poll the public URLs until every one serves an image (Pages builds take 1-2 min)."""
+        """Poll the public URLs until every one serves its image or video (Pages builds take
+        1-2 min). Only the headers are read, so a large video isn't downloaded each time."""
         deadline = time.monotonic() + timeout_s
         pending = list(files)
         while True:
             still: list[HostedFile] = []
             for f in pending:
                 try:
-                    resp = self._public.get(f.url)
-                    ok = resp.status_code == 200 and resp.headers.get(
-                        "content-type", ""
-                    ).startswith("image/")
+                    with self._public.stream("GET", f.url) as resp:
+                        ok = resp.status_code == 200 and resp.headers.get(
+                            "content-type", ""
+                        ).startswith(("image/", "video/"))
                 except httpx.HTTPError:
                     ok = False
                 if not ok:
