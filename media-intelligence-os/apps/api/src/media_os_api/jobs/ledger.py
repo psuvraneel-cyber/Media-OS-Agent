@@ -315,6 +315,10 @@ def complete_job_failure(
     else:
         job.status = "FAILED_FINAL"
         job.worker_finished_at = current
+        # Tell the owner a job gave up (alert jobs themselves are excluded to avoid loops).
+        from media_os_api.notify.service import alert_job_failed
+
+        alert_job_failed(session, job)
 
     session.flush()
     return job

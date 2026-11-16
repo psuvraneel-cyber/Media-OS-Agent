@@ -30,6 +30,14 @@ from media_os_api.jobs.routing import (
     RESEARCH_SOFT_TIME_LIMIT,
     RESEARCH_TIME_LIMIT,
 )
+from media_os_api.notify.service import (
+    DIGEST_TASK,
+    NOTIFY_TASK,
+    WATCHDOG_TASK,
+    handle_daily_digest,
+    handle_send_telegram,
+    handle_watchdog,
+)
 from media_os_api.publish.service import (
     SCHEDULE_TASK,
     SYNC_TASK,
@@ -110,6 +118,10 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     SYNC_TASK: handle_sync_status,
     SYNC_METRICS_TASK: handle_sync_post_metrics,  # worker only (Postiz credentials)
     PURGE_TASK: handle_purge_job_history,
+    # Owner alerts (worker only: holds TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID and the Postiz key).
+    NOTIFY_TASK: handle_send_telegram,
+    WATCHDOG_TASK: handle_watchdog,
+    DIGEST_TASK: handle_daily_digest,
 }
 
 

@@ -1,0 +1,172 @@
+"""Minimal, hardened Telegram Bot API client for owner alerts.
+
+Telegram puts the bot token in the URL path (`/bot<token>/sendMessage`), so this client is
+deliberately separate from the research HTTP client (which logs URLs). Guarantees:
+
+* exactly one fixed host (`api.telegram.org`), https only, no redirects, no proxy env vars;
+* the token is held in memory only and never appears in logs, exceptions or return values
+  (httpx errors carry the request URL, so they are caught and re-raised without it);
+* failures are classified like the job system: network, 429 and 5xx are retryable; a bad token,
+  a blocked bot or a wrong chat id are permanent.
+
+Configuration comes from the worker environment, like the other publishing credentials:
+`TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. When either is missing, `telegram_from_env` returns
+None and alerts are skipped (the system keeps working without them).
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
+API_HOST = "api.telegram.org"
+MAX_TEXT = 4000  # Telegram's limit is 4096 characters; keep a margin for the truncation marker
+_TOKEN_RE = re.compile(r"^\d{5,15}:[A-Za-z0-9_-]{30,64}$")
+_CHAT_RE = re.compile(r"^-?\d{3,20}$|^@[A-Za-z0-9_]{5,32}$")
+
+
+class TelegramError(Exception):
+    def __init__(self, message: str, *, code: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+
+
+@dataclass(frozen=True)
+class SentMessage:
+    message_id: int | None
+
+
+class TelegramClient:
+    def __init__(
+        self,
+        *,
+        token: str,
+        chat_id: str,
+        transport: httpx.BaseTransport | None = None,
+        timeout_seconds: float = 15.0,
+    ) -> None:
+        token = token.strip()
+        chat_id = chat_id.strip()
+        if not _TOKEN_RE.match(token):
+            # Never echo the value: only say it is malformed.
+            raise TelegramError(
+                "TELEGRAM_BOT_TOKEN is malformed.", code="TELEGRAM_BAD_TOKEN", retryable=False
+            )
+        if not _CHAT_RE.match(chat_id):
+            raise TelegramError(
+                "TELEGRAM_CHAT_ID is malformed.", code="TELEGRAM_BAD_CHAT", retryable=False
+            )
+        self._token = token
+        self.chat_id = chat_id
+        self._client = httpx.Client(
+            transport=transport,
+            follow_redirects=False,
+            trust_env=False,
+            timeout=httpx.Timeout(timeout_seconds, connect=5.0),
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> TelegramClient:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def send_message(
+        self,
+        text: str,
+        *,
+        buttons: list[list[Mapping[str, str]]] | None = None,
+        silent: bool = False,
+    ) -> SentMessage:
+        """Send an HTML-formatted message (callers must escape untrusted text)."""
+        body: dict[str, Any] = {
+            "chat_id": self.chat_id,
+            "text": truncate(text),
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+            "disable_notification": silent,
+        }
+        if buttons:
+            body["reply_markup"] = {"inline_keyboard": [list(row) for row in buttons]}
+        data = self._call("sendMessage", body)
+        result = data.get("result") if isinstance(data, dict) else None
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        return SentMessage(message_id=message_id if isinstance(message_id, int) else None)
+
+    def _call(self, method: str, body: Mapping[str, Any]) -> Any:
+        url = f"https://{API_HOST}/bot{self._token}/{method}"
+        try:
+            response = self._client.post(url, json=body)
+        except httpx.TimeoutException:
+            raise TelegramError(
+                "Telegram request timed out.", code="TELEGRAM_TIMEOUT", retryable=True
+            ) from None
+        except httpx.HTTPError as exc:
+            # Re-raise without the original exception: its text includes the URL (and token).
+            raise TelegramError(
+                f"Telegram unreachable ({type(exc).__name__}).",
+                code="TELEGRAM_NETWORK",
+                retryable=True,
+            ) from None
+        try:
+            data = response.json()
+        except ValueError:
+            data = None
+        description = ""
+        if isinstance(data, dict):
+            description = str(data.get("description") or "")[:200]
+        status = response.status_code
+        if 200 <= status < 300 and isinstance(data, dict) and data.get("ok"):
+            return data
+        if status == 429:
+            raise TelegramError(
+                "Telegram rate limit reached.", code="TELEGRAM_RATE_LIMITED", retryable=True
+            )
+        if status >= 500:
+            raise TelegramError(
+                f"Telegram server error ({status}).", code="TELEGRAM_SERVER", retryable=True
+            )
+        if status == 401:
+            raise TelegramError(
+                "Telegram rejected the bot token.", code="TELEGRAM_UNAUTHORIZED", retryable=False
+            )
+        if status == 403:
+            raise TelegramError(
+                "The bot can't message this chat (send /start to the bot first).",
+                code="TELEGRAM_FORBIDDEN",
+                retryable=False,
+            )
+        raise TelegramError(
+            f"Telegram refused the message ({status}): {description}",
+            code="TELEGRAM_BAD_REQUEST",
+            retryable=False,
+        )
+
+
+def truncate(text: str) -> str:
+    if len(text) <= MAX_TEXT:
+        return text
+    return text[: MAX_TEXT - 1] + "…"
+
+
+def telegram_from_env(
+    env: Mapping[str, str] | None = None,
+    *,
+    transport: httpx.BaseTransport | None = None,
+) -> TelegramClient | None:
+    """A client from TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID, or None when not configured."""
+    source = os.environ if env is None else env
+    token = (source.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    chat_id = (source.get("TELEGRAM_CHAT_ID") or "").strip()
+    if not token or not chat_id:
+        return None
+    return TelegramClient(token=token, chat_id=chat_id, transport=transport)

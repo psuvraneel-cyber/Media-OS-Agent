@@ -49,6 +49,7 @@ from media_os_api.db.models import (
 from media_os_api.jobs.errors import PermanentTaskError, PolicyRefusalError, RetryableTaskError
 from media_os_api.jobs.ledger import enqueue_durable_job
 from media_os_api.jobs.routing import queue_for_task
+from media_os_api.notify.service import alert_post_status
 from media_os_api.publish.media_host import GitHubPagesHost, MediaHostError
 from media_os_api.publish.postiz import Integration, PostizClient, PostizError
 from media_os_api.services.audit_service import record_audit_event
@@ -621,15 +622,18 @@ def handle_sync_status(
         posts = postiz.posts_between(start, now + timedelta(days=1))
         by_id = {str(p.get("id")): p for p in posts if p.get("id")}
         for s in due:
-            new_status = _next_status(s, by_id.get(s.postiz_post_id or ""), now)
+            post = by_id.get(s.postiz_post_id or "")
+            new_status = _next_status(s, post, now)
             if new_status is None or new_status == s.status:
                 continue
-            if new_status == "PUBLISHED":
-                post = by_id[s.postiz_post_id or ""]
+            if new_status == "PUBLISHED" and post is not None:
                 release = str(post.get("releaseURL") or post.get("releaseId") or "")
                 s.remote_post_id = release[:128] or None
             s.status = new_status
             updated += 1
+            # Tell the owner (Telegram; skipped when not configured). Same transaction, so an
+            # alert is queued exactly when the status change commits.
+            alert_post_status(session, s, new_status, post, now)
         session.flush()
         for package_id in {s.content_package_id for s in due}:
             _settle_package(session, package_id)

@@ -43,6 +43,7 @@ from media_os_api.db import (
 )
 from media_os_api.jobs.errors import PolicyRefusalError, RetryableTaskError
 from media_os_api.main import create_app
+from media_os_api.notify import service as notify
 from media_os_api.publish import service as svc
 from media_os_api.publish.media_host import HostedFile
 from media_os_api.publish.postiz import Integration
@@ -229,9 +230,10 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
                     )
                 )
                 db.execute(delete(ContentPackage).where(ContentPackage.id.in_(ids)))
-            jobs = select(JobRun.id).where(JobRun.task_name.like("media_os.%carousel%"))
-            db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(jobs)))
-            db.execute(delete(JobRun).where(JobRun.task_name.like("media_os.%carousel%")))
+            for pattern in ("media_os.%carousel%", "media_os.notify.%"):
+                jobs = select(JobRun.id).where(JobRun.task_name.like(pattern))
+                db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(jobs)))
+                db.execute(delete(JobRun).where(JobRun.task_name.like(pattern)))
             db.execute(delete(AuditEvent).where(AuditEvent.action.like("CAROUSEL_%")))
             restored = db.get(BrandProfile, bid)
             assert restored is not None
@@ -757,3 +759,155 @@ def test_failed_carousel_is_rescheduled_through_the_api(
     assert again.status_code == 409 and again.json()["error"]["code"] == "ALREADY_SCHEDULED"
     detail = client.get(detail_url).json()
     assert detail["status"] == "SCHEDULED" and detail["can_schedule"] is False
+
+
+# ------------------------------------------------------------------ owner alerts
+
+META_ERROR = (
+    '{"details":[{"json":"{\\"error\\":{\\"message\\":\\"Cannot call API for app 1 on behalf '
+    'of user 2\\",\\"type\\":\\"OAuthException\\",\\"code\\":200}}"}]}'
+)
+
+
+def _alerts(env: dict[str, Any], kind: str = "") -> list[JobRun]:
+    """Queued alert jobs, optionally only one kind (the alert key prefix, e.g. "stuck")."""
+    with session_scope(env["factory"]) as db:
+        rows = list(
+            db.execute(
+                select(JobRun)
+                .where(
+                    JobRun.task_name == notify.NOTIFY_TASK,
+                    JobRun.idempotency_key.like(f"notify:{kind}%"),
+                )
+                .order_by(JobRun.created_at)
+            ).scalars()
+        )
+        db.expunge_all()
+        return rows
+
+
+def test_failed_post_queues_a_plain_language_alert(env: dict[str, Any]) -> None:
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM"]), clients=env["clients"]
+        )
+    _backdate(env, 60)
+    for p in env["postiz"].posts:
+        p["state"] = "ERROR"
+        p["error"] = META_ERROR
+    _sync(env)
+    _sync(env)  # a second sync must not alert again
+    alerts = _alerts(env)
+    assert len(alerts) == 1
+    text = alerts[0].payload["text"]
+    assert "Post failed on Instagram" in text and "Meta blocked the app" in text
+    assert alerts[0].payload["severity"] == "error"
+
+
+def test_published_post_queues_a_quiet_alert_with_the_link(env: dict[str, Any]) -> None:
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM"]), clients=env["clients"]
+        )
+    _backdate(env, 20)
+    for p in env["postiz"].posts:
+        p["state"] = "PUBLISHED"
+        p["releaseURL"] = "https://www.instagram.com/p/live/"
+    _sync(env)
+    (alert,) = _alerts(env)
+    assert "Posted on Instagram" in alert.payload["text"]
+    assert "https://www.instagram.com/p/live/" in alert.payload["text"]
+    assert alert.payload["silent"] is True
+
+
+def test_watchdog_flags_a_stuck_post_once(env: dict[str, Any]) -> None:
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM"]), clients=env["clients"]
+        )
+
+    def watch() -> dict[str, Any]:
+        with session_scope(f) as db:
+            return notify.handle_watchdog(
+                db, JobRun(task_name=notify.WATCHDOG_TASK, payload={}), postiz=lambda: env["postiz"]
+            )
+
+    _backdate(env, 5)
+    assert watch()["stuck"] == 0  # not late enough yet
+    assert _alerts(env, "stuck") == []
+    _backdate(env, 15)  # Postiz still has it queued: its worker isn't publishing
+    assert watch()["stuck"] == 1
+    _backdate(env, 45)
+    watch()
+    _sync(env)  # the sync marks it OVERDUE: same alert key, so no second message
+    alerts = _alerts(env, "stuck")
+    assert len(alerts) == 1 and "hasn't gone out" in alerts[0].payload["text"]
+
+
+class _DownPostiz:
+    def integrations(self) -> list[Integration]:
+        from media_os_api.publish.postiz import PostizError
+
+        raise PostizError("connection refused", code="POSTIZ_NETWORK", retryable=True)
+
+    def close(self) -> None:
+        return None
+
+
+def test_watchdog_reports_postiz_down_once_per_hour(env: dict[str, Any]) -> None:
+    for _ in range(2):
+        with session_scope(env["factory"]) as db:
+            out = notify.handle_watchdog(
+                db, JobRun(task_name=notify.WATCHDOG_TASK, payload={}), postiz=_DownPostiz
+            )
+        assert out["postiz"] == "POSTIZ_NETWORK"
+    (alert,) = _alerts(env, "postiz-down")
+    assert "Postiz isn't responding" in alert.payload["text"]
+
+
+def test_job_that_gives_up_alerts_the_owner(env: dict[str, Any]) -> None:
+    from media_os_api.jobs.errors import PermanentTaskError
+    from media_os_api.jobs.ledger import complete_job_failure
+
+    with session_scope(env["factory"]) as db:
+        job = _schedule(db, env, _when(), ["INSTAGRAM"])
+        job.status = "RUNNING"
+        job.attempt_count = 1
+        db.flush()
+        complete_job_failure(
+            db, job_run_id=job.id, exc=PermanentTaskError("bad slides", code="SLIDE_COUNT")
+        )
+        assert job.status == "FAILED_FINAL"
+    (alert,) = _alerts(env)
+    assert "failed for good" in alert.payload["text"] and "SLIDE_COUNT" in alert.payload["text"]
+
+
+def test_daily_digest_summarises_the_day(env: dict[str, Any]) -> None:
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM"]), clients=env["clients"]
+        )
+    with session_scope(f) as db:
+        out = notify.handle_daily_digest(
+            db,
+            JobRun(id=uuid.uuid4(), task_name=notify.DIGEST_TASK, payload={}),
+            now=when - timedelta(hours=2),
+        )
+    assert out["upcoming"] == 1
+    (alert,) = _alerts(env, "digest")
+    assert "Coming up (next 24 h):</b> 1" in alert.payload["text"]
+
+
+def test_watchdog_reports_when_status_checks_stop(env: dict[str, Any]) -> None:
+    # The sync schedule is enabled (migration 0009) but no sync has succeeded recently.
+    with session_scope(env["factory"]) as db:
+        out = notify.handle_watchdog(
+            db, JobRun(task_name=notify.WATCHDOG_TASK, payload={}), postiz=lambda: env["postiz"]
+        )
+    assert out["sync"].startswith("stale")
+    (alert,) = _alerts(env, "sync-stale")
+    assert "status checks have stopped" in alert.payload["text"]

@@ -423,6 +423,17 @@ def test_persistent_scheduler_concurrent_ticks_create_one_logical_job() -> None:
     now = datetime.now(UTC)
     sched_name = f"concurrent-sched-{uuid.uuid4().hex[:10]}"
     bad_sched_name = f"invalid-sched-{uuid.uuid4().hex[:10]}"
+    # Global schedules seeded enabled by migrations (status sync, watchdog, purge) may be due
+    # too; pause them so the tick counts below only see this test's schedules.
+    with session_scope(factory) as db:
+        paused = list(
+            db.execute(
+                select(ScheduleDefinition).where(ScheduleDefinition.is_enabled.is_(True))
+            ).scalars()
+        )
+        paused_ids = [row.id for row in paused]
+        for row in paused:
+            row.is_enabled = False
     try:
         with session_scope(factory) as db:
             sched = create_schedule_definition_scoped(
@@ -484,6 +495,11 @@ def test_persistent_scheduler_concurrent_ticks_create_one_logical_job() -> None:
             bad_row = db.get(ScheduleDefinition, bad_sched_id)
             assert bad_row is not None and bad_row.is_enabled is False
     finally:
+        with session_scope(factory) as db:
+            for sid in paused_ids:
+                restored = db.get(ScheduleDefinition, sid)
+                if restored is not None:
+                    restored.is_enabled = True
         engine.dispose()
 
 

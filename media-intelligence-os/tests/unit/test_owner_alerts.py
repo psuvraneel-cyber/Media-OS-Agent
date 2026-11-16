@@ -1,0 +1,266 @@
+"""Unit: Telegram client, plain-language Postiz errors, alert texts, and the send handler."""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+import pytest
+
+from media_os_api.db.models import JobRun
+from media_os_api.jobs.errors import PermanentTaskError, RetryableTaskError
+from media_os_api.notify import messages as msg
+from media_os_api.notify.service import handle_send_telegram
+from media_os_api.notify.telegram import (
+    MAX_TEXT,
+    TelegramClient,
+    TelegramError,
+    telegram_from_env,
+)
+
+TOKEN = "123456789:AAH-test_token_value_abcdefghijklmnopqrstu"
+CHAT = "987654321"
+
+
+def _client(handler: Any) -> TelegramClient:
+    return TelegramClient(token=TOKEN, chat_id=CHAT, transport=httpx.MockTransport(handler))
+
+
+# ------------------------------------------------------------------ client
+
+
+def test_send_message_posts_html_to_the_fixed_host() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 42}})
+
+    with _client(handler) as client:
+        sent = client.send_message("<b>hi</b>", silent=True)
+    assert sent.message_id == 42
+    assert seen["url"].startswith("https://api.telegram.org/bot")
+    assert seen["url"].endswith("/sendMessage")
+    assert seen["body"] == {
+        "chat_id": CHAT,
+        "text": "<b>hi</b>",
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+        "disable_notification": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "retryable"),
+    [
+        (429, "TELEGRAM_RATE_LIMITED", True),
+        (502, "TELEGRAM_SERVER", True),
+        (401, "TELEGRAM_UNAUTHORIZED", False),
+        (403, "TELEGRAM_FORBIDDEN", False),
+        (400, "TELEGRAM_BAD_REQUEST", False),
+    ],
+)
+def test_errors_are_classified(status: int, code: str, retryable: bool) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json={"ok": False, "description": "nope"})
+
+    with _client(handler) as client, pytest.raises(TelegramError) as info:
+        client.send_message("x")
+    assert info.value.code == code
+    assert info.value.retryable is retryable
+    assert TOKEN not in str(info.value)
+
+
+def test_network_error_never_leaks_the_token() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"boom connecting to {request.url}", request=request)
+
+    with _client(handler) as client, pytest.raises(TelegramError) as info:
+        client.send_message("x")
+    assert info.value.code == "TELEGRAM_NETWORK" and info.value.retryable
+    assert TOKEN not in str(info.value)
+    assert info.value.__cause__ is None and info.value.__suppress_context__
+
+
+def test_malformed_settings_are_refused_without_echoing_them() -> None:
+    with pytest.raises(TelegramError) as info:
+        TelegramClient(token="not-a-token-secret-value", chat_id=CHAT)
+    assert info.value.code == "TELEGRAM_BAD_TOKEN"
+    assert "not-a-token-secret-value" not in str(info.value)
+    with pytest.raises(TelegramError) as info:
+        TelegramClient(token=TOKEN, chat_id="chat?")
+    assert info.value.code == "TELEGRAM_BAD_CHAT"
+
+
+def test_long_text_is_truncated() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["text"] = json.loads(request.content)["text"]
+        return httpx.Response(200, json={"ok": True, "result": {}})
+
+    with _client(handler) as client:
+        client.send_message("a" * 10_000)
+    assert len(seen["text"]) == MAX_TEXT and seen["text"].endswith("…")
+
+
+def test_from_env_is_none_until_both_values_are_set() -> None:
+    assert telegram_from_env({}) is None
+    assert telegram_from_env({"TELEGRAM_BOT_TOKEN": TOKEN}) is None
+    assert telegram_from_env({"TELEGRAM_CHAT_ID": CHAT}) is None
+    client = telegram_from_env({"TELEGRAM_BOT_TOKEN": TOKEN, "TELEGRAM_CHAT_ID": CHAT})
+    assert client is not None
+    client.close()
+
+
+# ------------------------------------------------------------------ Postiz errors
+
+# Shape of the real error Postiz stored for the 15 Nov 2026 failure (trimmed).
+META_BLOCKED = json.dumps(
+    {
+        "cause": {"failure": {"message": "Unknown Error"}},
+        "type": "bad_body",
+        "details": [
+            {
+                "identifier": "upload images slides",
+                "json": json.dumps(
+                    {
+                        "error": {
+                            "message": (
+                                "Cannot call API for app 1862070358151146 on behalf of user "
+                                "1664262358700884"
+                            ),
+                            "type": "OAuthException",
+                            "code": 200,
+                        }
+                    }
+                ),
+            }
+        ],
+    }
+)
+
+
+def _meta(message: str, code: int) -> str:
+    return json.dumps(
+        {"details": [{"json": json.dumps({"error": {"message": message, "code": code}})}]}
+    )
+
+
+def test_meta_app_block_is_explained() -> None:
+    text = msg.explain_postiz_error(META_BLOCKED)
+    assert "Meta blocked the app" in text and "reconnect the channel in Postiz" in text
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            _meta("Error validating access token: Session has expired", 190),
+            "login for this channel expired",
+        ),
+        (_meta("Application request limit reached", 4), "rate limit"),
+        (
+            _meta("Media download has failed. The media URI doesn't meet our requirements", 9004),
+            "couldn't download the images",
+        ),
+        (
+            _meta("(#10) Application does not have permission for this action", 10),
+            "refused a permission",
+        ),
+        ("", "without giving a reason"),
+        ("plain failure text", "Postiz reported: plain failure text"),
+    ],
+)
+def test_other_errors_are_explained(raw: str, expected: str) -> None:
+    assert expected in msg.explain_postiz_error(raw)
+
+
+# ------------------------------------------------------------------ alert texts
+
+
+def _ref(title: str = "বিয়ের কার্ডে *দেরি?*") -> msg.PostRef:
+    return msg.PostRef(
+        title=title,
+        brand="Nimontron",
+        platform="INSTAGRAM",
+        scheduled_at=datetime(2026, 11, 15, 13, 30, tzinfo=UTC),
+        url="https://www.instagram.com/p/abc/",
+    )
+
+
+def test_failed_alert_has_reason_time_and_no_markers() -> None:
+    text = msg.post_failed(_ref(), META_BLOCKED)
+    assert "Post failed on Instagram" in text
+    assert "15 Nov, 7:00 PM IST" in text
+    assert "Meta blocked the app" in text
+    assert "*" not in text  # *emphasis* markers stripped from the title
+
+
+def test_untrusted_text_is_escaped() -> None:
+    text = msg.post_published(_ref(title="<script>x</script> & co"), late_by_minutes=12)
+    assert "<script>" not in text and "&lt;script&gt;" in text and "&amp; co" in text
+    assert "(12 min late)" in text
+
+
+def test_digest_lists_counts_and_review_link() -> None:
+    item = msg.DigestItem(
+        title="Hook", platform="FACEBOOK", at=datetime(2026, 11, 16, 13, 30, tzinfo=UTC)
+    )
+    text = msg.daily_digest(
+        day=datetime(2026, 11, 16, 15, 30, tzinfo=UTC),
+        published=[item],
+        failed=[],
+        upcoming=[item, item],
+        awaiting_review=3,
+        dashboard_url="http://127.0.0.1:3100",
+    )
+    assert "Posted today:</b> 1" in text and "Coming up (next 24 h):</b> 2" in text
+    assert "3</b> carousel(s) waiting" in text and "/approvals" in text
+
+
+# ------------------------------------------------------------------ send handler
+
+
+class _FakeTelegram:
+    def __init__(self, error: TelegramError | None = None) -> None:
+        self.error = error
+        self.sent: list[tuple[str, bool]] = []
+
+    def send_message(self, text: str, *, silent: bool = False, **_: Any) -> Any:
+        if self.error:
+            raise self.error
+        self.sent.append((text, silent))
+        return type("Sent", (), {"message_id": 7})()
+
+    def close(self) -> None:
+        return None
+
+
+def _job(**payload: Any) -> JobRun:
+    return JobRun(task_name="media_os.notify.telegram", payload=payload)
+
+
+def test_send_handler_skips_when_not_configured() -> None:
+    result = handle_send_telegram(None, _job(text="hi"), telegram=lambda: None)  # type: ignore[arg-type]
+    assert result == {"sent": False, "reason": "TELEGRAM_NOT_CONFIGURED"}
+
+
+def test_send_handler_sends_and_maps_errors() -> None:
+    fake = _FakeTelegram()
+    result = handle_send_telegram(None, _job(text="hi", silent=True), telegram=lambda: fake)  # type: ignore[arg-type,return-value]
+    assert result["sent"] is True and fake.sent == [("hi", True)]
+
+    retry = _FakeTelegram(TelegramError("down", code="TELEGRAM_NETWORK", retryable=True))
+    with pytest.raises(RetryableTaskError):
+        handle_send_telegram(None, _job(text="hi"), telegram=lambda: retry)  # type: ignore[arg-type,return-value]
+
+    perm = _FakeTelegram(TelegramError("bad", code="TELEGRAM_UNAUTHORIZED", retryable=False))
+    with pytest.raises(PermanentTaskError):
+        handle_send_telegram(None, _job(text="hi"), telegram=lambda: perm)  # type: ignore[arg-type,return-value]
+
+    with pytest.raises(PermanentTaskError):
+        handle_send_telegram(None, _job(text="  "), telegram=lambda: fake)  # type: ignore[arg-type,return-value]
