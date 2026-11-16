@@ -120,6 +120,18 @@ class FakePostiz:
             out[t.id] = pid
         return out
 
+    def account_analytics(self, integration_id: str, days: int) -> list[dict[str, Any]]:
+        if integration_id == "ig-int":
+            return [
+                {"label": "Views", "data": [{"total": 100 * days, "date": "2026-11-16"}]},
+                {"label": "Likes", "data": [{"total": days, "date": "2026-11-16"}]},
+                {"label": "Reach", "data": [{"total": 2}, {"total": 3}]},
+            ]
+        return [
+            {"label": "Media views", "data": [{"total": 4}, {"total": 6}]},
+            {"label": "Posts Engagement", "data": [{"total": 1}, {"total": 2}]},
+        ]
+
     def posts_between(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
         return list(self.posts)
 
@@ -1210,8 +1222,8 @@ def test_owner_reel_upload_approve_batch_schedule_and_publish(
     assert reel["id"] in {r["id"] for r in publish_q}
 
     # Batch: the env caps each platform at 1 post a day, so the second reel on the same day is
-    # refused with a reason while the first is scheduled.
-    when = _when()
+    # refused with a reason while the first is scheduled. Midday IST, so +30 min stays that day.
+    when = _when().astimezone(ZoneInfo("Asia/Kolkata")).replace(hour=12, minute=0)
     batch = client.post(
         f"/api/v1/content/schedule-batch?{BRAND_Q}",
         json={
@@ -1441,3 +1453,81 @@ def test_owner_single_photo_post_and_bad_images(env: dict[str, Any], client: Tes
 
         path = resolve_asset_path(slide.local_path)
         assert slide.status == "DELETED" and path is not None and not path.exists()
+
+
+# ------------------------------------------------------------------ whole-account statistics
+
+
+def test_account_totals_are_stored_daily_served_and_reported(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    from media_os_api.analytics import account as acct
+    from media_os_api.db.models import AccountMetricSnapshot
+
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:  # scheduling once mirrors the Postiz channels into Media OS
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM", "FACEBOOK"]), clients=env["clients"]
+        )
+    now = datetime.now(UTC)
+    try:
+        for _ in range(2):  # a second read the same day replaces, never duplicates
+            with session_scope(f) as db:
+                out = acct.handle_sync_account_metrics(
+                    db,
+                    JobRun(task_name=acct.ACCOUNT_TASK, payload={}),
+                    clients=env["clients"],
+                    now=now,
+                )
+        assert out["channels"] == 2 and out["errors"] == []
+        with session_scope(f) as db:
+            rows = list(db.execute(select(AccountMetricSnapshot)).scalars())
+            # IG: views, likes, reach × 2 windows; FB: views, engagements × 2 windows
+            assert len(rows) == 10
+            ig7 = {
+                r.metric_key: float(r.value)
+                for r in rows
+                if r.platform == "INSTAGRAM" and r.window_days == 7
+            }
+            assert ig7 == {"views": 700.0, "likes": 7.0, "reach_daily_sum": 5.0}
+
+        week = client.get(f"/api/v1/analytics/account?{BRAND_Q}&window=7").json()
+        by_platform = {c["platform"]: c for c in week["channels"]}
+        ig_display = {d["key"]: d["value"] for d in by_platform["INSTAGRAM"]["display"]}
+        assert ig_display["views"] == 700.0 and ig_display["likes"] == 7.0
+        assert ig_display["new_followers"] is None  # not reported: shown as a dash, never zero
+        assert "reach_daily_sum" not in ig_display  # summed daily reach isn't shown as reach
+        assert by_platform["FACEBOOK"]["metrics"]["views"] == 10.0
+        assert week["combined"]["views"] == 710.0
+        month = client.get(f"/api/v1/analytics/account?{BRAND_Q}&window=30").json()
+        assert {c["platform"]: c for c in month["channels"]}["INSTAGRAM"]["metrics"][
+            "views"
+        ] == 3000.0
+
+        # Sync now queues the account read too.
+        client.post(f"/api/v1/analytics/sync?{BRAND_Q}")
+        with session_scope(f) as db:
+            queued = db.execute(
+                select(JobRun).where(JobRun.task_name == acct.ACCOUNT_TASK)
+            ).scalar_one()
+            assert queued.payload["trigger"] == "manual"
+
+        # The 10 PM report carries the whole-account section.
+        with session_scope(f) as db:
+            notify.handle_daily_digest(
+                db, JobRun(id=uuid.uuid4(), task_name=notify.DIGEST_TASK, payload={}), now=now
+            )
+        (alert,) = _alerts(env, "digest")
+        text = alert.payload["text"]
+        assert "Whole account · last 7 days" in text and "Views 700" in text
+        assert "Media views 10" in text
+    finally:
+        with session_scope(f) as db:
+            db.execute(delete(AccountMetricSnapshot))
+            jobs = select(JobRun.id).where(
+                JobRun.task_name == "media_os.analytics.sync_account_metrics"
+            )
+            db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(jobs)))
+            db.execute(
+                delete(JobRun).where(JobRun.task_name == "media_os.analytics.sync_account_metrics")
+            )

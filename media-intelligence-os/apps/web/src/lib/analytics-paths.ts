@@ -43,3 +43,7 @@ export function pipelinePath(brand: string): string {
 export function assetUrl(brand: string, assetId: string): string {
   return `/api/v1/content/assets/${encodeURIComponent(assetId)}/file?${buildQuery({ brand })}`;
 }
+
+export function accountPath(brand: string, window: "7" | "30" = "7"): string {
+  return `/analytics/account?${buildQuery({ brand, window })}`;
+}

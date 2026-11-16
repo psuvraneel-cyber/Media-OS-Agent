@@ -24,6 +24,11 @@ import {
   VIEWS_TOOLTIP,
   ViewsTrendChart,
 } from "@/components/analytics/ViewsPanels";
+import {
+  AccountTotalsCard,
+  type AccountReport,
+  type AccountWindow,
+} from "@/components/analytics/AccountTotals";
 import { SyncNowButton } from "@/components/analytics/SyncNowButton";
 import { AreaChart, BarList } from "@/components/charts/AreaChart";
 import { Badge } from "@/components/ui/Badge";
@@ -44,6 +49,7 @@ import {
 } from "@/lib/analytics";
 import {
   DEFAULT_RANGE,
+  accountPath,
   pipelinePath,
   postDetailPath,
   postsPath,
@@ -82,9 +88,15 @@ interface AnalyticsViewProps {
   initialViews?: Initial<ViewsReport>;
   initialPosts?: Initial<PostsPage>;
   initialPipeline?: Initial<PipelineSummary>;
+  initialAccount?: Initial<AccountReport>;
 }
 
-export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: AnalyticsViewProps = {}) {
+export function AnalyticsView({
+  initialViews,
+  initialPosts,
+  initialPipeline,
+  initialAccount,
+}: AnalyticsViewProps = {}) {
   const { activeBrand } = useBrandContext();
   const brandId = activeBrand.brand_id;
   const [range, setRange] = useState<RangeKey>(DEFAULT_RANGE);
@@ -112,6 +124,11 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
     initialPosts,
   );
   const pipeline = useApiResource<PipelineSummary>(pipelinePath(brandId), initialPipeline);
+  const [accountWindow, setAccountWindow] = useState<AccountWindow>("7");
+  const accountTotals = useApiResource<AccountReport>(
+    accountPath(brandId, accountWindow),
+    initialAccount,
+  );
 
   const report = views.data && views.data.brand_id === brandId ? views.data : null;
   const channels = pipeline.data && pipeline.data.brand_id === brandId ? pipeline.data.channels : [];
@@ -127,6 +144,7 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
     views.reload();
     posts.reload();
     pipeline.reload();
+    accountTotals.reload();
   };
 
   const noPosts = report !== null && report.totals.published_posts === 0;
@@ -174,6 +192,13 @@ export function AnalyticsView({ initialViews, initialPosts, initialPipeline }: A
       </div>
 
       {views.error && !report && <ErrorBanner title="Analytics unavailable" message={views.error} />}
+
+      <AccountTotalsCard
+        report={accountTotals.data}
+        loading={accountTotals.loading}
+        window={accountWindow}
+        onWindow={setAccountWindow}
+      />
 
       {report && ((report.coverage.no_data_posts ?? 0) > 0 || (report.coverage.error_posts ?? 0) > 0) && (
         <div role="status" className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] px-4 py-3 text-xs leading-relaxed text-amber-100">

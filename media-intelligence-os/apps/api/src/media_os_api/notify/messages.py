@@ -296,6 +296,26 @@ def metrics_block(totals: PeriodTotals | None, *, days: int = 7) -> list[str]:
     return lines
 
 
+def account_block(channels: list[dict[str, Any]] | None, *, days: int = 7) -> list[str]:
+    """Whole-account totals (every post, including ones posted directly), for the nightly report."""
+    if not channels:
+        return []
+    lines = [
+        f"\n🌐 <b>Whole account · last {days} days</b> (all posts, incl. ones posted directly)"
+    ]
+    for ch in channels:
+        parts = [
+            f"{e(d['label'])} {number(d['value'])}"
+            for d in ch.get("display", [])
+            if d.get("value") is not None
+        ]
+        body = " · ".join(parts) if parts else "no numbers yet"
+        lines.append(f"• <b>{e(platform(ch['platform']))}</b>: {body}")
+    if any(ch["platform"] == "INSTAGRAM" for ch in channels):
+        lines.append("<i>Instagram account numbers can run up to 2 days behind.</i>")
+    return lines
+
+
 def daily_digest(
     *,
     day: datetime,
@@ -305,6 +325,7 @@ def daily_digest(
     awaiting_review: int,
     dashboard_url: str,
     totals: PeriodTotals | None = None,
+    account: list[dict[str, Any]] | None = None,
 ) -> str:
     """The 22:00 IST nightly report: today's activity plus the last 7 days of numbers."""
     pub, bad, nxt = list(published), list(failed), list(upcoming)
@@ -330,4 +351,5 @@ def daily_digest(
     if not pub and not nxt:
         lines.append("\nNothing posted today and nothing scheduled for tomorrow.")
     lines.extend(metrics_block(totals))
+    lines.extend(account_block(account))
     return "\n".join(lines)

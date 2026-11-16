@@ -144,6 +144,11 @@ There are two layers, and both run every 5 minutes.
   - `analytics.sync_post_metrics.nightly` (21:40 IST, `force_recent`) refreshes every post up to 30 days old first, so the numbers are about 20 min old.
   - Facebook comments and shares aren't available through Postiz for photo posts; YouTube appears once a channel is connected.
 - **`notify.telegram_commands`, every minute:** reads messages sent to the bot and answers `/status` (worker, scheduler, Postiz, status sync, last and next post, stuck and failed posts, review queue), `/queue` (upcoming posts) and `/help`. It answers only `TELEGRAM_CHAT_ID`, ignores messages older than 10 min, and never changes anything.
+- **Whole-account statistics:** `analytics.sync_account_metrics` (daily 21:35 IST, and on Sync now) reads each connected channel's account analytics from Postiz (`GET /analytics/{channel}?date=7|30`) and stores last-7 and last-30 day totals in `account_metric_snapshots`, one row per channel, metric, window and IST day. These cover every post on the account, including ones posted directly in the Instagram or Facebook apps.
+  - Instagram gives likes, views, comments, shares, saves and replies as window totals, plus daily reach; follower counts appear only once the account has 100+ followers. Instagram's account numbers can run about 2 days behind post-level numbers.
+  - Facebook gives media views, unique viewers, engagements and new follows per day.
+  - Sums of daily unique counts (reach, unique viewers) are stored but never shown as reach or added across platforms.
+  - Shown in Analytics as "Whole account" and in the 22:00 report as "Whole account · last 7 days".
 - **De-duplication:** alerts are durable jobs keyed by the event, so each event is sent once and a Telegram outage only delays them.
 - **Configuration:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `MEDIA_OS_DASHBOARD_URL` in the runtime `.env`, worker only. When the token or chat ID is empty, alerts are skipped and nothing else changes.
 

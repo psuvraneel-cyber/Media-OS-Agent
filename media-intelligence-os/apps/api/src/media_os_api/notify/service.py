@@ -357,9 +357,11 @@ def handle_daily_digest(
     ).scalar_one()
     # Last 7 days of platform numbers. Imported here: analytics.service imports the publish
     # service, which imports this module.
+    from media_os_api.analytics.account import account_channels_all
     from media_os_api.analytics.service import period_totals
 
     totals = period_totals(session, now=now, days=7)
+    account = account_channels_all(session, 7)
     queue_alert(
         session,
         key=f"digest:{local_day.isoformat()}:{job.id}",
@@ -371,6 +373,7 @@ def handle_daily_digest(
             awaiting_review=int(awaiting),
             dashboard_url=dashboard_url(),
             totals=totals,
+            account=account,
         ),
         severity="info",
         silent=True,

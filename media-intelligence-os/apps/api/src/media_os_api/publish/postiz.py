@@ -155,6 +155,12 @@ class PostizClient:
             return None
         return [m for m in data or [] if isinstance(m, dict)] if isinstance(data, list) else []
 
+    def account_analytics(self, integration_id: str, days: int) -> list[dict[str, Any]]:
+        """Account-wide metrics for one channel over the last `days` days
+        (`GET /analytics/{integration}`), read-only. Covers every post on the account."""
+        data = self._call("GET", f"/analytics/{integration_id}", params={"date": days})
+        return [m for m in data or [] if isinstance(m, dict)] if isinstance(data, list) else []
+
     def posts_between(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
         data = self._call(
             "GET", "/posts", params={"startDate": start.isoformat(), "endDate": end.isoformat()}

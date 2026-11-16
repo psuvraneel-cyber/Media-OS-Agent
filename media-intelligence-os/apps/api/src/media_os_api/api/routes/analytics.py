@@ -6,6 +6,7 @@
   — server-paginated platform posts with period and lifetime metrics.
 * `GET /api/v1/analytics/posts/{content_package_id}?brand=<ref>&range=…` — one post, per platform.
 * `GET /api/v1/analytics/pipeline?brand=<ref>` — production / approval / publishing counts.
+* `GET /api/v1/analytics/account?brand=<ref>&window=7|30` — account-wide totals per channel.
 
 All numbers come from stored platform observations; nothing is simulated.
 """
@@ -115,3 +116,26 @@ def get_pipeline(
 ) -> dict[str, Any]:
     with _db(request) as db:
         return service.pipeline_summary(db, _brand_id(db, brand))
+
+
+@router.get("/analytics/account")
+def get_account(
+    request: Request,
+    response: Response,
+    _session: Annotated[SessionPayload, Depends(require_session)],
+    brand: BrandParam,
+    window: Annotated[int, Query()] = 7,
+) -> dict[str, Any]:
+    """Account-wide totals per connected channel (every post, including ones posted directly)."""
+    from media_os_api.analytics.account import WINDOWS, account_report
+
+    if window not in WINDOWS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            {"code": "BAD_WINDOW", "message": "window must be 7 or 30."},
+        )
+
+    with _db(request) as db:
+        report = account_report(db, _brand_id(db, brand), window)
+    response.headers["Cache-Control"] = CACHE
+    return report
