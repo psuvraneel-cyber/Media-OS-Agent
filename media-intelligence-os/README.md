@@ -2,8 +2,19 @@
 
 A personal, local-first autonomous AI research, content-production, and social-media publishing intelligence platform running in Docker containers independently of Antigravity.
 
-**Current Project Stage:** Phase 0 (Project Contract), Phase 1 (Workspace Baseline), Phase 2 (Standalone Postiz v2.25.3), Phase 3 (Next.js Dashboard + FastAPI Control-Plane Skeleton), Phase 4 (PostgreSQL, Redis, Multi-Brand Schema, Durable Jobs, Outbox, Scheduler & Workflow State Machine) and **Phase 5 (Research Ingestion: five live-verified official-source connectors, scheduling, read-only Research/Topics UI) complete and deployed**; see [`docs/PHASE_5_IMPLEMENTATION.md`](./docs/PHASE_5_IMPLEMENTATION.md). All research sources are `OFF` until the owner enables them.
-**Next:** Nimontron marketing track (brand onboarding, free-tier AI adapter, carousels, publishing), per [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+> ← Back to the [project overview](../README.md): features, status, quick start and releases.
+
+**Current stage (v1.0):** Phases 0–5 plus the Nimontron track are complete and deployed:
+- research ingestion (sources `OFF` until enabled);
+- AI carousels with QA;
+- scheduled Instagram and Facebook publishing;
+- Studio for your own reels, photos and carousels;
+- per-post and whole-account analytics;
+- Telegram alerts and reports;
+- the Windows self-healer.
+
+See [`docs/OPERATIONS.md`](./docs/OPERATIONS.md).
+**Next:** link accounts to brands and add a New brand form, YouTube Shorts and autopilot, per [`docs/ROADMAP.md`](./docs/ROADMAP.md).
 
 ---
 
