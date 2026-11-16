@@ -23,6 +23,7 @@ from media_os_api.jobs.errors import (
     compute_backoff_seconds,
     validate_safe_task_payload,
 )
+from media_os_api.jobs.routing import retry_policy_for_task
 
 TERMINAL_JOB_STATUSES = frozenset({"SUCCEEDED", "FAILED_FINAL", "CANCELLED"})
 
@@ -291,7 +292,8 @@ def complete_job_failure(
     job.last_error_message = classification.sanitized_message
 
     if classification.retryable and job.attempt_count < job.maximum_attempts:
-        delay = compute_backoff_seconds(job.attempt_count, base_seconds=base_backoff_seconds)
+        base = max(base_backoff_seconds, retry_policy_for_task(job.task_name).base_backoff_seconds)
+        delay = compute_backoff_seconds(job.attempt_count, base_seconds=base)
         next_at = current + timedelta(seconds=delay)
         job.status = "FAILED_RETRYABLE"
         job.available_at = next_at
