@@ -16,7 +16,7 @@ from media_os_api.db import check_database_health, create_db_engine
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HEAD = "0010_nightly_report"  # current head; 0006 is checked below
+HEAD = "0011_telegram_commands"  # current head; 0006 is checked below
 
 
 def _db_url() -> str:

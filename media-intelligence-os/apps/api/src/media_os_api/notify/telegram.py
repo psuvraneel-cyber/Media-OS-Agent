@@ -102,6 +102,15 @@ class TelegramClient:
         message_id = result.get("message_id") if isinstance(result, dict) else None
         return SentMessage(message_id=message_id if isinstance(message_id, int) else None)
 
+    def get_updates(self, *, offset: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        """New messages sent to the bot (short poll: returns immediately)."""
+        body: dict[str, Any] = {"timeout": 0, "limit": limit, "allowed_updates": ["message"]}
+        if offset is not None:
+            body["offset"] = offset
+        data = self._call("getUpdates", body)
+        result = data.get("result") if isinstance(data, dict) else None
+        return [u for u in result or [] if isinstance(u, dict)] if isinstance(result, list) else []
+
     def _call(self, method: str, body: Mapping[str, Any]) -> Any:
         url = f"https://{API_HOST}/bot{self._token}/{method}"
         try:

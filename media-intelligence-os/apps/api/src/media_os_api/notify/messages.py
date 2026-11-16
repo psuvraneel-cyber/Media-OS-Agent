@@ -128,13 +128,51 @@ def post_published(post: PostRef, late_by_minutes: int = 0) -> str:
     )
 
 
-def post_failed(post: PostRef, raw_error: str | None) -> str:
-    return (
+# Meta error codes that are worth one automatic retry: rate limits, transient server errors and
+# media download hiccups. Permission and login errors (10, 190, 200, "cannot call api") are not.
+TRANSIENT_META_CODES = frozenset({1, 2, 4, 17, 32, 613, 9004})
+_TRANSIENT_WORDS = (
+    "rate limit",
+    "request limit",
+    "temporarily",
+    "try again",
+    "timeout",
+    "timed out",
+    "service unavailable",
+    "media download",
+)
+_NEVER_RETRY_WORDS = ("cannot call api", "access token", "session has expired", "permission")
+
+
+def is_transient_postiz_error(raw: str | None) -> bool:
+    """True when a failed post's error looks temporary, so one automatic retry may succeed."""
+    text = raw or ""
+    if not text.strip():
+        return False  # no reason given: don't guess, tell the owner
+    errors = _meta_errors(text)
+    message = " ".join(str(err.get("message") or "") for err in errors) or text
+    low = message.lower()
+    if any(word in low for word in _NEVER_RETRY_WORDS):
+        return False
+    codes = {err.get("code") for err in errors}
+    if codes & {10, 190, 200}:
+        return False
+    return bool(codes & TRANSIENT_META_CODES) or any(word in low for word in _TRANSIENT_WORDS)
+
+
+def post_failed(post: PostRef, raw_error: str | None, retry_at: datetime | None = None) -> str:
+    head = (
         f"🔴 <b>Post failed on {e(platform(post.platform))}</b>\n"
         f"{e(short(post.title))}\n<i>{e(post.brand)} · was due {e(when_ist(post.scheduled_at))}"
         f" IST</i>\n\n<b>Why:</b> {e(explain_postiz_error(raw_error))}\n\n"
-        "Once that's fixed, reschedule it from Approvals → Approved."
     )
+    if retry_at is not None:
+        return head + (
+            f"🔁 This looks temporary, so Media OS will <b>retry automatically at "
+            f"{e(when_ist(retry_at))} IST</b>. You don't need to do anything; you'll hear "
+            "whether it worked."
+        )
+    return head + "Once that's fixed, reschedule it from Approvals → Approved."
 
 
 def post_stuck(post: PostRef, minutes_late: int) -> str:

@@ -120,6 +120,7 @@ There are two layers, and both run every 5 minutes.
 - **Queued from the publish status sync:**
   - post **published**: quiet message with the link;
   - post **failed**: Meta and Postiz errors explained in plain words, for example "Meta blocked the app";
+    - **automatic retry:** when every platform failed with a temporary error (rate limit, Meta code 1/2/4/17/32/613, media download failed, timeout, 5xx), the package is rescheduled once, 30 min later (40 or 50 min if that slot is taken). The alert says so. Permission, token and policy errors are never retried, and a second failure asks you to reschedule it yourself;
   - post **overdue**.
 - **Job that gave up:** any durable job that ends `FAILED_FINAL`.
 - **`notify.watchdog`, every 5 min:**
@@ -131,19 +132,22 @@ There are two layers, and both run every 5 minutes.
   - Totals across platforms only add metrics that mean the same everywhere; reach and unique viewers stay per platform.
   - `analytics.sync_post_metrics.nightly` (21:40 IST, `force_recent`) refreshes every post up to 30 days old first, so the numbers are about 20 min old.
   - Facebook comments and shares aren't available through Postiz for photo posts; YouTube appears once a channel is connected.
+- **`notify.telegram_commands`, every minute:** reads messages sent to the bot and answers `/status` (worker, scheduler, Postiz, status sync, last and next post, stuck and failed posts, review queue), `/queue` (upcoming posts) and `/help`. It answers only `TELEGRAM_CHAT_ID`, ignores messages older than 10 min, and never changes anything.
 - **De-duplication:** alerts are durable jobs keyed by the event, so each event is sent once and a Telegram outage only delays them.
 - **Configuration:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `MEDIA_OS_DASHBOARD_URL` in the runtime `.env`, worker only. When the token or chat ID is empty, alerts are skipped and nothing else changes.
 
 **Host (`infra/ops/windows/watchdog.ps1`, Task Scheduler), repairs:**
 - restarts `postiz-runtime-app` when its worker has no live Temporal pollers for about 10 min, or is crash-looping;
-- restarts any watched container that stays unhealthy;
-- warns when Docker Desktop is down.
+- restarts any watched container that stays unhealthy, and starts any that has stopped;
+- **watches the watcher:** if Media OS's own `notify.watchdog` hasn't succeeded for 15 min, it tells you directly on Telegram and restarts `media-os-worker` and `media-os-scheduler`;
+- warns when Docker Desktop is down;
+- **dead man's switch (optional):** pings `HEALTHCHECKS_PING_URL` (Healthchecks.io) every run. If the pings stop because the PC is off, asleep or offline, Healthchecks.io alerts you on Telegram from outside.
 
 It has a 15-min cooldown per container and never stops or removes anything. See `infra/ops/windows/README.md` for install, pause and dry-run.
 
 **Postiz startup gate.** `postiz-runtime/docker-compose.yaml` makes the Postiz app wait for Temporal before starting. Docker ignores `depends_on` when Docker Desktop restarts containers itself, which is what silently broke publishing on 16 Nov 2026.
 
-**One limit code can't fix.** The PC must be on and awake at posting times. Turn on "Start Docker Desktop when you sign in" and avoid sleep during posting windows.
+**One limit code can't fix.** The PC must be on and awake at posting times. The Healthchecks.io ping tells you when it isn't. Turn on "Start Docker Desktop when you sign in" and avoid sleep during posting windows.
 
 ## 4. Storage Locations & Retention
 
