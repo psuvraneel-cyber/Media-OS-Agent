@@ -8,6 +8,7 @@
 | Postiz's orchestrator restarted 3+ times in 5 min (crash loop) | `docker restart postiz-runtime-app` |
 | A Media OS or Postiz container is running but unhealthy for two checks | `docker restart <container>` |
 | A Media OS or Postiz container has stopped (exited) | `docker start <container>` |
+| The dashboard (`127.0.0.1:3100`) or API (`127.0.0.1:8000`) is healthy in Docker but unreachable from Windows for two checks (Docker lost the port link, usually after its Linux layer restarted) | `docker restart media-os-web` / `media-os-api` |
 | Media OS's in-app watchdog hasn't succeeded for 15 min (its alert system is quiet) | Telegram alert (at most hourly) + `docker restart media-os-worker media-os-scheduler` |
 | Docker Desktop isn't running | Telegram alert (at most hourly) |
 
