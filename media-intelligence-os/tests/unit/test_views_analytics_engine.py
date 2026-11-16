@@ -281,3 +281,19 @@ def test_is_due_respects_last_check() -> None:
         scheduled_at=now - timedelta(days=200), metrics_checked_at=now - timedelta(days=3)
     )
     assert not is_due(old, now)  # weekly tier
+
+
+def test_sync_now_rereads_posts_checked_more_than_two_minutes_ago() -> None:
+    from media_os_api.analytics.sync import FORCE_RECENT_MIN_GAP, MANUAL_MIN_GAP, is_due
+    from media_os_api.db.models import PublishSchedule
+
+    now = datetime(2026, 11, 16, 15, tzinfo=UTC)
+    post = PublishSchedule(
+        scheduled_at=now - timedelta(days=2), metrics_checked_at=now - timedelta(minutes=10)
+    )
+    # The nightly forced run still skips posts read in the last hour...
+    assert not is_due(post, now, force_recent=True, min_gap=FORCE_RECENT_MIN_GAP)
+    # ...but "Sync now" re-reads anything older than two minutes.
+    assert is_due(post, now, force_recent=True, min_gap=MANUAL_MIN_GAP)
+    post.metrics_checked_at = now - timedelta(minutes=1)
+    assert not is_due(post, now, force_recent=True, min_gap=MANUAL_MIN_GAP)
