@@ -378,7 +378,7 @@ def test_sync_marks_published_and_package_published(env: dict[str, Any]) -> None
         out = svc.handle_sync_status(
             db, JobRun(task_name=svc.SYNC_TASK, payload={}), clients=env["clients"]
         )
-        assert out == {"checked": 2, "updated": 2}
+        assert out == {"checked": 2, "updated": 2, "auto_retried": 0}
         rows = list(db.execute(select(PublishSchedule)).scalars())
         assert {r.status for r in rows} == {"PUBLISHED"} and all(
             (r.remote_post_id or "").startswith("https://") for r in rows
@@ -969,3 +969,164 @@ def test_nightly_report_adds_up_the_last_7_days(env: dict[str, Any]) -> None:
     finally:
         with session_scope(f) as db:
             db.execute(delete(PostMetricObservation))
+
+
+# ------------------------------------------------------------------ auto-retry
+
+
+def _fail_all(env: dict[str, Any], error: str) -> None:
+    for p in env["postiz"].posts:
+        if p["state"] == "QUEUE":
+            p["state"] = "ERROR"
+            p["error"] = error
+
+
+RATE_LIMIT = (
+    '{"details":[{"json":"{\\"error\\":{\\"message\\":\\"Application request limit reached\\",'
+    '\\"code\\":4}}"}]}'
+)
+
+
+def _schedule_jobs(env: dict[str, Any]) -> list[JobRun]:
+    with session_scope(env["factory"]) as db:
+        rows = list(
+            db.execute(
+                select(JobRun)
+                .where(JobRun.task_name == svc.SCHEDULE_TASK)
+                .order_by(JobRun.created_at)
+            ).scalars()
+        )
+        db.expunge_all()
+        return rows
+
+
+def test_temporary_failure_is_retried_once_automatically(env: dict[str, Any]) -> None:
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM"]), clients=env["clients"]
+        )
+    _backdate(env, 60)
+    _fail_all(env, RATE_LIMIT)
+    out = _sync(env)
+    assert out["auto_retried"] == 1
+    jobs = _schedule_jobs(env)
+    assert len(jobs) == 2  # the original + the automatic retry
+    retry_at = datetime.fromisoformat(jobs[-1].payload["scheduled_at"])
+    assert timedelta(minutes=30) <= retry_at - datetime.now(UTC) <= timedelta(minutes=32)
+    (alert,) = _alerts(env, "failed")
+    assert "retry automatically" in alert.payload["text"]
+    assert alert.payload["severity"] == "warning"
+
+    # The retry runs and fails again: no third attempt, the owner is told to step in.
+    with session_scope(f) as db:
+        job = db.get(JobRun, jobs[-1].id)
+        assert job is not None
+        svc.handle_schedule_carousel(db, job, clients=env["clients"])
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            if r.status == "SCHEDULED":
+                r.scheduled_at = datetime.now(UTC) - timedelta(minutes=45)
+    _fail_all(env, RATE_LIMIT)
+    out = _sync(env)
+    assert out["auto_retried"] == 0
+    assert len(_schedule_jobs(env)) == 2
+    texts = [a.payload["text"] for a in _alerts(env, "failed")]
+    assert len(texts) == 2 and "reschedule it from Approvals" in texts[-1]
+
+
+def test_permission_failure_is_never_retried(env: dict[str, Any]) -> None:
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM"]), clients=env["clients"]
+        )
+    _backdate(env, 60)
+    _fail_all(env, META_ERROR)
+    assert _sync(env)["auto_retried"] == 0
+    assert len(_schedule_jobs(env)) == 1
+    (alert,) = _alerts(env, "failed")
+    assert "Meta blocked the app" in alert.payload["text"]
+    assert "reschedule it from Approvals" in alert.payload["text"]
+
+
+# ------------------------------------------------------------------ bot commands
+
+
+class _FakeBot:
+    chat_id = "4242"
+
+    def __init__(self, updates: list[dict[str, Any]]) -> None:
+        self.updates = updates
+        self.offsets: list[int | None] = []
+        self.sent: list[str] = []
+
+    def get_updates(self, *, offset: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        self.offsets.append(offset)
+        return [u for u in self.updates if offset is None or u["update_id"] >= offset]
+
+    def send_message(self, text: str, **_: Any) -> Any:
+        self.sent.append(text)
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+def _update(update_id: int, chat: str, text: str, age_minutes: int = 0) -> dict[str, Any]:
+    sent = int((datetime.now(UTC) - timedelta(minutes=age_minutes)).timestamp())
+    return {
+        "update_id": update_id,
+        "message": {"chat": {"id": int(chat)}, "date": sent, "text": text},
+    }
+
+
+def test_bot_answers_the_owner_only_and_remembers_its_place(env: dict[str, Any]) -> None:
+    from media_os_api.jobs.ledger import enqueue_durable_job
+    from media_os_api.notify import commands
+
+    f, when = env["factory"], _when()
+    with session_scope(f) as db:
+        svc.handle_schedule_carousel(
+            db, _schedule(db, env, when, ["INSTAGRAM"]), clients=env["clients"]
+        )
+    bot = _FakeBot(
+        [
+            _update(10, "4242", "/status"),
+            _update(11, "999", "/status"),  # a stranger: never answered
+            _update(12, "4242", "/queue", age_minutes=30),  # too old: skipped
+            _update(13, "4242", "hello"),  # not a command
+            _update(14, "4242", "/queue"),
+        ]
+    )
+    try:
+        with session_scope(f) as db:
+            job, _ = enqueue_durable_job(
+                db,
+                task_name=commands.COMMANDS_TASK,
+                task_type="NOTIFY",
+                payload={},
+                idempotency_key="test:commands:1",
+            )
+            out = commands.handle_telegram_commands(db, job, telegram=lambda: bot)  # type: ignore[arg-type,return-value]
+            job.status, job.result_payload = "SUCCEEDED", out
+            job.worker_finished_at = datetime.now(UTC)
+        assert out == {"offset": 15, "handled": 2, "ignored_other_chats": 1}
+        assert "Media OS status" in bot.sent[0] and "Next post:" in bot.sent[0]
+        assert "scheduled post(s)" in bot.sent[1]
+        # The next run continues after the last update it saw.
+        with session_scope(f) as db:
+            job2, _ = enqueue_durable_job(
+                db,
+                task_name=commands.COMMANDS_TASK,
+                task_type="NOTIFY",
+                payload={},
+                idempotency_key="test:commands:2",
+            )
+            commands.handle_telegram_commands(db, job2, telegram=lambda: bot)  # type: ignore[arg-type,return-value]
+        assert bot.offsets == [None, 15] and len(bot.sent) == 2
+    finally:
+        with session_scope(f) as db:
+            ids = select(JobRun.id).where(JobRun.task_name == commands.COMMANDS_TASK)
+            db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(ids)))
+            db.execute(delete(JobRun).where(JobRun.task_name == commands.COMMANDS_TASK))

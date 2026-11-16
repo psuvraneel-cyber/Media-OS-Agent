@@ -156,13 +156,7 @@ def alert_post_status(
             silent=True,
         )
     elif new_status == "FAILED":
-        raw = str((post or {}).get("error") or "")
-        queue_alert(
-            session,
-            key=f"failed:{row.id}:{row.scheduled_at.isoformat()}",
-            text=msg.post_failed(post_ref(session, row), raw),
-            severity="error",
-        )
+        alert_post_failed(session, row, post)
     elif new_status == "OVERDUE":
         minutes = int((now - row.scheduled_at).total_seconds() // 60)
         queue_alert(
@@ -171,6 +165,22 @@ def alert_post_status(
             text=msg.post_stuck(post_ref(session, row), minutes),
             severity="warning",
         )
+
+
+def alert_post_failed(
+    session: Session,
+    row: PublishSchedule,
+    post: dict[str, Any] | None,
+    retry_at: datetime | None = None,
+) -> None:
+    """A failed post. With `retry_at`, the alert says Media OS is retrying it automatically."""
+    raw = str((post or {}).get("error") or "")
+    queue_alert(
+        session,
+        key=f"failed:{row.id}:{row.scheduled_at.isoformat()}",
+        text=msg.post_failed(post_ref(session, row), raw, retry_at=retry_at),
+        severity="warning" if retry_at else "error",
+    )
 
 
 def alert_job_failed(session: Session, job: JobRun) -> None:

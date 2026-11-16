@@ -319,3 +319,59 @@ def test_nightly_refresh_rechecks_recent_posts_only() -> None:
     assert not is_due(recent, now) and is_due(recent, now, force_recent=True)
     assert not is_due(just_read, now, force_recent=True)  # read in the last hour
     assert not is_due(old, now, force_recent=True)  # older than 30 days keeps its tier
+
+
+# ------------------------------------------------------------------ auto-retry + bot commands
+
+
+def test_transient_errors_are_retried_and_permission_errors_are_not() -> None:
+    assert msg.is_transient_postiz_error(_meta("Application request limit reached", 4))
+    assert msg.is_transient_postiz_error(_meta("Media download has failed", 9004))
+    assert msg.is_transient_postiz_error(_meta("An unexpected error has occurred. Please retry", 2))
+    assert msg.is_transient_postiz_error("Service temporarily unavailable")
+    assert not msg.is_transient_postiz_error(META_BLOCKED)  # Meta blocked the app
+    assert not msg.is_transient_postiz_error(_meta("Error validating access token", 190))
+    assert not msg.is_transient_postiz_error(
+        _meta("(#10) Application does not have permission", 10)
+    )
+    assert not msg.is_transient_postiz_error("")  # no reason given: tell the owner
+
+
+def test_failed_alert_mentions_the_automatic_retry() -> None:
+    retry = datetime(2026, 11, 16, 14, 1, tzinfo=UTC)
+    text = msg.post_failed(_ref(), _meta("Application request limit reached", 4), retry_at=retry)
+    assert "retry automatically at 16 Nov, 7:31 PM IST" in text
+    assert "reschedule it from Approvals" not in text
+
+
+def test_bot_replies_route_to_the_right_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    from media_os_api.notify import commands
+
+    calls: list[str] = []
+
+    def fake_status(_s: Any, _n: Any) -> str:
+        calls.append("status")
+        return "S"
+
+    def fake_queue(_s: Any, _n: Any) -> str:
+        calls.append("queue")
+        return "Q"
+
+    monkeypatch.setattr(commands, "status_text", fake_status)
+    monkeypatch.setattr(commands, "queue_text", fake_queue)
+    now = datetime(2026, 11, 16, tzinfo=UTC)
+    assert commands.reply_for(None, "/status", now) == "S"  # type: ignore[arg-type]
+    assert commands.reply_for(None, "/queue@Media_bot extra", now) == "Q"  # type: ignore[arg-type]
+    assert commands.reply_for(None, "/help", now) == commands.HELP  # type: ignore[arg-type]
+    assert commands.reply_for(None, "/whatever", now) == commands.HELP  # type: ignore[arg-type]
+    assert calls == ["status", "queue"]
+
+
+def test_get_updates_reads_messages() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).endswith("/getUpdates")
+        assert json.loads(request.content)["offset"] == 5
+        return httpx.Response(200, json={"ok": True, "result": [{"update_id": 5, "message": {}}]})
+
+    with _client(handler) as client:
+        assert client.get_updates(offset=5) == [{"update_id": 5, "message": {}}]

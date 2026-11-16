@@ -49,7 +49,8 @@ from media_os_api.db.models import (
 from media_os_api.jobs.errors import PermanentTaskError, PolicyRefusalError, RetryableTaskError
 from media_os_api.jobs.ledger import enqueue_durable_job
 from media_os_api.jobs.routing import queue_for_task
-from media_os_api.notify.service import alert_post_status
+from media_os_api.notify.messages import is_transient_postiz_error
+from media_os_api.notify.service import alert_post_failed, alert_post_status
 from media_os_api.publish.media_host import GitHubPagesHost, MediaHostError
 from media_os_api.publish.postiz import Integration, PostizClient, PostizError
 from media_os_api.services.audit_service import record_audit_event
@@ -621,6 +622,7 @@ def handle_sync_status(
         start = min(s.scheduled_at for s in due) - timedelta(days=1)
         posts = postiz.posts_between(start, now + timedelta(days=1))
         by_id = {str(p.get("id")): p for p in posts if p.get("id")}
+        failed_now: dict[uuid.UUID, list[tuple[PublishSchedule, dict[str, Any] | None]]] = {}
         for s in due:
             post = by_id.get(s.postiz_post_id or "")
             new_status = _next_status(s, post, now)
@@ -631,13 +633,23 @@ def handle_sync_status(
                 s.remote_post_id = release[:128] or None
             s.status = new_status
             updated += 1
+            if new_status == "FAILED":
+                # Alerted after the package settles, once we know whether it's retried.
+                failed_now.setdefault(s.content_package_id, []).append((s, post))
+                continue
             # Tell the owner (Telegram; skipped when not configured). Same transaction, so an
             # alert is queued exactly when the status change commits.
             alert_post_status(session, s, new_status, post, now)
         session.flush()
         for package_id in {s.content_package_id for s in due}:
             _settle_package(session, package_id)
-        return {"checked": len(due), "updated": updated}
+        retried = 0
+        for package_id, failures in failed_now.items():
+            retry_at = _auto_retry(session, package_id, failures, now)
+            retried += int(retry_at is not None)
+            for row, post in failures:
+                alert_post_failed(session, row, post, retry_at=retry_at)
+        return {"checked": len(due), "updated": updated, "auto_retried": retried}
     except PostizError as exc:
         if exc.retryable:
             raise RetryableTaskError(str(exc), code=exc.code) from exc
@@ -645,6 +657,62 @@ def handle_sync_status(
     finally:
         host.close()
         postiz.close()
+
+
+AUTO_RETRY_DELAYS = (timedelta(minutes=30), timedelta(minutes=40), timedelta(minutes=50))
+AUTO_RETRY_ACTOR = "system:auto-retry"
+
+
+def _auto_retry(
+    session: Session,
+    package_id: uuid.UUID,
+    failures: list[tuple[PublishSchedule, dict[str, Any] | None]],
+    now: datetime,
+) -> datetime | None:
+    """Reschedule a carousel once, 30 min later, when every failure looks temporary.
+
+    Only when the whole carousel failed (it is FAILED_RETRYABLE, so the normal reschedule rules
+    apply), every error is temporary (rate limit, server hiccup, media download; never permission
+    or login problems), and it hasn't been retried before (one original attempt so far). Returns
+    the new time, or None when the owner has to look at it.
+    """
+    pkg = session.get(ContentPackage, package_id)
+    if pkg is None or pkg.status != ContentLifecycleStatus.FAILED_RETRYABLE.value:
+        return None
+    if not all(
+        is_transient_postiz_error(str((post or {}).get("error") or "")) for _, post in failures
+    ):
+        return None
+    attempts = session.execute(
+        select(func.count(func.distinct(PublishSchedule.scheduled_at))).where(
+            PublishSchedule.content_package_id == package_id
+        )
+    ).scalar_one()
+    if attempts >= 2:
+        return None  # already retried once: the owner decides now
+    brand = session.get(BrandProfile, pkg.brand_profile_id)
+    if brand is None:
+        return None
+    platforms = sorted({row.platform for row, _ in failures})
+    for delay in AUTO_RETRY_DELAYS:
+        when = (now + delay).replace(second=0, microsecond=0) + timedelta(minutes=1)
+        try:
+            request_schedule(
+                session,
+                pkg=pkg,
+                brand=brand,
+                when=when,
+                platforms=platforms,
+                actor_id=AUTO_RETRY_ACTOR,
+                now=now,
+            )
+        except ScheduleRequestError as exc:
+            if exc.code in ("SLOT_TAKEN", "DAILY_CAP"):
+                continue  # try a little later
+            logger.info("auto-retry refused for %s: %s", package_id, exc.code)
+            return None
+        return when
+    return None
 
 
 def _next_status(s: PublishSchedule, post: dict[str, Any] | None, now: datetime) -> str | None:

@@ -30,6 +30,7 @@ from media_os_api.jobs.routing import (
     RESEARCH_SOFT_TIME_LIMIT,
     RESEARCH_TIME_LIMIT,
 )
+from media_os_api.notify.commands import COMMANDS_TASK, handle_telegram_commands
 from media_os_api.notify.service import (
     DIGEST_TASK,
     NOTIFY_TASK,
@@ -122,6 +123,7 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     NOTIFY_TASK: handle_send_telegram,
     WATCHDOG_TASK: handle_watchdog,
     DIGEST_TASK: handle_daily_digest,
+    COMMANDS_TASK: handle_telegram_commands,  # /status, /queue, /help from the owner's chat
 }
 
 
