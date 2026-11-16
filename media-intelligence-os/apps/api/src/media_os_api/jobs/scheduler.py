@@ -15,7 +15,7 @@ from media_os_api.db.models import JobRun, ScheduleDefinition
 from media_os_api.db.session import session_scope
 from media_os_api.jobs.errors import RetryableTaskError
 from media_os_api.jobs.ledger import complete_job_failure, enqueue_durable_job
-from media_os_api.jobs.routing import queue_for_task
+from media_os_api.jobs.routing import queue_for_task, retry_policy_for_task
 
 logger = logging.getLogger("media_os_api.scheduler")
 
@@ -140,6 +140,7 @@ def run_scheduler_tick(
                         brand_profile_id=sched.brand_profile_id,
                         schedule_definition_id=sched.id,
                         queue_name=queue_for_task(sched.task_name),
+                        maximum_attempts=retry_policy_for_task(sched.task_name).maximum_attempts,
                         available_at=current,
                     )
                     sched.last_run_at = scheduled_slot_utc

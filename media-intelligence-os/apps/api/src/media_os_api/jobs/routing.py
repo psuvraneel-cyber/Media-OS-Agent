@@ -7,6 +7,8 @@ a dedicated Celery task with longer limits; everything else keeps the Phase 4 de
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 RESEARCH_FETCH_PREFIX = "media_os.research.fetch."
 
 DEFAULT_QUEUE = "control"
@@ -49,3 +51,23 @@ def celery_task_for_queue(queue_name: str) -> str:
     if queue_name == CREATIVE_QUEUE:
         return CREATIVE_CELERY_TASK
     return DEFAULT_CELERY_TASK
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    maximum_attempts: int
+    base_backoff_seconds: float
+
+
+DEFAULT_RETRY_POLICY = RetryPolicy(maximum_attempts=3, base_backoff_seconds=2.0)
+# Jobs that only read from Postiz. Postiz starts slower than the Media OS stack (it was still
+# booting when a 6-hourly sync fired and the 2 s / 4 s retries gave up in 12 s), so they back off
+# 30 s, 60 s, 120 s, 240 s, 300 s: about 12 minutes of tolerance before FAILED_FINAL.
+POSTIZ_READ_RETRY_POLICY = RetryPolicy(maximum_attempts=6, base_backoff_seconds=30.0)
+POSTIZ_READ_TASKS = frozenset({"media_os.publish.sync_status"})
+
+
+def retry_policy_for_task(task_name: str) -> RetryPolicy:
+    if task_name.startswith(ANALYTICS_PREFIX) or task_name in POSTIZ_READ_TASKS:
+        return POSTIZ_READ_RETRY_POLICY
+    return DEFAULT_RETRY_POLICY
