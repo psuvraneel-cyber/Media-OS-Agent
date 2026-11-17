@@ -42,6 +42,7 @@ export interface AutopilotSettings {
   auto_schedule: boolean;
   post_times: string[];
   platforms: string[];
+  daily_caps: Record<string, number>;
   can_generate: boolean;
   next_daily_run: string | null;
   timezone: string;
@@ -54,6 +55,10 @@ const COUNT_OPTIONS = [
   { value: "2", label: "2 posts" },
   { value: "3", label: "3 posts" },
 ] as const;
+const CAP_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
+  value: String(i + 1),
+  label: i === 0 ? "1 post" : `${i + 1} posts`,
+}));
 const DAILY_OPTIONS = [
   { value: "0", label: "Off" },
   { value: "1", label: "1 a day" },
@@ -289,6 +294,7 @@ function AutopilotCard({ brand }: { brand: string }) {
           auto_schedule: draft.auto_schedule,
           post_times: draft.post_times,
           platforms: draft.platforms,
+          daily_caps: draft.daily_caps,
         }),
       });
       setCfg(next);
@@ -307,6 +313,27 @@ function AutopilotCard({ brand }: { brand: string }) {
       title="Autopilot"
       subtitle="New drafts every morning, and approved posts placed into your posting times. Nothing goes out without your approval."
     >
+      <div className="mb-4 rounded-lg border border-white/[0.06] bg-[var(--surface-inset)] p-3 text-xs">
+        <p className="text-[11px] font-medium text-slate-500">Posts per day (the most Media OS will schedule on each platform)</p>
+        <div className="mt-2 flex flex-wrap items-center gap-4">
+          {(["INSTAGRAM", "FACEBOOK"] as const).map((p) => (
+            <label key={p} className="flex items-center gap-2 text-slate-200">
+              {p === "INSTAGRAM" ? "Instagram" : "Facebook"}
+              <Dropdown
+                ariaLabel={`${p === "INSTAGRAM" ? "Instagram" : "Facebook"} posts per day`}
+                size="sm"
+                minWidth="5.5rem"
+                value={String(draft.daily_caps?.[p] ?? 2)}
+                onChange={(v) => set({ daily_caps: { ...draft.daily_caps, [p]: Number(v) } })}
+                options={CAP_OPTIONS}
+              />
+            </label>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          Applies to single posts, batches and auto-scheduling. Instagram and Facebook allow far more; a steady 1–2 a day usually keeps reach up.
+        </p>
+      </div>
       <div className="grid gap-4 text-xs md:grid-cols-2">
         <div className="space-y-1.5">
           <p className="text-[11px] font-medium text-slate-500">Daily drafts (written at 8:00 AM)</p>
@@ -367,7 +394,7 @@ function AutopilotCard({ brand }: { brand: string }) {
             )}
           </div>
           <p className="text-[11px] text-slate-500">
-            Each approved Media OS carousel takes the next free time (your daily cap and 5-minute spacing still apply). Your own uploads are scheduled by hand.
+            Each approved Media OS carousel takes the next free time (your posts-per-day limit and 5-minute spacing still apply). Your own uploads are scheduled by hand.
           </p>
         </div>
       </div>

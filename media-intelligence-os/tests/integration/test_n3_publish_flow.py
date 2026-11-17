@@ -1932,3 +1932,54 @@ def test_media_os_chooses_designs_by_occasion_and_rotation(
         assert choose_design(db, brand, "builtin", "WEDDING_HINDU") is None
         chosen = choose_design(db, brand, hidden, "BIRTHDAY")  # picked by hand: allowed
         assert chosen is not None and chosen["template_id"] == hidden
+
+
+def test_posts_per_day_setting_changes_the_scheduling_limit(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    base = {"daily_drafts": 1, "auto_schedule": False, "post_times": ["19:00"]}
+    start = client.get("/api/v1/brands/brand-app-promo/autopilot").json()
+    assert start["daily_caps"] == {"INSTAGRAM": 1, "FACEBOOK": 1}  # the env's caps
+    bad = client.put(
+        "/api/v1/brands/brand-app-promo/autopilot",
+        json={**base, "daily_caps": {"INSTAGRAM": 11, "FACEBOOK": 2}},
+    )
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "BAD_DAILY_CAPS"
+    ok = client.put(
+        "/api/v1/brands/brand-app-promo/autopilot",
+        json={**base, "daily_caps": {"INSTAGRAM": 3, "FACEBOOK": 2}},
+    )
+    assert ok.status_code == 200 and ok.json()["daily_caps"] == {"INSTAGRAM": 3, "FACEBOOK": 2}
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        caps = brand.publishing_preferences["daily_caps"]
+        assert caps["INSTAGRAM"] == 3 and caps["FACEBOOK"] == 2
+        # Scheduling uses the new limit: a second Instagram post the same day is now allowed.
+        when = _when().astimezone(ZoneInfo("Asia/Kolkata")).replace(hour=12, minute=0)
+        pkg = db.get(ContentPackage, env["pid"])
+        assert pkg is not None
+        job = svc.request_schedule(
+            db, pkg=pkg, brand=brand, when=when, platforms=["INSTAGRAM"], actor_id="owner:t"
+        )
+        svc.handle_schedule_carousel(db, job, clients=env["clients"])
+        other = ContentPackage(
+            brand_profile_id=brand.id,
+            platform="INSTAGRAM",
+            format="CAROUSEL",
+            status="QA_PASSED",
+            approval_status="APPROVED",
+            hashtags=[],
+            slide_data=[],
+            source_manifest=[],
+        )
+        db.add(other)
+        db.flush()
+        svc.request_schedule(
+            db,
+            pkg=other,
+            brand=brand,
+            when=when + timedelta(hours=1),
+            platforms=["INSTAGRAM"],
+            actor_id="owner:t",
+        )

@@ -185,6 +185,7 @@ class AutopilotSettings(BaseModel):
     auto_schedule: bool
     post_times: list[str] = Field(min_length=1, max_length=3)
     platforms: list[str] = Field(default=["INSTAGRAM", "FACEBOOK"], min_length=1, max_length=2)
+    daily_caps: dict[str, int] | None = None  # posts per day per platform, 1-10
 
 
 def _settings_view(db: Session, profile: BrandProfile) -> dict[str, Any]:
