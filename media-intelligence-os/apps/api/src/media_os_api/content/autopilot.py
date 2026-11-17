@@ -79,10 +79,34 @@ def has_generator(brand: BrandProfile) -> bool:
 
 
 def settings_for(brand: BrandProfile) -> dict[str, Any]:
+    from media_os_api.publish.service import daily_cap
+
     stored = dict((brand.publishing_preferences or {}).get("autopilot") or {})
     out = {**DEFAULTS, **{k: v for k, v in stored.items() if k in DEFAULTS}}
     if not has_generator(brand):
         out["daily_drafts"] = 0
+    # Posts per day per platform: the same limit every scheduling path enforces.
+    out["daily_caps"] = {p: daily_cap(brand, p) for p in CAP_PLATFORMS}
+    return out
+
+
+CAP_PLATFORMS = ("INSTAGRAM", "FACEBOOK")
+MIN_CAP, MAX_CAP = 1, 10
+
+
+def validate_caps(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        raise AutopilotError("Posts per day must be set per platform.", code="BAD_DAILY_CAPS")
+    out = {}
+    for p in CAP_PLATFORMS:
+        if p not in raw:
+            continue
+        n = raw[p]
+        if not isinstance(n, int) or isinstance(n, bool) or not MIN_CAP <= n <= MAX_CAP:
+            raise AutopilotError(
+                f"Posts per day must be {MIN_CAP}–{MAX_CAP}.", code="BAD_DAILY_CAPS"
+            )
+        out[p] = n
     return out
 
 
@@ -117,8 +141,12 @@ def _hhmm(value: Any) -> time:
 
 def save_settings(brand: BrandProfile, raw: dict[str, Any]) -> dict[str, Any]:
     clean = validate_settings(raw)
+    caps = validate_caps(raw["daily_caps"]) if raw.get("daily_caps") is not None else {}
     prefs = dict(brand.publishing_preferences or {})
     prefs["autopilot"] = clean
+    if caps:
+        # Other platforms' caps (e.g. YouTube) are kept as they are.
+        prefs["daily_caps"] = {**dict(prefs.get("daily_caps") or {}), **caps}
     brand.publishing_preferences = prefs  # reassign so SQLAlchemy sees the JSON change
     return settings_for(brand)
 

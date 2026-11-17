@@ -873,7 +873,7 @@ function BatchScheduler({
     <SurfaceCard
       icon={<CalendarClock />}
       title={`Schedule ${reels.length} post${reels.length === 1 ? "" : "s"}`}
-      subtitle="Postiz publishes each one at its time. Each platform allows 2 posts a day, at least 5 minutes apart."
+      subtitle="Postiz publishes each one at its time. Your posts-per-day limit (set in Autopilot) and 5-minute spacing apply."
       badge={
         <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 text-slate-400 hover:bg-white/[0.06] hover:text-slate-100">
           <X className="h-4 w-4" aria-hidden="true" />
