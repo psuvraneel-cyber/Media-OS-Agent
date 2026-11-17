@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from media_os_api.api.routes import (
     analytics,
     auth,
+    autopilot,
     brands,
     content,
     health,
@@ -23,5 +24,6 @@ api_v1_router.include_router(content.router)
 api_v1_router.include_router(analytics.router)
 api_v1_router.include_router(studio.router)
 api_v1_router.include_router(ops.router)
+api_v1_router.include_router(autopilot.router)
 
 __all__ = ["api_v1_router", "health"]

@@ -33,12 +33,16 @@ CREATIVE_TIME_LIMIT = 540
 # N3 publishing waits for GitHub Pages builds (1-2 min, up to 7), so it shares the long-lease
 # research queue/task (900 s lease) on the worker, which holds the publishing credentials.
 PUBLISH_PREFIX = "media_os.publish."
+# AI writing takes minutes: keep it off the control queue (alerts, bot replies).
+CONTENT_PREFIX = "media_os.content."
 # Views analytics sync calls Postiz once per published post; same worker queue and long lease.
 ANALYTICS_PREFIX = "media_os.analytics."
 
 
 def queue_for_task(task_name: str) -> str:
-    if task_name.startswith((RESEARCH_FETCH_PREFIX, PUBLISH_PREFIX, ANALYTICS_PREFIX)):
+    if task_name.startswith(
+        (RESEARCH_FETCH_PREFIX, PUBLISH_PREFIX, ANALYTICS_PREFIX, CONTENT_PREFIX)
+    ):
         return RESEARCH_QUEUE
     if task_name.startswith(CREATIVE_PREFIX):
         return CREATIVE_QUEUE

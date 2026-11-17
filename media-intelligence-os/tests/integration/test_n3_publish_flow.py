@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from media_os_api.auth import create_redis_client, hash_password
 from media_os_api.carousel.brand_kit import NIMONTRON
@@ -247,14 +247,22 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
                     )
                 )
                 db.execute(delete(ContentPackage).where(ContentPackage.id.in_(ids)))
-            for pattern in ("media_os.%carousel%", "media_os.notify.%"):
+            for pattern in ("media_os.%carousel%", "media_os.notify.%", "media_os.content.%"):
                 jobs = select(JobRun.id).where(JobRun.task_name.like(pattern))
                 db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(jobs)))
                 db.execute(delete(JobRun).where(JobRun.task_name.like(pattern)))
             manual = select(JobRun.id).where(JobRun.idempotency_key.like("analytics:manual:%"))
             db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(manual)))
             db.execute(delete(JobRun).where(JobRun.idempotency_key.like("analytics:manual:%")))
-            for prefix in ("CAROUSEL_%", "REEL_%", "POST_%", "BRAND_LOGO_%", "ANALYTICS_SYNC_%"):
+            for prefix in (
+                "CAROUSEL_%",
+                "REEL_%",
+                "POST_%",
+                "BRAND_LOGO_%",
+                "ANALYTICS_SYNC_%",
+                "GENERATION_%",
+                "AUTOPILOT_%",
+            ):
                 db.execute(delete(AuditEvent).where(AuditEvent.action.like(prefix)))
             restored = db.get(BrandProfile, bid)
             assert restored is not None
@@ -1575,3 +1583,193 @@ def test_restart_postiz_request_is_recorded_once_and_reported(
         with session_scope(env["factory"]) as db:
             db.execute(delete(OpsRequest))
             db.execute(delete(AuditEvent).where(AuditEvent.action == "POSTIZ_RESTART_REQUESTED"))
+
+
+# ------------------------------------------------------------------ autopilot
+
+
+def _fake_produce(calls: list[Any]) -> Any:
+    """Stands in for the AI writer: saves a real draft package, exactly like produce() does."""
+
+    def produce(brand_slug: str, brief: Any, *, save: bool, factory: Any = None) -> dict[str, Any]:
+        calls.append(brief)
+        draft = _draft()
+        qa = run_text_qa(NIMONTRON, brief, draft)
+        with session_scope(factory) as db:
+            pkg = create_carousel_package(
+                db,
+                brand_slug=brand_slug,
+                brief=brief,
+                draft=draft,
+                qa=qa,
+                score={"total": 70},
+                written_by="test/fake-model",
+            )
+            pid = str(pkg.id)
+        return {
+            "qa": qa.to_json(),
+            "draft": draft.model_dump(mode="json"),
+            "written_by": "test/fake-model",
+            "content_package_id": pid,
+        }
+
+    return produce
+
+
+def test_generate_button_queues_jobs_that_write_drafts_and_ping_telegram(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from media_os_api.carousel import admin
+    from media_os_api.content import autopilot as ap
+
+    opts = client.get(f"/api/v1/content/generate/options?{BRAND_Q}").json()
+    assert opts["can_generate"] is True and opts["generated_today"] == 0
+    assert {p["value"] for p in opts["pillars"]} == set(PILLARS)
+
+    bad = client.post(f"/api/v1/content/generate?{BRAND_Q}", json={"pillar": "astrology"})
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "BAD_PILLAR"
+    ok = client.post(
+        f"/api/v1/content/generate?{BRAND_Q}",
+        json={"count": 2, "pillar": "how_it_works", "language": "BN_EN"},
+    )
+    assert ok.status_code == 202 and ok.json()["queued"] == 2
+
+    calls: list[Any] = []
+    monkeypatch.setattr(admin, "produce", _fake_produce(calls))
+    with session_scope(env["factory"]) as db:
+        jobs = list(
+            db.execute(select(JobRun).where(JobRun.task_name == ap.GENERATE_TASK)).scalars()
+        )
+        assert len(jobs) == 2 and all(j.queue_name == "research" for j in jobs)
+        outs = [ap.handle_generate_carousel(db, j) for j in jobs]
+        for j, out in zip(jobs, outs, strict=True):
+            j.status, j.result_payload = "SUCCEEDED", out
+    assert all(b.pillar == "how_it_works" and b.language.value == "BN_EN" for b in calls)
+    assert all(o["qa_passed"] for o in outs)
+    with session_scope(env["factory"]) as db:
+        made = list(
+            db.execute(
+                select(ContentPackage).where(
+                    ContentPackage.id.in_([uuid.UUID(o["content_package_id"]) for o in outs])
+                )
+            ).scalars()
+        )
+        assert len(made) == 2 and all(p.approval_status == "PENDING" for p in made)
+    alerts = _alerts(env, "draft")
+    assert len(alerts) == 2 and "New post ready for review" in alerts[0].payload["text"]
+    recent = client.get(f"/api/v1/content/generate/recent?{BRAND_Q}").json()["items"]
+    assert len(recent) == 2 and all(r["qa_passed"] for r in recent)
+
+
+def test_automatic_topics_rotate_away_from_recent_posts(env: dict[str, Any]) -> None:
+    from media_os_api.content import autopilot as ap
+
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        brief = ap.pick_brief(db, brand)
+        # The env's only carousel is a wedding_season post: the next pick is a different topic.
+        assert brief.pillar != "wedding_season" and brief.pillar in PILLARS
+        picks = {ap.pick_brief(db, brand, seed=i).pillar for i in range(5)}
+        assert len(picks) >= 2
+        seasonal = ap.pick_brief(db, brand, pillar="how_it_works", hook="SEASONAL")
+        assert seasonal.hook_type.value == "QUESTION"  # seasonal needs an occasion
+
+
+def test_daily_drafts_queue_once_per_day_and_respect_off(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    from media_os_api.content import autopilot as ap
+
+    now = datetime.now(UTC)
+    for _ in range(2):  # a second run the same day doesn't add more
+        with session_scope(env["factory"]) as db:
+            out = ap.handle_daily_drafts(db, JobRun(task_name=ap.DAILY_TASK, payload={}), now=now)
+    assert out["queued"].get("brand-app-promo") == 1
+    with session_scope(env["factory"]) as db:
+        n = db.execute(
+            select(func.count()).select_from(JobRun).where(JobRun.task_name == ap.GENERATE_TASK)
+        ).scalar_one()
+        assert n == 1
+    put = client.put(
+        "/api/v1/brands/brand-app-promo/autopilot",
+        json={"daily_drafts": 0, "auto_schedule": False, "post_times": ["19:00"]},
+    )
+    assert put.status_code == 200 and put.json()["daily_drafts"] == 0
+    with session_scope(env["factory"]) as db:
+        out = ap.handle_daily_drafts(
+            db, JobRun(task_name=ap.DAILY_TASK, payload={}), now=now + timedelta(days=1)
+        )
+    assert "brand-app-promo" not in out["queued"]
+
+
+def test_auto_schedule_places_approved_posts_into_free_posting_times(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    from media_os_api.content import autopilot as ap
+
+    bad = client.put(
+        "/api/v1/brands/brand-app-promo/autopilot",
+        json={"daily_drafts": 1, "auto_schedule": True, "post_times": ["7pm"]},
+    )
+    assert bad.status_code == 422
+    # Turning it on places the env's approved carousel straight away.
+    on = client.put(
+        "/api/v1/brands/brand-app-promo/autopilot",
+        json={"daily_drafts": 1, "auto_schedule": True, "post_times": ["19:00"]},
+    )
+    assert on.status_code == 200 and on.json()["auto_schedule"] is True
+    with session_scope(env["factory"]) as db:
+        first = db.execute(select(JobRun).where(JobRun.task_name == svc.SCHEDULE_TASK)).scalar_one()
+        at = datetime.fromisoformat(first.payload["scheduled_at"]).astimezone(
+            ZoneInfo("Asia/Kolkata")
+        )
+        assert (at.hour, at.minute) == (19, 0)
+
+        # A second approved carousel takes the next free 7 PM (the env caps each day at 1 post).
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        other = ContentPackage(
+            brand_profile_id=brand.id,
+            platform="INSTAGRAM",
+            format="CAROUSEL",
+            status="QA_PASSED",
+            approval_status="PENDING",
+            hashtags=[],
+            slide_data=[],
+            source_manifest=[],
+            post_tags={"pillar": "how_it_works"},
+        )
+        db.add(other)
+        db.flush()
+        oid = other.id
+    approved = client.post(
+        f"/api/v1/content/carousels/{oid}/decision?{BRAND_Q}", json={"decision": "APPROVE"}
+    )
+    assert approved.status_code == 200 and approved.json()["scheduling"] is True
+    with session_scope(env["factory"]) as db:
+        jobs = list(
+            db.execute(
+                select(JobRun)
+                .where(JobRun.task_name == svc.SCHEDULE_TASK)
+                .order_by(JobRun.created_at)
+            ).scalars()
+        )
+        times = [datetime.fromisoformat(j.payload["scheduled_at"]) for j in jobs]
+        assert len(times) == 2 and (times[1] - times[0]) == timedelta(days=1)
+        assert all(j.payload["platforms"] == ["INSTAGRAM", "FACEBOOK"] for j in jobs)
+        # Owner uploads are never auto-scheduled.
+        reel = ContentPackage(
+            brand_profile_id=env["bid"],
+            platform="INSTAGRAM",
+            format="REEL",
+            status="QA_PASSED",
+            approval_status="APPROVED",
+            hashtags=[],
+            slide_data=[],
+            source_manifest=[],
+            qa_report={"version": "owner-reel-1", "passed": True, "checks": []},
+        )
+        db.add(reel)
+        db.flush()
+        assert ap.auto_schedule(db, reel, brand) is None

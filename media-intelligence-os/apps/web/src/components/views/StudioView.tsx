@@ -26,6 +26,7 @@ import { Dropdown } from "@/components/ui/Dropdown";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner, LoadingSkeleton } from "@/components/ui/FeedbackStates";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { AutopilotPanel } from "@/components/views/AutopilotPanel";
 import { defaultSlot } from "@/components/views/PublishQueueView";
 import { ApiClientError, browserApiFetch, readCsrfCookie } from "@/lib/api-client";
 import { useBrandContext } from "@/lib/brand-context";
@@ -1071,6 +1072,8 @@ export function StudioView() {
       >
         <UploadZone brand={brand} onUploaded={load} />
       </SurfaceCard>
+
+      <AutopilotPanel brand={brand} />
 
       {error && <ErrorBanner title="Studio" message={error} />}
 
