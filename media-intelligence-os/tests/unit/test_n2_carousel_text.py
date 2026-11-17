@@ -286,7 +286,12 @@ def test_failed_qa_triggers_one_rewrite_with_feedback() -> None:
     calls: list[list[str] | None] = []
 
     def fake_write(
-        router: object, kit: object, b: object, *, feedback: list[str] | None = None
+        router: object,
+        kit: object,
+        b: object,
+        *,
+        feedback: list[str] | None = None,
+        avoid: str = "",
     ) -> tuple[CarouselDraft, str, list[object]]:
         calls.append(feedback)
         return (bad if len(calls) == 1 else good), "test/model", []

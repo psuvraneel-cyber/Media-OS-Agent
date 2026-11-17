@@ -1606,6 +1606,7 @@ def _fake_produce(calls: list[Any]) -> Any:
         save: bool,
         factory: Any = None,
         design: dict[str, Any] | None = None,
+        recent: Any = None,
     ) -> dict[str, Any]:
         calls.append(brief)
         draft = _draft()
