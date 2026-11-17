@@ -44,20 +44,50 @@ def _quota_store() -> QuotaStore:
     )
 
 
-def produce(brand_slug: str, brief: CarouselBrief, *, save: bool) -> dict[str, Any]:
+def produce(
+    brand_slug: str,
+    brief: CarouselBrief,
+    *,
+    save: bool,
+    factory: Any = None,
+) -> dict[str, Any]:
+    """Write, check and score one carousel; with save=True store it as a draft.
+
+    `factory` is a session factory to reuse (the worker passes its own); when omitted (the CLI),
+    a temporary engine is created and disposed afterwards.
+    """
     kit = kit_for(brand_slug)
     settings = load_settings()
     on_attempt = None
-    factory = None
+    own_engine = None
     if save:
         from media_os_api.ai.usage import usage_recorder
-        from media_os_api.db.session import (
-            create_db_engine_from_settings,
-            create_session_factory,
-        )
 
-        factory = create_session_factory(create_db_engine_from_settings(settings))
+        if factory is None:
+            from media_os_api.db.session import (
+                create_db_engine_from_settings,
+                create_session_factory,
+            )
+
+            own_engine = create_db_engine_from_settings(settings)
+            factory = create_session_factory(own_engine)
         on_attempt = usage_recorder(factory)
+    try:
+        return _produce(kit, brand_slug, brief, save=save, factory=factory, on_attempt=on_attempt)
+    finally:
+        if own_engine is not None:
+            own_engine.dispose()
+
+
+def _produce(
+    kit: Any,
+    brand_slug: str,
+    brief: CarouselBrief,
+    *,
+    save: bool,
+    factory: Any,
+    on_attempt: Any,
+) -> dict[str, Any]:
     router = build_router(quota_store=_quota_store(), on_attempt=on_attempt)
     try:
         draft, written_by, attempts, qa = write_with_qa(router, kit, brief)

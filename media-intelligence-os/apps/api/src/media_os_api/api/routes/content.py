@@ -468,7 +468,21 @@ def decide_carousel(
             metadata={"reason": (payload.reason or "")[:200]},
         )
         db.flush()
-        return CarouselSummary(**_summary(pkg, _slide_assets(db, pkg)))
+        # Autopilot: an approved Media OS carousel goes straight into the next free posting slot
+        # when the brand has auto-scheduling on (owner uploads are scheduled by hand).
+        scheduled = False
+        if payload.decision == "APPROVE":
+            from media_os_api.content.autopilot import auto_schedule
+
+            profile = db.get(BrandProfile, pkg.brand_profile_id)
+            scheduled = profile is not None and auto_schedule(db, pkg, profile) is not None
+            db.flush()
+        return CarouselSummary(
+            **_summary(pkg, _slide_assets(db, pkg)),
+            schedules=_schedules(db, pkg),
+            scheduling=scheduled or _scheduling(db, pkg),
+            can_schedule=can_schedule(pkg, package_schedules(db, pkg)),
+        )
 
 
 @router.post("/content/carousels/{package_id}/schedule", response_model=CarouselSummary)

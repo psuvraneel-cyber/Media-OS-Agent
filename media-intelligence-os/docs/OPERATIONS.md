@@ -112,6 +112,13 @@ Migration `0004_add_brand_topic_assignments` establishes the multi-brand editori
 
 ---
 
+### Autopilot: generate, review, auto-schedule
+
+- **Generate posts (Studio).** Queue 1–3 carousels for a brand that has a brand kit (Nimontron). Topic, hook and language are optional: blanks rotate away from the last 12 carousels; bilingual comes up twice as often as Bengali-only or English-only, and a seasonal hook always gets an occasion. Each job (`media_os.content.generate_carousel`, research queue, about 2–5 min) runs the normal writer + QA + score pipeline, renders a passing draft into the Approvals review queue, and sends a Telegram message. Limit: 10 generations per brand per IST day, to stay inside free AI quotas.
+- **Daily drafts.** `content.daily_drafts` runs at 08:00 IST and queues each active brand's daily drafts (`publishing_preferences.autopilot.daily_drafts`: default 1, 0 = off, up to 3). It runs once per day per brand.
+- **Auto-schedule (off by default).** When on, approving a Media OS carousel puts it straight into the next free posting time (`post_times`, default 19:00, up to 3 a day). It goes through `request_schedule`, so lead time, daily caps, 5-minute spacing and queued requests all apply. Turning it on, and each daily run, also places carousels already approved and waiting. Owner uploads are never auto-scheduled.
+- **Approval is always required.** Nothing generated is scheduled or published until the owner approves it.
+
 ### Studio: the owner's own reels, photos and carousels, brand logo, Sync now
 
 - **Photos and carousels.** Images (PNG, JPEG or WebP, up to 8 MB each) are staged one by one, then become one post: 1 image is a photo post (`POST`), 2–10 a carousel, in the order the owner set. Checks flag shapes Instagram would crop. At publish time images are converted to JPEG with phone rotation applied, and capped at 2160 px. Owner uploads are marked by `qa_report.version` starting `owner-`, so they're reviewed in Studio and kept out of the generated-carousel review queue.

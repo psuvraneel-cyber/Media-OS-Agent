@@ -14,6 +14,12 @@ from media_os_api.analytics.account import ACCOUNT_TASK, handle_sync_account_met
 from media_os_api.analytics.sync import SYNC_METRICS_TASK, handle_sync_post_metrics
 from media_os_api.carousel.render_job import RENDER_TASK, handle_render_carousel
 from media_os_api.config import Settings, load_settings
+from media_os_api.content.autopilot import (
+    DAILY_TASK,
+    GENERATE_TASK,
+    handle_daily_drafts,
+    handle_generate_carousel,
+)
 from media_os_api.db.models import JobRun
 from media_os_api.db.retention import run_retention_evaluation
 from media_os_api.db.session import create_db_engine_from_settings, create_session_factory
@@ -120,6 +126,8 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     SYNC_TASK: handle_sync_status,
     SYNC_METRICS_TASK: handle_sync_post_metrics,  # worker only (Postiz credentials)
     ACCOUNT_TASK: handle_sync_account_metrics,  # worker only (Postiz credentials)
+    GENERATE_TASK: handle_generate_carousel,  # worker only (AI keys)
+    DAILY_TASK: handle_daily_drafts,
     PURGE_TASK: handle_purge_job_history,
     # Owner alerts (worker only: holds TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID and the Postiz key).
     NOTIFY_TASK: handle_send_telegram,
