@@ -12,7 +12,8 @@ import json
 from media_os_api.ai.router import AIRouter
 from media_os_api.ai.types import AttemptRecord, GenerationRequest, TaskClass
 from media_os_api.carousel.brand_kit import BrandKit
-from media_os_api.carousel.qa import QaReport, run_text_qa
+from media_os_api.carousel.novelty import RecentPost, avoid_block, closest_repeat
+from media_os_api.carousel.qa import Check, QaReport, run_text_qa
 from media_os_api.carousel.schema import (
     LANGUAGE_RULES,
     MAX_SLIDES,
@@ -167,11 +168,15 @@ def write_carousel(
     brief: CarouselBrief,
     *,
     feedback: list[str] | None = None,
+    avoid: str = "",
 ) -> tuple[CarouselDraft, str, list[AttemptRecord]]:
     """Returns the draft, the route that wrote it ('provider/model'), and all attempts.
 
-    `feedback` carries the QA failures of a previous attempt so the rewrite can fix them."""
+    `feedback` carries the QA failures of a previous attempt so the rewrite can fix them;
+    `avoid` lists recent posts whose subjects must not be repeated."""
     system, prompt = build_prompt(kit, brief)
+    if avoid:
+        prompt = avoid + prompt
     if feedback:
         prompt += (
             "\n\nYOUR PREVIOUS DRAFT WAS REJECTED BY QA FOR THESE REASONS. Write a new draft "
@@ -194,19 +199,54 @@ def write_carousel(
 
 
 def write_with_qa(
-    router: AIRouter, kit: BrandKit, brief: CarouselBrief, *, max_rewrites: int = 1
+    router: AIRouter,
+    kit: BrandKit,
+    brief: CarouselBrief,
+    *,
+    max_rewrites: int = 1,
+    recent: list[RecentPost] | None = None,
 ) -> tuple[CarouselDraft, str, list[AttemptRecord], QaReport]:
     """Write, run text QA, and on failure rewrite once with the failures as feedback.
 
+    With `recent` posts, the AI is told not to repeat their subjects, and a passing draft that
+    still repeats one is rewritten once more; if it still repeats, the QA report carries a
+    `novelty` warning naming the post (the owner decides in review).
+
     Returns the last draft with its QA report; a draft that still fails is returned as-is so the
     caller can save it as QA-failed (it never reaches the approval queue)."""
-    draft, written_by, attempts = write_carousel(router, kit, brief)
+    avoid = avoid_block(recent or [])
+    draft, written_by, attempts = write_carousel(router, kit, brief, avoid=avoid)
     qa = run_text_qa(kit, brief, draft)
     for _ in range(max_rewrites):
         if qa.passed:
             break
         feedback = [f"{c.name}: {c.detail}" for c in qa.failures]
-        draft, written_by, more = write_carousel(router, kit, brief, feedback=feedback)
+        draft, written_by, more = write_carousel(router, kit, brief, feedback=feedback, avoid=avoid)
         attempts = attempts + more
         qa = run_text_qa(kit, brief, draft)
+    if recent is None:
+        return draft, written_by, attempts, qa
+    repeat = closest_repeat(draft, recent) if qa.passed else None
+    if repeat is not None:
+        feedback = [
+            f"novelty: this repeats the subject of the recent post '{repeat.title}' "
+            f"(both are about: {', '.join(repeat.shared)}). Write about a clearly different "
+            "subject."
+        ]
+        retry, retry_by, more = write_carousel(router, kit, brief, feedback=feedback, avoid=avoid)
+        attempts = attempts + more
+        retry_qa = run_text_qa(kit, brief, retry)
+        if retry_qa.passed:  # keep the rewrite only if it's still a valid draft
+            draft, written_by, qa = retry, retry_by, retry_qa
+            repeat = closest_repeat(draft, recent)
+    qa.checks.append(
+        Check(name="novelty", status="PASS")
+        if repeat is None
+        else Check(
+            name="novelty",
+            status="WARN",
+            detail=f"Similar to a recent post: '{repeat.title}' "
+            f"(both about {', '.join(repeat.shared)}).",
+        )
+    )
     return draft, written_by, attempts, qa

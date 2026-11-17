@@ -317,10 +317,25 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
 
     bind = session.get_bind()
     engine = bind if isinstance(bind, Engine) else bind.engine
+    from media_os_api.carousel.novelty import recent_posts
+
     result = produce(
-        brand.slug, brief, save=True, factory=create_session_factory(engine), design=design
+        brand.slug,
+        brief,
+        save=True,
+        factory=create_session_factory(engine),
+        design=design,
+        recent=recent_posts(session, brand.id),  # don't repeat a recent post's subject
     )
     passed = bool(result.get("qa", {}).get("passed"))
+    similar = next(
+        (
+            str(c.get("detail") or "")
+            for c in result.get("qa", {}).get("checks", [])
+            if c.get("name") == "novelty" and c.get("status") == "WARN"
+        ),
+        "",
+    )
     title = ""
     slides = (result.get("draft") or {}).get("slides") or []
     if slides:
@@ -332,7 +347,9 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
             f"✍️ <b>New post ready for review</b>\n{e(short(title.replace('*', ''), 80))}\n"
             f"Topic: {e(brief.pillar.replace('_', ' '))} · {e(brief.language.value)} · "
             f"Design: {e(design['name'] if design else 'Built-in')}\n"
-            f'The slides are rendering now. <a href="{e(dashboard_url())}/approvals">Review it</a>'
+            + (f"⚠️ {e(similar)}\n" if similar else "")
+            + "The slides are rendering now. "
+            + f'<a href="{e(dashboard_url())}/approvals">Review it</a>'
         )
     else:
         text = (
