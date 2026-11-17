@@ -10,7 +10,7 @@
 | A Media OS or Postiz container has stopped (exited) | `docker start <container>` |
 | The dashboard (`127.0.0.1:3100`) or API (`127.0.0.1:8000`) is healthy in Docker but unreachable from Windows for two checks (Docker lost the port link, usually after its Linux layer restarted) | `docker restart media-os-web` / `media-os-api` |
 | Media OS's in-app watchdog hasn't succeeded for 15 min (its alert system is quiet) | Telegram alert (at most hourly) + `docker restart media-os-worker media-os-scheduler` |
-| Docker Desktop isn't running | Telegram alert (at most hourly) |
+| Docker Desktop is off (e.g. you quit it to keep the laptop cool) | **Docker on demand:** starts Docker Desktop from 1 hour before a scheduled post until 20 min after it, and tells you on Telegram; otherwise stays quiet. Post times are saved to `%LOCALAPPDATA%\MediaOS\upcoming-posts.json` while Docker runs. With no saved times yet, it warns hourly instead. If Docker still isn't up 15 min after starting it, it warns you. |
 
 **Telegram.** Every action is reported there when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are in `C:\Media OS Agent\media-os-runtime\.env`.
 
