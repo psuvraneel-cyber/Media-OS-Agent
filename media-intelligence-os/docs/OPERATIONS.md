@@ -157,7 +157,7 @@ There are two layers, and both run every 5 minutes.
 - restarts any watched container that stays unhealthy, and starts any that has stopped;
 - restarts the dashboard or API container when it is healthy but Windows can no longer reach its port (Docker lost the port link, which leaves the desktop app on "Media OS isn't reachable yet");
 - **watches the watcher:** if Media OS's own `notify.watchdog` hasn't succeeded for 15 min, it tells you directly on Telegram and restarts `media-os-worker` and `media-os-scheduler`;
-- warns when Docker Desktop is down;
+- **Docker on demand:** when Docker Desktop is off, starts it from 1 hour before a scheduled post until 20 minutes after (times saved while Docker runs), and otherwise leaves it off without hourly warnings. To stop Docker starting with Windows, disable Docker Desktop in Task Manager, Startup apps;
 - **dead man's switch (optional):** pings `HEALTHCHECKS_PING_URL` (Healthchecks.io) every run. If the pings stop because the PC is off, asleep or offline, Healthchecks.io alerts you on Telegram from outside.
 
 It has a 15-min cooldown per container and never stops or removes anything. See `infra/ops/windows/README.md` for install, pause and dry-run.

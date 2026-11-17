@@ -24,6 +24,11 @@
   6. The dashboard (127.0.0.1:3100) or API (127.0.0.1:8000) is healthy inside Docker but Windows
      can't reach it two checks in a row: Docker lost the port link after its Linux layer
      restarted. Fix: restart that container, which rebuilds the link.
+  7. Docker on demand. Docker Desktop is off, maybe on purpose (it heats the laptop). While Docker
+     runs, each run saves the upcoming post times to upcoming-posts.json. While it's off, it's
+     started only from 1 hour before a scheduled post until 20 minutes after it (Telegram says
+     so), and a warning follows if it still isn't up 15 minutes later. Otherwise it's left off,
+     quietly. With no saved times yet, the old hourly "Docker isn't running" warning applies.
 
   Every action is logged and sent to Telegram (when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are
   in the runtime .env). Restarts have a 15-minute cooldown per container so a broken container is
@@ -40,6 +45,10 @@ param(
     [string]$RuntimeEnv = 'C:\Media OS Agent\media-os-runtime\.env',
     [int]$CooldownMinutes = 15,
     [int]$PollerFreshSeconds = 120,
+    # Docker on demand: start Docker Desktop from this long before a scheduled post until this long
+    # after it. Outside those windows a stopped Docker is left alone (you turned it off).
+    [int]$StartBeforeMinutes = 60,
+    [int]$StartAfterMinutes = 20,
     [switch]$DryRun
 )
 
@@ -48,6 +57,12 @@ $StateDir = Join-Path $env:LOCALAPPDATA 'MediaOS'
 $LogFile = Join-Path $StateDir 'watchdog.log'
 $StateFile = Join-Path $StateDir 'watchdog-state.json'
 $PauseFile = Join-Path $StateDir 'watchdog.pause'
+# Upcoming post times, saved while Docker runs, so they're known while it's off.
+$ScheduleFile = Join-Path $StateDir 'upcoming-posts.json'
+$DockerDesktopPaths = @(
+    (Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\Docker Desktop.exe'),
+    (Join-Path $env:ProgramFiles 'Docker\Docker\Docker Desktop.exe')
+)
 
 $PostizApp = 'postiz-runtime-app'
 $Temporal = 'postiz-runtime-temporal'
@@ -132,6 +147,42 @@ function Get-ContainerState([string]$Name) {
     return [pscustomobject]@{ Status = $parts[0]; Health = $(if ($parts.Count -gt 1) { $parts[1] } else { '' }) }
 }
 
+function Save-UpcomingPosts {
+    # Epoch seconds avoid date formats with double quotes (Windows PowerShell 5.1 strips them).
+    $sql = 'psql -U $POSTGRES_USER -d $POSTGRES_DB -At -c ''select extract(epoch from ' +
+        'scheduled_at)::bigint from publish_schedules where status = $$SCHEDULED$$ and ' +
+        'scheduled_at > now() - interval $$30 minutes$$ and scheduled_at < now() + ' +
+        'interval $$30 days$$ order by 1'''
+    $r = Invoke-Docker @('exec', 'media-os-postgres', 'sh', '-c', $sql)
+    if (-not $r.Ok) { return }
+    $times = @($r.Output -split "`n" | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [long]$_ } |
+        Select-Object -Unique)
+    [pscustomobject]@{ savedAt = (Get-Date).ToString('o'); posts = $times } |
+        ConvertTo-Json | Set-Content $ScheduleFile -Encoding utf8
+}
+
+function Get-DuePost {
+    # The scheduled post (local time) whose start window is open now, or $null. Returns 'unknown'
+    # when no schedule has been saved yet.
+    if (-not (Test-Path $ScheduleFile)) { return 'unknown' }
+    try { $saved = Get-Content $ScheduleFile -Raw | ConvertFrom-Json } catch { return 'unknown' }
+    $now = [DateTimeOffset]::Now
+    foreach ($epoch in @($saved.posts)) {
+        $at = [DateTimeOffset]::FromUnixTimeSeconds([long]$epoch).ToLocalTime()
+        if ($now -ge $at.AddMinutes(-$StartBeforeMinutes) -and $now -le $at.AddMinutes($StartAfterMinutes)) {
+            return $at
+        }
+    }
+    return $null
+}
+
+function Start-DockerDesktop {
+    $exe = $DockerDesktopPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $exe) { return $false }
+    if (-not $DryRun) { Start-Process -FilePath $exe }
+    return $true
+}
+
 function Test-HostPort([string]$Url) {
     # Any HTTP answer, even an error status, means the port link works. Only a refused or timed-out
     # connection counts as unreachable.
@@ -212,22 +263,54 @@ $state = Get-State
 
 $info = Invoke-Docker @('info', '--format', '{{.ServerVersion}}')
 if (-not $info.Ok) {
-    # Docker Desktop isn't running: nothing can post. Tell the owner at most once an hour.
-    $lastWarn = Get-Prop $state 'dockerDownWarned' $null
-    $warnNow = $true
-    if ($lastWarn) {
-        $warnNow = ((Get-Date) - [datetime]::Parse($lastWarn, [Globalization.CultureInfo]::InvariantCulture)).TotalMinutes -ge 60
-    }
-    if ($warnNow) {
-        Write-Log 'docker is not running'
-        Send-Telegram "🔴 <b>Docker isn't running</b>`nMedia OS and Postiz are down, so nothing can post. Start Docker Desktop."
-        Set-Prop $state 'dockerDownWarned' ((Get-Date).ToString('o'))
+    # Docker is off. You may have turned it off to keep the laptop cool, so it's only started from
+    # an hour before a scheduled post until 20 minutes after it (times saved while it was running).
+    $due = Get-DuePost
+    $sinceIso = { param($iso) ((Get-Date) - [datetime]::Parse($iso, [Globalization.CultureInfo]::InvariantCulture)).TotalMinutes }
+    if ($due -is [DateTimeOffset]) {
+        $label = $due.ToString('h:mm tt')
+        $forKey = [string]$due.ToUnixTimeSeconds()
+        $startedAt = Get-Prop $state 'dockerAutoStartAt' $null
+        if (-not $startedAt -or (& $sinceIso $startedAt) -ge 10) {
+            Write-Log "docker is off and a post is due at ${label}: starting Docker Desktop"
+            if (Start-DockerDesktop) {
+                if ((Get-Prop $state 'dockerAutoStartFor' '') -ne $forKey) {
+                    Send-Telegram ("🐳 <b>Starting Docker for your {0} post</b>`nIt was off, and a post is scheduled at {0}. Media OS and Postiz will be up in a few minutes." -f $label)
+                    Set-Prop $state 'dockerAutoStartFor' $forKey
+                    Set-Prop $state 'dockerAutoStartWarned' $false
+                }
+            } else {
+                Send-Telegram ("🔴 <b>Couldn't find Docker Desktop</b>`nA post is due at {0}. Start Docker Desktop yourself." -f $label)
+            }
+            Set-Prop $state 'dockerAutoStartAt' ((Get-Date).ToString('o'))
+        }
+        $firstStart = Get-Prop $state 'dockerAutoStartFirst' $null
+        if (-not $firstStart -or (Get-Prop $state 'dockerAutoStartFor' '') -ne $forKey) {
+            Set-Prop $state 'dockerAutoStartFirst' ((Get-Date).ToString('o'))
+        } elseif ((& $sinceIso $firstStart) -ge 15 -and -not (Get-Prop $state 'dockerAutoStartWarned' $false)) {
+            Send-Telegram ("🔴 <b>Docker still isn't up for your {0} post</b>`nI tried to start it 15 minutes ago. Open Docker Desktop and check it isn't stuck." -f $label)
+            Set-Prop $state 'dockerAutoStartWarned' $true
+        }
+    } elseif ($due -eq 'unknown') {
+        # No saved schedule yet: we can't tell whether a post is due, so warn at most hourly.
+        $lastWarn = Get-Prop $state 'dockerDownWarned' $null
+        if (-not $lastWarn -or (& $sinceIso $lastWarn) -ge 60) {
+            Write-Log 'docker is not running (no saved schedule)'
+            Send-Telegram "🔴 <b>Docker isn't running</b>`nMedia OS and Postiz are down, so nothing can post. Start Docker Desktop."
+            Set-Prop $state 'dockerDownWarned' ((Get-Date).ToString('o'))
+        }
+    } else {
+        # Off on purpose and nothing due within the hour: stay quiet.
+        Set-Prop $state 'dockerAutoStartFirst' $null
     }
     $state | ConvertTo-Json | Set-Content $StateFile -Encoding utf8
     Send-Ping
     exit 0
 }
 Set-Prop $state 'dockerDownWarned' $null
+Set-Prop $state 'dockerAutoStartFirst' $null
+# Keep the saved post times fresh, for when Docker is next turned off.
+Save-UpcomingPosts
 
 # 1. Postiz publishing worker: connected to Temporal, and not crash-looping?
 $postiz = Get-ContainerState $PostizApp
