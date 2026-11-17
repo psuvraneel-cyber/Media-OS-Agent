@@ -1101,3 +1101,26 @@ class OpsRequest(UUIDPrimaryKeyMixin, Base):
     picked_up_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     result_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class DesignTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A named set of the owner's carousel backgrounds (migration 0015).
+
+    `slides` maps COVER / CONTENT / CTA to {asset_id, area: top|middle|bottom, tone: light|dark}.
+    """
+
+    __tablename__ = "design_templates"
+    __table_args__ = (
+        CheckConstraint("jsonb_typeof(occasions) = 'array'", name="design_occasions_is_array"),
+        CheckConstraint("jsonb_typeof(slides) = 'object'", name="design_slides_is_object"),
+        Index("ix_design_templates_brand", "brand_profile_id"),
+    )
+
+    brand_profile_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("brand_profiles.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    auto_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    occasions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    slides: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

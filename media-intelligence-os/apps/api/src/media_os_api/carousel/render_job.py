@@ -63,6 +63,30 @@ def render_checks(rendered: list[Any], expected: int) -> list[Check]:
     ]
 
 
+def design_inputs(
+    pkg: ContentPackage,
+) -> tuple[dict[str, Path] | None, dict[str, dict[str, str]] | None, list[str]]:
+    """The owner's template backgrounds saved with this post: files, area/tone per slide, and the
+    slides whose image is missing (those fall back to the built-in design)."""
+    from media_os_api.content.designs import design_of
+    from media_os_api.content.uploads import resolve_asset_path
+
+    design = design_of(pkg)
+    if not design:
+        return None, None, []
+    files: dict[str, Path] = {}
+    settings: dict[str, dict[str, str]] = {}
+    missing: list[str] = []
+    for role, s in dict(design.get("slides") or {}).items():
+        path = resolve_asset_path(str(s.get("local_path", "")))
+        if path is None or not path.is_file():
+            missing.append(role)
+            continue
+        files[role] = path
+        settings[role] = {"area": str(s.get("area", "middle")), "tone": str(s.get("tone", "light"))}
+    return files, settings, missing
+
+
 def handle_render_carousel(session: Session, job: JobRun) -> dict[str, Any]:
     from media_os_api.carousel.render import media_root, render_carousel  # creative image only
 
@@ -84,8 +108,15 @@ def handle_render_carousel(session: Session, job: JobRun) -> dict[str, Any]:
     language = Language((pkg.post_tags or {}).get("language", Language.BN_EN.value))
 
     rel = relative_slide_dir(pkg)
+    design_files, design_settings, design_missing = design_inputs(pkg)
     rendered = render_carousel(
-        kit, slides, language, media_root() / rel, festive=is_festive(pkg.post_tags or {})
+        kit,
+        slides,
+        language,
+        media_root() / rel,
+        festive=is_festive(pkg.post_tags or {}),
+        design=design_files,
+        design_settings=design_settings,
     )
 
     session.execute(
@@ -110,6 +141,16 @@ def handle_render_carousel(session: Session, job: JobRun) -> dict[str, Any]:
         )
 
     checks = render_checks(rendered, len(slides))
+    if design_missing:
+        checks.append(
+            Check(
+                name="render_design",
+                status="WARN",
+                detail="Template image missing for "
+                + ", ".join(r.lower() for r in design_missing)
+                + "; used the built-in design there.",
+            )
+        )
     report = dict(pkg.qa_report or {"checks": [], "passed": True})
     kept = [c for c in report.get("checks", []) if not str(c.get("name", "")).startswith("render_")]
     report["checks"] = kept + [c.model_dump(mode="json") for c in checks]

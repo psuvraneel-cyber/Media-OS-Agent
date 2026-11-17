@@ -340,10 +340,13 @@ services:
       MEDIA_OS_MEDIA_ROOT: /data/media
       MEDIA_OS_BRAND_ASSETS_ROOT: /brand-assets
       MEDIA_OS_FONT_DIR: /app/fonts
+      MEDIA_OS_UPLOADS_ROOT: /data/uploads
     volumes:
       # Owner's brand assets, read in place and never modified.
       - ${NIMONTRON_STORE_DIR:-C:/nimontron/store}:/brand-assets/brand-app-promo:ro
       - media_os_media:/data/media
+      # Read-only: the owner's design-template backgrounds for carousel slides.
+      - media_os_uploads:/data/uploads:ro
     depends_on:
       media-os-postgres:
         condition: service_healthy

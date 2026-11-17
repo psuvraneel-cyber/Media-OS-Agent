@@ -249,8 +249,15 @@ def request_generation(
     clean = {
         k: v for k, v in brief.items() if k in ("pillar", "hook", "language", "occasion") and v
     }
+    design = str(brief.get("design") or "auto")
     # Validate overrides now, so the owner sees a mistake straight away.
-    pick_brief(session, brand, **clean)
+    chosen = pick_brief(session, brand, **clean)
+    from media_os_api.content.designs import DesignError, choose_design
+
+    try:
+        choose_design(session, brand, design, chosen.occasion.value)
+    except DesignError as exc:
+        raise AutopilotError(str(exc), code=exc.code) from exc
     stamp = now.strftime("%Y%m%dT%H%M%S")
     jobs = []
     for i in range(count):
@@ -258,7 +265,13 @@ def request_generation(
             session,
             task_name=GENERATE_TASK,
             task_type="CONTENT_GENERATION",
-            payload={"brand": brand.slug, "brief": clean, "trigger": trigger, "seed": i},
+            payload={
+                "brand": brand.slug,
+                "brief": clean,
+                "design": design,
+                "trigger": trigger,
+                "seed": i,
+            },
             idempotency_key=f"{key_prefix or 'generate:' + brand.slug + ':' + stamp}:{i}",
             brand_profile_id=brand.id,
             queue_name=queue_for_task(GENERATE_TASK),
@@ -288,6 +301,14 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
         )
     except (AutopilotError, ValueError) as exc:
         raise PermanentTaskError(str(exc), code="BAD_BRIEF") from exc
+    from media_os_api.content.designs import DesignError, choose_design
+
+    try:
+        design = choose_design(
+            session, brand, str(payload.get("design") or "auto"), brief.occasion.value
+        )
+    except DesignError:
+        design = None  # the chosen set was switched off or emptied since: use the built-in design
     # produce() saves the package in its own transaction (it records AI usage as it goes), on the
     # worker's own engine.
     from sqlalchemy import Engine
@@ -296,7 +317,9 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
 
     bind = session.get_bind()
     engine = bind if isinstance(bind, Engine) else bind.engine
-    result = produce(brand.slug, brief, save=True, factory=create_session_factory(engine))
+    result = produce(
+        brand.slug, brief, save=True, factory=create_session_factory(engine), design=design
+    )
     passed = bool(result.get("qa", {}).get("passed"))
     title = ""
     slides = (result.get("draft") or {}).get("slides") or []
@@ -307,7 +330,8 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
     if passed:
         text = (
             f"✍️ <b>New post ready for review</b>\n{e(short(title.replace('*', ''), 80))}\n"
-            f"Topic: {e(brief.pillar.replace('_', ' '))} · {e(brief.language.value)}\n"
+            f"Topic: {e(brief.pillar.replace('_', ' '))} · {e(brief.language.value)} · "
+            f"Design: {e(design['name'] if design else 'Built-in')}\n"
             f'The slides are rendering now. <a href="{e(dashboard_url())}/approvals">Review it</a>'
         )
     else:
@@ -324,6 +348,7 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
         "hook": brief.hook_type.value,
         "language": brief.language.value,
         "written_by": result.get("written_by"),
+        "design": design["name"] if design else "Built-in",
     }
 
 

@@ -16,7 +16,7 @@ from media_os_api.db import check_database_health, create_db_engine
 pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HEAD = "0014_autopilot"  # current head; 0006 is checked below
+HEAD = "0015_design_templates"  # current head; 0006 is checked below
 
 
 def _db_url() -> str:
