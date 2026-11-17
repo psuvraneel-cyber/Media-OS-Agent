@@ -23,6 +23,7 @@ export interface GenerateOptions {
   generated_today: number;
   daily_limit: number;
   max_per_request: number;
+  designs?: Option[];
 }
 
 export interface GenerationItem {
@@ -88,6 +89,7 @@ function GenerateCard({ brand }: { brand: string }) {
   const [hook, setHook] = useState(AUTO);
   const [language, setLanguage] = useState(AUTO);
   const [count, setCount] = useState<"1" | "2" | "3">("1");
+  const [design, setDesign] = useState("auto");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const q = `?brand=${encodeURIComponent(brand)}`;
@@ -125,6 +127,7 @@ function GenerateCard({ brand }: { brand: string }) {
         body: JSON.stringify({
           count: Number(count),
           pillar: pillar || null,
+          design,
           hook: hook || null,
           language: language || null,
         }),
@@ -182,6 +185,16 @@ function GenerateCard({ brand }: { brand: string }) {
             value={language}
             onChange={setLanguage}
             options={[{ value: AUTO, label: "Let Media OS choose" }, ...(opts?.languages ?? [])]}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] font-medium text-slate-500">Design</span>
+          <Dropdown
+            ariaLabel="Design"
+            minWidth="10rem"
+            value={design}
+            onChange={setDesign}
+            options={opts?.designs ?? [{ value: "auto", label: "Let Media OS choose" }]}
           />
         </div>
         <div className="flex flex-col gap-1">

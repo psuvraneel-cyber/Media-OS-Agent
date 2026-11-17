@@ -31,6 +31,7 @@ def create_carousel_package(
     score: dict[str, object],
     written_by: str,
     actor_id: str = ACTOR,
+    design: dict[str, object] | None = None,
 ) -> ContentPackage:
     brand = session.execute(
         select(BrandProfile).where(BrandProfile.slug == brand_slug)
@@ -50,7 +51,8 @@ def create_carousel_package(
         caption=compose_caption(draft),
         hashtags=list(draft.hashtags),
         slide_data=[s.model_dump(mode="json") for s in draft.slides],
-        source_manifest=[{"kind": "brand_kit", "brand": brand_slug, "written_by": written_by}],
+        source_manifest=[{"kind": "brand_kit", "brand": brand_slug, "written_by": written_by}]
+        + ([design] if design else []),
         post_tags=tags.model_dump(mode="json"),
         qa_report=qa.to_json(),
         score=dict(score),

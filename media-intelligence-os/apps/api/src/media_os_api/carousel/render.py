@@ -16,7 +16,13 @@ from urllib.parse import unquote
 
 from media_os_api.carousel.brand_kit import BrandKit
 from media_os_api.carousel.schema import Slide, SlideRole
-from media_os_api.carousel.templates import HEIGHT, WIDTH, SlideContext, render_slide_html
+from media_os_api.carousel.templates import (
+    HEIGHT,
+    WIDTH,
+    DesignSlide,
+    SlideContext,
+    render_slide_html,
+)
 from media_os_api.content.taxonomy import Language
 
 FIT_SCRIPT = """
@@ -75,6 +81,31 @@ def _uri(path: Path) -> str:
     return path.resolve().as_uri()
 
 
+def design_role(slide: Slide) -> str:
+    if slide.role is SlideRole.HOOK:
+        return "COVER"
+    if slide.role is SlideRole.CTA:
+        return "CTA"
+    return "CONTENT"
+
+
+def _design_for(
+    slide: Slide,
+    design: dict[str, Path] | None,
+    settings: dict[str, dict[str, str]] | None,
+) -> DesignSlide | None:
+    if not design:
+        return None
+    role = design_role(slide)
+    path = design.get(role)
+    if path is None or not path.is_file():
+        return None
+    s = (settings or {}).get(role, {})
+    return DesignSlide(
+        background_uri=_uri(path), area=s.get("area", "middle"), tone=s.get("tone", "light")
+    )
+
+
 def render_carousel(
     kit: BrandKit,
     slides: list[Slide],
@@ -82,13 +113,20 @@ def render_carousel(
     out_dir: Path,
     *,
     festive: bool = False,
+    design: dict[str, Path] | None = None,
+    design_settings: dict[str, dict[str, str]] | None = None,
 ) -> list[RenderedSlide]:
+    """Render every slide to PNG. `design` maps COVER / CONTENT / CTA to the owner's template
+    background files (with `design_settings` giving each one's text area and tone); without it
+    the built-in design is used."""
     from playwright.sync_api import sync_playwright  # type: ignore[import-not-found,unused-ignore]
 
     assets = brand_asset_root(kit.brand_slug)
     icon = assets / "icon-1024.png"
     out_dir.mkdir(parents=True, exist_ok=True)
-    allowed_roots = [str(p.resolve()) for p in (assets, font_dir(), out_dir)]
+    roots = [assets, font_dir(), out_dir]
+    roots += [p.parent for p in (design or {}).values()]
+    allowed_roots = [str(p.resolve()) for p in roots]
     rendered: list[RenderedSlide] = []
     card_uris = tuple(
         _uri(assets / a.path)
@@ -131,6 +169,7 @@ def render_carousel(
                     festive=festive,
                     card_uris=card_uris,
                     content_number=content_numbers.get(i, 0),
+                    design=_design_for(slide, design, design_settings),
                 )
                 html_path = out_dir / f"slide-{i:02d}.html"
                 html_path.write_text(render_slide_html(kit, slide, ctx), encoding="utf-8")

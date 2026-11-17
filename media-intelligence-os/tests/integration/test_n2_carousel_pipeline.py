@@ -104,7 +104,14 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
     calls: list[bool] = []
 
     def fake_render(
-        kit: Any, slides: list[Any], language: Any, out_dir: Path, *, festive: bool = False
+        kit: Any,
+        slides: list[Any],
+        language: Any,
+        out_dir: Path,
+        *,
+        festive: bool = False,
+        design: Any = None,
+        design_settings: Any = None,
     ) -> list[Any]:
         calls.append(festive)
         out_dir.mkdir(parents=True, exist_ok=True)

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from media_os_api.api.routes.content import _brand_id, _db
 from media_os_api.auth import SessionPayload, require_csrf, require_session
 from media_os_api.content import autopilot as ap
+from media_os_api.content.designs import is_ready, list_templates
 from media_os_api.content.taxonomy import UNAPPROVED_OCCASIONS, HookType, Language, Occasion
 from media_os_api.db.models import BrandProfile, JobRun, ScheduleDefinition
 from media_os_api.services.audit_service import record_audit_event
@@ -84,6 +85,15 @@ def generate_options(
             "generated_today": ap.requests_today(db, profile, datetime.now(UTC)),
             "daily_limit": ap.MAX_PER_DAY,
             "max_per_request": ap.MAX_PER_REQUEST,
+            "designs": [
+                {"value": "auto", "label": "Let Media OS choose"},
+                {"value": "builtin", "label": "Built-in design"},
+            ]
+            + [
+                {"value": str(t.id), "label": t.name}
+                for t in list_templates(db, profile.id)
+                if t.is_active and is_ready(db, t)
+            ],
         }
 
 
@@ -93,6 +103,7 @@ class GenerateRequest(BaseModel):
     hook: str | None = Field(default=None, max_length=32)
     language: str | None = Field(default=None, max_length=8)
     occasion: str | None = Field(default=None, max_length=32)
+    design: str | None = Field(default=None, max_length=64)  # "auto", "builtin" or a template id
 
 
 @router.post("/content/generate", status_code=202)
@@ -114,6 +125,7 @@ def generate(
                     "hook": payload.hook,
                     "language": payload.language,
                     "occasion": payload.occasion,
+                    "design": payload.design,
                 },
                 trigger="owner",
             )
