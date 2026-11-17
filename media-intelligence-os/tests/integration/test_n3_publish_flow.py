@@ -234,7 +234,14 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
                     )
                 ).scalars()
             )
-            db.execute(delete(Asset).where(Asset.asset_type.in_(("BRAND_LOGO", "UPLOAD_IMAGE"))))
+            db.execute(
+                delete(Asset).where(
+                    Asset.asset_type.in_(("BRAND_LOGO", "UPLOAD_IMAGE", "TEMPLATE_IMAGE"))
+                )
+            )
+            from media_os_api.db.models import DesignTemplate
+
+            db.execute(delete(DesignTemplate))
             db.execute(delete(PublishSchedule))
             db.execute(
                 delete(ChannelAccount).where(ChannelAccount.postiz_integration_id.is_not(None))
@@ -262,6 +269,7 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, A
                 "ANALYTICS_SYNC_%",
                 "GENERATION_%",
                 "AUTOPILOT_%",
+                "DESIGN_%",
             ):
                 db.execute(delete(AuditEvent).where(AuditEvent.action.like(prefix)))
             restored = db.get(BrandProfile, bid)
@@ -1591,7 +1599,14 @@ def test_restart_postiz_request_is_recorded_once_and_reported(
 def _fake_produce(calls: list[Any]) -> Any:
     """Stands in for the AI writer: saves a real draft package, exactly like produce() does."""
 
-    def produce(brand_slug: str, brief: Any, *, save: bool, factory: Any = None) -> dict[str, Any]:
+    def produce(
+        brand_slug: str,
+        brief: Any,
+        *,
+        save: bool,
+        factory: Any = None,
+        design: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         calls.append(brief)
         draft = _draft()
         qa = run_text_qa(NIMONTRON, brief, draft)
@@ -1604,6 +1619,7 @@ def _fake_produce(calls: list[Any]) -> Any:
                 qa=qa,
                 score={"total": 70},
                 written_by="test/fake-model",
+                design=design,
             )
             pid = str(pkg.id)
         return {
@@ -1773,3 +1789,145 @@ def test_auto_schedule_places_approved_posts_into_free_posting_times(
         db.add(reel)
         db.flush()
         assert ap.auto_schedule(db, reel, brand) is None
+
+
+# ------------------------------------------------------------------ design templates
+
+
+def _bg(w: int = 600, h: int = 750, color: tuple[int, int, int] = (90, 20, 40)) -> bytes:
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h), color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _make_set(c: TestClient, name: str, occasions: list[str] | None = None) -> str:
+    made = c.post(f"/api/v1/content/templates?{BRAND_Q}", json={"name": name})
+    assert made.status_code == 201, made.text
+    tid = str(made.json()["id"])
+    for role in ("COVER", "CONTENT", "CTA"):
+        r = c.put(
+            f"/api/v1/content/templates/{tid}/images/{role}?{BRAND_Q}",
+            content=_bg(),
+            headers={"Content-Type": "image/png"},
+        )
+        assert r.status_code == 200, r.text
+    if occasions is not None:
+        c.patch(f"/api/v1/content/templates/{tid}?{BRAND_Q}", json={"occasions": occasions})
+    return tid
+
+
+def test_template_sets_are_created_checked_and_offered_in_generate(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    made = client.post(f"/api/v1/content/templates?{BRAND_Q}", json={"name": "Gold mandala"})
+    tid = made.json()["id"]
+    assert made.json()["ready"] is False
+    wrong = client.put(
+        f"/api/v1/content/templates/{tid}/images/COVER?{BRAND_Q}",
+        content=_bg(800, 800),
+        headers={"Content-Type": "image/png"},
+    )
+    assert wrong.status_code == 422 and wrong.json()["error"]["code"] == "WRONG_SHAPE"
+    for role in ("COVER", "CONTENT", "CTA"):
+        client.put(
+            f"/api/v1/content/templates/{tid}/images/{role}?{BRAND_Q}",
+            content=_bg(),
+            headers={"Content-Type": "image/png"},
+        )
+    patched = client.patch(
+        f"/api/v1/content/templates/{tid}?{BRAND_Q}",
+        json={
+            "occasions": ["WEDDING_HINDU"],
+            "slides": {"COVER": {"area": "bottom", "tone": "dark"}},
+        },
+    ).json()
+    assert patched["ready"] is True and patched["occasions"] == ["WEDDING_HINDU"]
+    assert patched["slides"]["COVER"] | {"asset_id": None} == {
+        "asset_id": None,
+        "width": 600,
+        "height": 750,
+        "area": "bottom",
+        "tone": "dark",
+    }
+    bad = client.patch(
+        f"/api/v1/content/templates/{tid}?{BRAND_Q}", json={"occasions": ["WEDDING_BUDDHIST"]}
+    )
+    assert bad.status_code == 422
+    opts = client.get(f"/api/v1/content/generate/options?{BRAND_Q}").json()
+    assert {"value": tid, "label": "Gold mandala"} in opts["designs"]
+    listed = client.get(f"/api/v1/content/templates?{BRAND_Q}").json()["items"]
+    assert [t["id"] for t in listed] == [tid]
+    # Switched off: no longer offered.
+    client.patch(f"/api/v1/content/templates/{tid}?{BRAND_Q}", json={"is_active": False})
+    opts = client.get(f"/api/v1/content/generate/options?{BRAND_Q}").json()
+    assert tid not in {d["value"] for d in opts["designs"]}
+    assert client.delete(f"/api/v1/content/templates/{tid}?{BRAND_Q}").status_code == 204
+    assert client.get(f"/api/v1/content/templates?{BRAND_Q}").json()["items"] == []
+
+
+def test_generated_post_records_its_design_and_the_renderer_finds_it(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from media_os_api.carousel import admin
+    from media_os_api.carousel.render_job import design_inputs
+    from media_os_api.content import autopilot as ap
+
+    tid = _make_set(client, "Minimal cream")
+    ok = client.post(
+        f"/api/v1/content/generate?{BRAND_Q}",
+        json={"count": 1, "language": "BN_EN", "design": tid},
+    )
+    assert ok.status_code == 202, ok.text
+    bad = client.post(
+        f"/api/v1/content/generate?{BRAND_Q}",
+        json={"count": 1, "design": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert bad.status_code == 422
+    calls: list[Any] = []
+
+    monkeypatch.setattr(admin, "produce", _fake_produce(calls))
+    with session_scope(env["factory"]) as db:
+        job = db.execute(select(JobRun).where(JobRun.task_name == ap.GENERATE_TASK)).scalar_one()
+        out = ap.handle_generate_carousel(db, job)
+    assert out["design"] == "Minimal cream"
+    (alert,) = _alerts(env, "draft")
+    assert "Design: Minimal cream" in alert.payload["text"]
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(out["content_package_id"]))
+        assert pkg is not None
+        files, settings, missing = design_inputs(pkg)
+        assert files is not None and set(files) == {"COVER", "CONTENT", "CTA"}
+        assert all(p.is_file() for p in files.values()) and missing == []
+        assert settings == {r: {"area": "middle", "tone": "light"} for r in files}
+
+
+def test_media_os_chooses_designs_by_occasion_and_rotation(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    from media_os_api.content.designs import choose_design
+
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        assert choose_design(db, brand, "auto", "BIRTHDAY") is None  # no sets: built-in
+    wedding = _make_set(client, "Wedding red", ["WEDDING_HINDU"])
+    everyday = _make_set(client, "Everyday")
+    hidden = _make_set(client, "Manual only")
+    client.patch(f"/api/v1/content/templates/{hidden}?{BRAND_Q}", json={"auto_allowed": False})
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        # A set tagged for the occasion wins for that occasion.
+        w = choose_design(db, brand, "auto", "WEDDING_HINDU")
+        assert w is not None and w["template_id"] == wedding
+        # Otherwise untagged sets rotate with the built-in design; manual-only sets never appear.
+        picks = {
+            (d or {}).get("template_id", "builtin")
+            for d in [choose_design(db, brand, "auto", "BIRTHDAY")]
+        }
+        assert picks <= {everyday, "builtin"} and hidden not in picks
+        assert choose_design(db, brand, "builtin", "WEDDING_HINDU") is None
+        chosen = choose_design(db, brand, hidden, "BIRTHDAY")  # picked by hand: allowed
+        assert chosen is not None and chosen["template_id"] == hidden

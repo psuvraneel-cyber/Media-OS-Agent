@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Film, FolderKanban, ImageIcon, Play, RefreshCw, Sparkles } from "lucide-react";
 
 import { BrandLogoEditor } from "@/components/shell/BrandLogoEditor";
+import { DesignTemplates } from "@/components/views/DesignTemplates";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner, LoadingSkeleton } from "@/components/ui/FeedbackStates";
@@ -152,6 +153,8 @@ export function AssetsView() {
       >
         <BrandLogoEditor brand={activeBrand} size={88} showRemove />
       </SurfaceCard>
+
+      {live && <DesignTemplates brand={brand} />}
 
       <SurfaceCard
         icon={<FolderKanban />}

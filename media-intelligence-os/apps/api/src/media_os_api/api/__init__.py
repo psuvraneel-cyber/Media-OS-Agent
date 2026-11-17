@@ -8,6 +8,7 @@ from media_os_api.api.routes import (
     autopilot,
     brands,
     content,
+    designs,
     health,
     ops,
     research,
@@ -25,5 +26,6 @@ api_v1_router.include_router(analytics.router)
 api_v1_router.include_router(studio.router)
 api_v1_router.include_router(ops.router)
 api_v1_router.include_router(autopilot.router)
+api_v1_router.include_router(designs.router)
 
 __all__ = ["api_v1_router", "health"]

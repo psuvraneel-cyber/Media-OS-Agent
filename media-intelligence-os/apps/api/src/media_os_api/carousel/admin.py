@@ -50,8 +50,11 @@ def produce(
     *,
     save: bool,
     factory: Any = None,
+    design: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Write, check and score one carousel; with save=True store it as a draft.
+
+    `design` is a design-template snapshot (None = the built-in design), saved with the post.
 
     `factory` is a session factory to reuse (the worker passes its own); when omitted (the CLI),
     a temporary engine is created and disposed afterwards.
@@ -73,7 +76,15 @@ def produce(
             factory = create_session_factory(own_engine)
         on_attempt = usage_recorder(factory)
     try:
-        return _produce(kit, brand_slug, brief, save=save, factory=factory, on_attempt=on_attempt)
+        return _produce(
+            kit,
+            brand_slug,
+            brief,
+            save=save,
+            factory=factory,
+            on_attempt=on_attempt,
+            design=design,
+        )
     finally:
         if own_engine is not None:
             own_engine.dispose()
@@ -87,6 +98,7 @@ def _produce(
     save: bool,
     factory: Any,
     on_attempt: Any,
+    design: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     router = build_router(quota_store=_quota_store(), on_attempt=on_attempt)
     try:
@@ -114,8 +126,10 @@ def _produce(
                 qa=qa,
                 score=score,
                 written_by=written_by,
+                design=design,
             )
             out["content_package_id"] = str(pkg.id)
+            out["design"] = design.get("name") if design else "Built-in"
     return out
 
 

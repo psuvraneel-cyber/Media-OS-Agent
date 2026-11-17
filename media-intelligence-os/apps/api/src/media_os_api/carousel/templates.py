@@ -71,6 +71,16 @@ class SlideContext:
     festive: bool = False  # wedding / puja / seasonal: marigold garland on the hook
     card_uris: tuple[str, ...] = field(default_factory=tuple)  # real card renders for the CTA fan
     content_number: int = 0  # 1-based position among content slides (for the ghost numeral)
+    design: DesignSlide | None = None  # the owner's template background, if one was chosen
+
+
+@dataclass(frozen=True)
+class DesignSlide:
+    """One background from the owner's design template."""
+
+    background_uri: str  # file:// URI of the uploaded image
+    area: str = "middle"  # where the text sits: top | middle | bottom
+    tone: str = "light"  # light text (for dark artwork) | dark text (for light artwork)
 
 
 # ----------------------------------------------------------------------------- ornaments (SVG)
@@ -393,7 +403,61 @@ def _cta(kit: BrandKit, slide: Slide, ctx: SlideContext) -> tuple[str, str]:
     return "dark", body
 
 
+_DESIGN_AREAS = {
+    # The text panel's vertical placement on a 1350 px slide (leaving room for the footer).
+    "top": "top:110px",
+    "middle": "top:50%;transform:translateY(-55%)",
+    "bottom": "bottom:150px",
+}
+
+
+def _design_css(kit: BrandKit, ctx: SlideContext, d: DesignSlide) -> str:
+    p = kit.palette
+    light = d.tone != "dark"
+    ink = "#ffffff" if light else p["ink"]
+    head = "#ffffff" if light else p["red_deep"]
+    # A soft panel behind the text keeps it readable on busy artwork.
+    panel = "rgba(12,10,14,.46)" if light else "rgba(255,250,244,.80)"
+    place = _DESIGN_AREAS.get(d.area, _DESIGN_AREAS["middle"])
+    return f"""
+body.design{{background:#000;color:{ink}}}
+.design .bg{{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0}}
+.design .panel{{position:absolute;left:70px;right:70px;{place};
+ max-height:640px;display:flex;flex-direction:column;gap:20px;padding:44px 48px;z-index:2;
+ background:{panel};border-radius:28px;backdrop-filter:blur(3px);overflow:hidden}}
+.design .panel.center{{text-align:center;align-items:center}}
+.design .h-bn,.design .h-en{{color:{head}}}
+.design .sub-en,.design .b,.design .b-en{{color:{ink}}}
+.design mark{{background:none;color:{p["gold"] if light else p["red"]}}}
+.design .foot{{color:{ink};opacity:.85}}
+.design .dots i{{background:{ink}}}
+"""
+
+
+def _design_html(kit: BrandKit, slide: Slide, ctx: SlideContext, d: DesignSlide) -> str:
+    hook = slide.role is SlideRole.HOOK
+    cta = slide.role is SlideRole.CTA
+    texts = _texts(slide, ctx.language, compact=hook or cta, hook=hook)
+    extra = ""
+    if cta:
+        label = "Google Play-এ পাবেন" if ctx.language is Language.BN else "Get it on Google Play"
+        extra = f'<div class="pill"><i>▶</i> {escape(label)}</div>'
+    elif hook:
+        extra = _swipe(ctx.language)
+    align = " center" if hook or cta else ""
+    lang = "en" if ctx.language is Language.EN else "bn"
+    return (
+        f'<!doctype html><html lang="{lang}"><head><meta charset="utf-8">'
+        f"<style>{_css(kit, ctx)}{_design_css(kit, ctx, d)}</style></head>"
+        f'<body class="design"><img class="bg" src="{escape(d.background_uri)}" alt="">'
+        f'<div class="panel{align}">{texts}{extra if cta else ""}</div>'
+        f"{extra if hook else ''}{_footer(kit, ctx)}</body></html>"
+    )
+
+
 def render_slide_html(kit: BrandKit, slide: Slide, ctx: SlideContext) -> str:
+    if ctx.design is not None:
+        return _design_html(kit, slide, ctx, ctx.design)
     if slide.role is SlideRole.HOOK:
         theme, body = _hook(kit, slide, ctx)
         theme += " hook"

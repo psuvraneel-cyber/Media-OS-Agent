@@ -118,6 +118,9 @@ Migration `0004_add_brand_topic_assignments` establishes the multi-brand editori
 - **Daily drafts.** `content.daily_drafts` runs at 08:00 IST and queues each active brand's daily drafts (`publishing_preferences.autopilot.daily_drafts`: default 1, 0 = off, up to 3). It runs once per day per brand.
 - **Auto-schedule (off by default).** When on, approving a Media OS carousel puts it straight into the next free posting time (`post_times`, default 19:00, up to 3 a day). It goes through `request_schedule`, so lead time, daily caps, 5-minute spacing and queued requests all apply. Turning it on, and each daily run, also places carousels already approved and waiting. Owner uploads are never auto-scheduled.
 - **Approval is always required.** Nothing generated is scheduled or published until the owner approves it.
+- **Design templates (Assets → Design templates).** A set is three 4:5 backgrounds: COVER (hook slide), CONTENT (every middle slide) and CTA (closing slide). Each has a text area (top, middle or bottom) and a text tone (light or dark). Images are uploads (`TEMPLATE_IMAGE`) on the uploads volume, which the renderer mounts read-only. Text goes on a soft panel over the artwork for readability; the footer, slide dots, swipe cue and Google Play badge stay.
+  - **Choosing a design:** Generate posts offers the built-in design, any ready and active set, or "Let Media OS choose" (also what daily drafts use). Automatic choice prefers sets tagged for the post's occasion, otherwise rotates the least recently used of untagged sets and the built-in design. Sets marked "manual only" are never chosen automatically.
+  - **Snapshots:** the chosen design is copied into the post's `source_manifest`, so editing or deleting a set never changes posts already written. A missing image falls back to the built-in design for that slide, with a render warning.
 
 ### Studio: the owner's own reels, photos and carousels, brand logo, Sync now
 

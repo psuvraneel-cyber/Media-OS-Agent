@@ -95,7 +95,12 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
     secret_markers = ("GEMINI", "GROQ", "OPENROUTER", "CLOUDFLARE", "GITHUB_TOKEN")
     assert not [k for k in creative["environment"] if k.startswith(secret_markers)]
     mounts = {v["target"]: v.get("read_only", False) for v in creative["volumes"]}
-    assert mounts == {"/brand-assets/brand-app-promo": True, "/data/media": False}
+    # The renderer reads the owner's design-template backgrounds but can never change uploads.
+    assert mounts == {
+        "/brand-assets/brand-app-promo": True,
+        "/data/media": False,
+        "/data/uploads": True,
+    }
     # The API reads rendered media and is the only writer of owner uploads; the worker reads both.
     assert {v["target"]: v.get("read_only", False) for v in api["volumes"]} == {
         "/data/media": True,
@@ -105,7 +110,6 @@ def test_compose_app_enforces_phase4_topology_loopback_and_memory_limits() -> No
         "/data/media": True,
         "/data/uploads": True,
     }
-    assert "/data/uploads" not in mounts  # the renderer never sees uploads
     assert "creative" not in worker["command"][-1]
 
     # Strict loopback-only host bindings for web and api
