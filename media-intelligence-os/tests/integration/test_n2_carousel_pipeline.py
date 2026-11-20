@@ -211,6 +211,47 @@ def test_save_enqueues_render_and_render_reaches_qa_passed(env: dict[str, Any]) 
         assert job is not None and handle_render_carousel(db, job)["skipped"] is True
 
 
+def test_a_render_that_finishes_after_an_edit_is_discarded(
+    env: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from media_os_api.carousel import render as render_mod
+    from media_os_api.carousel.service import edit_package
+
+    pid = _save(env["factory"])
+    real_render = render_mod.render_carousel
+
+    def render_while_owner_edits(*args: Any, **kwargs: Any) -> Any:
+        out = real_render(*args, **kwargs)
+        # The owner saves an edit while the slides are being rendered.
+        with session_scope(env["factory"]) as other:
+            pkg = other.get(ContentPackage, pid)
+            assert pkg is not None
+            edits: list[dict[str, Any]] = [{} for _ in pkg.slide_data]
+            edits[0] = {"headline_en": "Wedding season is *here*"}
+            assert edit_package(other, pkg, actor_id="owner:t", slides=edits) is not None
+        return out
+
+    monkeypatch.setattr(render_mod, "render_carousel", render_while_owner_edits)
+    stale = _render(env["factory"], pid)
+    assert stale["skipped"] is True and stale["stale_version"] == 1
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, pid)
+        assert pkg is not None and pkg.version == 2 and pkg.status == "DRAFTED"
+        assert not list(db.execute(select(Asset).where(Asset.content_package_id == pid)).scalars())
+        v2 = db.execute(
+            select(JobRun).where(JobRun.idempotency_key == f"render:{pid}:v2")
+        ).scalar_one()
+    monkeypatch.setattr(render_mod, "render_carousel", real_render)
+    with session_scope(env["factory"]) as db:
+        job = db.get(JobRun, v2.id)
+        assert job is not None
+        assert handle_render_carousel(db, job)["status"] == "QA_PASSED"
+        paths = list(
+            db.execute(select(Asset.local_path).where(Asset.content_package_id == pid)).scalars()
+        )
+        assert paths and all(f"{pid}/v2/" in p for p in paths)
+
+
 @pytest.fixture
 def client(env: dict[str, Any]) -> Iterator[TestClient]:
     settings = load_settings(

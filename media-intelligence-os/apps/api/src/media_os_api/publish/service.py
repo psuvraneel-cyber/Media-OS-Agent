@@ -282,6 +282,23 @@ def request_schedule(
             "This carousel was already scheduled for that exact time; pick a different time.",
             code="SAME_TIME",
         )
+    if pkg.format == "CAROUSEL":
+        from media_os_api.carousel.service import expected_slides, missing_slides
+
+        active = list(
+            session.execute(
+                select(Asset).where(
+                    Asset.content_package_id == pkg.id,
+                    Asset.asset_type == "CAROUSEL_SLIDE",
+                    Asset.status == "ACTIVE",
+                )
+            ).scalars()
+        )
+        if missing_slides(active, expected_slides(pkg)):
+            raise ScheduleRequestError(
+                "Some slide images are missing or damaged; this carousel can't be posted as is.",
+                code="SLIDES_MISSING",
+            )
     if len(compose_caption(pkg)) > CAPTION_MAX:
         raise ScheduleRequestError(
             f"Caption with hashtags is longer than Instagram's {CAPTION_MAX} characters.",
@@ -420,12 +437,21 @@ def _slides(session: Session, pkg: ContentPackage) -> list[bytes]:
         if path is None or not path.is_file():
             raise PermanentTaskError(f"Slide file missing: {a.local_path}", code="SLIDE_MISSING")
         data = path.read_bytes()
-        if not data:
+        if not data or (a.file_size and len(data) < a.file_size):
             raise PermanentTaskError(
-                f"Slide file is empty: {a.local_path}. Re-render the slides in Approvals.",
+                f"Slide file is empty or cut short: {a.local_path}. Re-render the slides in "
+                "Approvals.",
                 code="SLIDE_MISSING",
             )
         out.append(data)
+    from media_os_api.carousel.service import expected_slides
+
+    expected = expected_slides(pkg)
+    if expected is not None and len(out) != expected:
+        raise PermanentTaskError(
+            f"This carousel has {expected} slides but {len(out)} images. Re-render the slides.",
+            code="SLIDE_COUNT",
+        )
     low = 1 if pkg.format == "POST" else 2
     if not low <= len(out) <= 10:
         raise PermanentTaskError(

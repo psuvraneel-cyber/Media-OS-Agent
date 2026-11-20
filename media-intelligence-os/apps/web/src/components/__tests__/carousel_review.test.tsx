@@ -184,7 +184,7 @@ describe("CarouselReviewView", () => {
         <CarouselReviewView />
       </BrandProvider>,
     );
-    expect(await screen.findByText(/slide images are missing or empty/)).toBeInTheDocument();
+    expect(await screen.findByText(/are missing or empty on disk/)).toBeInTheDocument();
     expect(screen.getByText("Slides missing")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Approve/ })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: /Re-render slides/ }));
@@ -197,10 +197,12 @@ describe("CarouselReviewView", () => {
       qa_report: { passed: false, checks: [{ name: "render_text_fits", status: "FAIL", detail: "slide 6: text box 2 too wide" }] },
     };
     let lists = 0;
+    let release: () => void = () => {};
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes("/content/carousels/c1")) return json(failed);
       lists += 1;
+      if (lists > 1) await new Promise<void>((r) => (release = r)); // hold the refresh
       return json({ items: [{ ...SUMMARY, status: "RENDERED", qa_passed: false }] });
     });
     render(
@@ -210,10 +212,30 @@ describe("CarouselReviewView", () => {
     );
     expect(await screen.findByText(/slide 6: text box 2 too wide/, { selector: "p" })).toBeInTheDocument();
     expect(screen.getByText("Render check failed")).toBeInTheDocument();
-    const before = lists;
     await userEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
-    await screen.findByRole("button", { name: /^Refresh$/ });
-    expect(lists).toBeGreaterThan(before);
+    const busy = await screen.findByRole("button", { name: /Refreshing…/ });
+    expect(busy).toBeDisabled();
+    expect(lists).toBe(2);
+    release();
+    expect(await screen.findByRole("button", { name: /^Refresh$/ })).toBeEnabled();
+  });
+
+  it("offers a re-render when the render job gave up", async () => {
+    const gaveUp = { ...DETAIL, status: "DRAFTED", qa_passed: true, assets: [], render_failed: true };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/content/carousels/c1")) return json(gaveUp);
+      return json({ items: [{ ...SUMMARY, status: "DRAFTED", render_failed: true }] });
+    });
+    render(
+      <BrandProvider brands={[BRAND]} initialBrandId={APP}>
+        <CarouselReviewView />
+      </BrandProvider>,
+    );
+    expect(await screen.findByText(/Rendering the slides failed/)).toBeInTheDocument();
+    expect(screen.getByText("Render failed")).toBeInTheDocument();
+    expect(screen.queryByText(/Slides are rendering/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Re-render slides/ })).toBeEnabled();
   });
 
   it("disables approve for carousels that have not passed QA", async () => {

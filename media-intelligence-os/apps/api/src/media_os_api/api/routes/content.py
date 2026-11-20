@@ -111,6 +111,7 @@ class CarouselSummary(BaseModel):
     can_schedule: bool = False  # QA-passed, or every earlier platform post failed/cancelled
     can_cancel: bool = False  # scheduled, and more than 5 minutes before the post time
     slides_missing: int = 0  # rendered slides missing or empty on disk (re-render to fix)
+    render_failed: bool = False  # the render job gave up; re-render to try again
 
 
 class CarouselDetail(CarouselSummary):
@@ -219,10 +220,40 @@ def _scheduling(db: Session, pkg: ContentPackage) -> bool:
     )
 
 
-def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
-    from media_os_api.carousel.service import missing_slides
+def _render_failures(db: Session, pkgs: list[ContentPackage]) -> set[uuid.UUID]:
+    """Which of these carousels' renders will never finish (see `render_failed`), in one query."""
+    from media_os_api.carousel.render_job import RENDER_TASK
+    from media_os_api.carousel.service import LIVE_JOB_STATES
+    from media_os_api.db.models import JobRun
+
+    waiting = {
+        f"render:{p.id}:v{p.version}": p.id
+        for p in pkgs
+        if p.format == "CAROUSEL" and p.status == "DRAFTED" and (p.qa_report or {}).get("passed")
+    }
+    if not waiting:
+        return set()
+    live = set(
+        db.execute(
+            select(JobRun.idempotency_key).where(
+                JobRun.task_name == RENDER_TASK,
+                JobRun.idempotency_key.in_(list(waiting)),
+                JobRun.status.in_(LIVE_JOB_STATES),
+            )
+        ).scalars()
+    )
+    return {pid for key, pid in waiting.items() if key not in live}
+
+
+def _summary(
+    pkg: ContentPackage, assets: list[Asset], *, failed: bool | None = None
+) -> dict[str, Any]:
+    from sqlalchemy.orm import object_session
+
+    from media_os_api.carousel.service import expected_slides, missing_slides, render_failed
 
     tags = pkg.post_tags or {}
+    db = object_session(pkg)
     qa = pkg.qa_report or {}
     score = pkg.score or {}
     return {
@@ -233,7 +264,12 @@ def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
         # Older carousels stored *emphasis* markers in the title and hook.
         "title": pkg.title.replace("*", "") if pkg.title else pkg.title,
         "hook": pkg.hook.replace("*", "") if pkg.hook else pkg.hook,
-        "slides_missing": missing_slides(assets) if pkg.format == "CAROUSEL" else 0,
+        "slides_missing": (
+            missing_slides(assets, expected_slides(pkg)) if pkg.format == "CAROUSEL" else 0
+        ),
+        "render_failed": (
+            failed if failed is not None else (render_failed(db, pkg) if db is not None else False)
+        ),
         "language": tags.get("language"),
         "pillar": tags.get("pillar"),
         "hook_type": tags.get("hook_type"),
@@ -277,10 +313,13 @@ def list_carousels(
                 ContentPackage.status.in_(PUBLISH_STATUSES),
                 ContentPackage.approval_status == "APPROVED",
             )
-        pkgs = db.execute(stmt.order_by(ContentPackage.created_at.desc()).limit(limit)).scalars()
+        pkgs = list(
+            db.execute(stmt.order_by(ContentPackage.created_at.desc()).limit(limit)).scalars()
+        )
+        failed = _render_failures(db, pkgs)
         items = [
             CarouselSummary(
-                **_summary(p, _slide_assets(db, p)),
+                **_summary(p, _slide_assets(db, p), failed=p.id in failed),
                 schedules=_schedules(db, p),
                 scheduling=_scheduling(db, p),
                 can_schedule=can_schedule(p, package_schedules(db, p)),
@@ -450,6 +489,9 @@ def decide_carousel(
     actor = f"owner:{session.subject}"
     with _db(request) as db:
         pkg = _package(db, _brand_id(db, brand), package_id)
+        from media_os_api.carousel.service import lock_package
+
+        lock_package(db, pkg)  # one at a time with re-renders and edits of this carousel
         if pkg.approval_status != "PENDING":
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
@@ -464,9 +506,11 @@ def decide_carousel(
                         "message": "Only QA-passed carousels can be approved.",
                     },
                 )
-            from media_os_api.carousel.service import missing_slides
+            from media_os_api.carousel.service import expected_slides, missing_slides
 
-            if pkg.format == "CAROUSEL" and missing_slides(_slide_assets(db, pkg)):
+            if pkg.format == "CAROUSEL" and missing_slides(
+                _slide_assets(db, pkg), expected_slides(pkg)
+            ):
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
                     {

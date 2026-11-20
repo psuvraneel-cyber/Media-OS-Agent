@@ -7,6 +7,7 @@ render QA. No network: every resource is a local file, and requests to anything 
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 from dataclasses import dataclass
@@ -68,12 +69,33 @@ def write_durably(path: Path, data: bytes) -> None:
         f.flush()
         os.fsync(f.fileno())
     tmp.replace(path)
+    fsync_dir(path.parent)
+
+
+_NO_DIR_SYNC = {
+    errno.EINVAL,
+    errno.EBADF,
+    errno.EISDIR,
+    errno.EACCES,
+    errno.EPERM,
+    getattr(errno, "ENOTSUP", errno.EINVAL),
+    getattr(errno, "EOPNOTSUPP", errno.EINVAL),
+}
+
+
+def fsync_dir(folder: Path) -> None:
+    """Flush a folder's entries (new files, renames, new subfolders) to disk."""
     try:
-        fd = os.open(path.parent, os.O_RDONLY)
+        fd = os.open(folder, os.O_RDONLY)
     except OSError:  # some filesystems don't allow opening a folder
         return
     try:
         os.fsync(fd)
+    except OSError as exc:
+        # Opening worked but this filesystem can't sync a folder: nothing more to do. Any other
+        # error (e.g. EIO) is a real storage failure and must fail the render.
+        if exc.errno not in _NO_DIR_SYNC:
+            raise
     finally:
         os.close(fd)
 
@@ -148,6 +170,10 @@ def render_carousel(
     assets = brand_asset_root(kit.brand_slug)
     icon = assets / "icon-1024.png"
     out_dir.mkdir(parents=True, exist_ok=True)
+    # carousels/<id>/v<n>: make the new folders themselves durable, not just the files in them.
+    # <media root>/carousels/<id>/v<n>: flush each new level's entry in its parent.
+    for folder in (out_dir.parent.parent.parent, out_dir.parent.parent, out_dir.parent):
+        fsync_dir(folder)
     roots = [assets, font_dir(), out_dir]
     roots += [p.parent for p in (design or {}).values()]
     allowed_roots = [str(p.resolve()) for p in roots]
