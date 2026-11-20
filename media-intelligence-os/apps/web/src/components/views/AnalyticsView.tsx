@@ -36,6 +36,7 @@ import { DeltaPill, InfoTip, SegmentedControl, Select } from "@/components/ui/Co
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner, Skeleton } from "@/components/ui/FeedbackStates";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import { LearningPanel, type LearningReport } from "@/components/analytics/LearningPanel";
 import {
   RANGE_LABEL,
   useApiResource,
@@ -89,6 +90,7 @@ interface AnalyticsViewProps {
   initialPosts?: Initial<PostsPage>;
   initialPipeline?: Initial<PipelineSummary>;
   initialAccount?: Initial<AccountReport>;
+  initialLearning?: Initial<LearningReport>;
 }
 
 export function AnalyticsView({
@@ -96,6 +98,7 @@ export function AnalyticsView({
   initialPosts,
   initialPipeline,
   initialAccount,
+  initialLearning,
 }: AnalyticsViewProps = {}) {
   const { activeBrand } = useBrandContext();
   const brandId = activeBrand.brand_id;
@@ -423,6 +426,9 @@ export function AnalyticsView({
               <Skeleton className="h-24" />
             )}
           </SurfaceCard>
+
+          {/* E2. The learning loop: what's working, learned score, best times */}
+          <LearningPanel brandId={brandId} initial={initialLearning} />
 
           {/* F. Accounts + methodology */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

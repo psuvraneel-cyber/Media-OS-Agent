@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from media_os_api.content.taxonomy import HookType, Language, Occasion
+from media_os_api.content.taxonomy import HookType, Language, Occasion, Strategy
 from media_os_api.db.models import BrandProfile, ContentPackage, JobRun
 from media_os_api.jobs.errors import PermanentTaskError
 from media_os_api.jobs.ledger import enqueue_durable_job
@@ -323,12 +323,27 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
     ).scalar_one_or_none()
     if brand is None:
         raise PermanentTaskError("Brand not found.", code="NOT_FOUND")
+    seed = int(payload.get("seed", 0))
+    owner_brief = dict(payload.get("brief", {}))
+    learned = _learning_for(session, brand)
+    steered = steer_fields(
+        brand,
+        owner_brief,
+        learned["winners"] if learned else {},
+        explore=explores(job.id),
+        seed=seed,
+    )
     try:
-        brief = pick_brief(
-            session, brand, seed=int(payload.get("seed", 0)), **payload.get("brief", {})
-        )
-    except (AutopilotError, ValueError) as exc:
-        raise PermanentTaskError(str(exc), code="BAD_BRIEF") from exc
+        brief = pick_brief(session, brand, seed=seed, **owner_brief, **steered)
+    except (AutopilotError, ValueError):
+        if not steered:
+            raise PermanentTaskError("Invalid brief.", code="BAD_BRIEF") from None
+        steered = {}  # a learned value no longer fits this brand: fall back to rotation
+        try:
+            brief = pick_brief(session, brand, seed=seed, **owner_brief)
+        except (AutopilotError, ValueError) as exc:
+            raise PermanentTaskError(str(exc), code="BAD_BRIEF") from exc
+    brief = brief.model_copy(update={"strategy": Strategy.EXPLOIT if steered else Strategy.EXPLORE})
     from media_os_api.content.designs import DesignError, choose_design
 
     try:
@@ -355,9 +370,12 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
         factory=create_session_factory(engine),
         design=design,
         recent=recent_posts(session, brand.id),  # don't repeat a recent post's subject
-        guidance=notes_block(owner_notes(session, brand.id)),  # the owner's review notes
+        guidance=notes_block(owner_notes(session, brand.id))  # the owner's review notes
+        + (learned["hooks"] if learned else ""),  # hooks that did best, as style examples
     )
     passed = bool(result.get("qa", {}).get("passed"))
+    if learned and result.get("content_package_id"):
+        _save_prediction(session, brand, str(result["content_package_id"]), learned)
     similar = next(
         (
             str(c.get("detail") or "")
@@ -395,6 +413,8 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
         "hook": brief.hook_type.value,
         "language": brief.language.value,
         "written_by": result.get("written_by"),
+        "strategy": brief.strategy.value,
+        "steered": steered,
         "design": design["name"] if design else "Built-in",
     }
 
@@ -511,3 +531,96 @@ def schedule_waiting(session: Session, brand: BrandProfile, *, now: datetime | N
         if in_flight is None and auto_schedule(session, pkg, brand, now=now) is not None:
             done += 1
     return done
+
+
+# --------------------------------------------------------------------------- learning (N5)
+
+# Brief field -> learning dimension it can be steered by.
+STEERABLE = {
+    "pillar": "pillar",
+    "hook": "hook_type",
+    "language": "language",
+    "occasion": "occasion",
+}
+
+
+def explores(job_id: uuid.UUID) -> bool:
+    """About a quarter of generated posts stay experiments; stable for a given job (retries pick
+    the same way)."""
+    from media_os_api.learning.service import EXPLORE_SHARE
+
+    return job_id.int % 100 < round(EXPLORE_SHARE * 100)
+
+
+def steer_fields(
+    brand: BrandProfile,
+    owner_brief: dict[str, Any],
+    winners: dict[str, list[str]],
+    *,
+    explore: bool,
+    seed: int,
+) -> dict[str, str]:
+    """Fill the fields the owner left blank with proven winners (exploit), or nothing (explore).
+
+    Winners are only tag values whose group passed the minimum-posts bar with a clearly better
+    result, so with little data nothing is steered and rotation decides, as before."""
+    from media_os_api.content.taxonomy import UNAPPROVED_OCCASIONS
+
+    if explore:
+        return {}
+    valid = {
+        "pillar": {p for p in (brand.content_pillars or []) if isinstance(p, str)},
+        "hook": {h.value for h in HookType},
+        "language": {lang.value for lang in Language},
+        "occasion": {o.value for o in Occasion if o not in UNAPPROVED_OCCASIONS},
+    }
+    out: dict[str, str] = {}
+    for field, dim in STEERABLE.items():
+        if owner_brief.get(field):
+            continue  # the owner chose it
+        options = [v for v in winners.get(dim, []) if v in valid[field]]
+        if options:
+            out[field] = options[seed % len(options)]
+    return out
+
+
+def _learning_for(session: Session, brand: BrandProfile) -> dict[str, Any] | None:
+    """What the learning loop knows for this brand; None if it can't be worked out right now
+    (generation never fails because of learning)."""
+    try:
+        from media_os_api.learning import core
+        from media_os_api.learning.service import trained_model, winning_hooks_block
+
+        model, evaluation, groups, learnable = trained_model(session, brand)
+        return {
+            "model": model,
+            "evaluation": evaluation,
+            "winners": core.proven_winners(groups),
+            "hooks": winning_hooks_block(learnable),
+        }
+    except Exception:  # noqa: BLE001 - learning is advisory
+        logger.exception("learning unavailable for %s", brand.slug)
+        return None
+
+
+def _save_prediction(
+    session: Session, brand: BrandProfile, package_id: str, learned: dict[str, Any]
+) -> None:
+    """Record the learned score on the new draft, to compare with its real result later."""
+    from media_os_api.content.taxonomy import posting_slot
+    from media_os_api.learning.service import features_of, prediction_for
+
+    pkg = session.get(ContentPackage, uuid.UUID(package_id))
+    if pkg is None:
+        return
+    features = features_of(pkg, None, brand.timezone)
+    times = settings_for(brand)["post_times"]
+    if times:  # the slot it will most likely go out in
+        hh = _hhmm(times[0])
+        features["slot"] = posting_slot(
+            datetime.combine(date.today(), hh, ZoneInfo(brand.timezone)), brand.timezone
+        ).value
+    pkg.score = {
+        **dict(pkg.score or {}),
+        "learned": prediction_for(learned["model"], learned["evaluation"], features),
+    }
