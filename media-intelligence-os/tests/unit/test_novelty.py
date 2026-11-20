@@ -131,3 +131,29 @@ def test_owner_notes_go_first_in_the_prompt(monkeypatch: pytest.MonkeyPatch) -> 
     assert avoid.startswith("THE OWNER REJECTED") and "On 'Old post': Too salesy" in avoid
     assert "শ্রী/শ্রীমতী mistake" in avoid  # recent posts are still listed
     assert notes_block([]) == ""
+
+
+def _hooks_only() -> list[RecentPost]:
+    from media_os_api.carousel.novelty import concepts
+
+    return [
+        RecentPost(title=k, terms=frozenset(terms(v)), hook_concepts=frozenset(concepts(v)))
+        for k, v in EXISTING.items()
+    ]
+
+
+def test_same_subject_in_another_language_is_a_repeat() -> None:
+    # English-only draft vs the Bengali-only post of the day before (18 and 19 Nov 2026).
+    english = _draft("শ্রী না শ্রীমতী?", "Sri or Srimati? *Many get this* wrong").model_copy()
+    english.slides[0].headline_bn = None
+    only_bn = [p for p in _hooks_only() if p.title == "শ্রী/শ্রীমতী mistake"]
+    hit = closest_repeat(english, only_bn)
+    assert hit is not None and hit.shared == ("honorifics",)
+    assert closest_repeat(FRESH, _hooks_only()) is None
+
+
+def test_real_posts_have_distinct_hook_subjects() -> None:
+    posts = [p for p in _hooks_only() if p.hook_concepts]
+    for i, a in enumerate(posts):
+        for b in posts[i + 1 :]:
+            assert not (a.hook_concepts & b.hook_concepts), (a.title, b.title)

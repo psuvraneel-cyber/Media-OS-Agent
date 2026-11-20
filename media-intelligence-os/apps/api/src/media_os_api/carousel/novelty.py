@@ -181,6 +181,71 @@ def _stem(word: str) -> str:
     return word
 
 
+# Subjects named the same way in English and Bengali. Word overlap can't see that an English
+# "Sri or Srimati?" and a Bengali "শ্রী/শ্রীমতী নিয়ে ভুল" are the same post, so the hook of each
+# post is also reduced to these language-free subjects. Keys are lower-cased, stemmed words.
+_CONCEPT_WORDS: dict[str, tuple[str, ...]] = {
+    "honorifics": (
+        "sri",
+        "shri",
+        "sree",
+        "srimati",
+        "shrimati",
+        "honorific",
+        "honorifics",
+        "janab",
+        "janaba",
+        "শ্রী",
+        "শ্রীমতী",
+        "জনাব",
+        "জনাবা",
+        "সম্বোধন",
+    ),
+    "name spelling": ("name", "names", "spell", "spelt", "spelled", "spelling", "নাম"),
+    "printer delays": ("delay", "delays", "late", "printer", "press", "দেরি", "প্রেস", "ছাপা"),
+    "card wording": (
+        "wording",
+        "sadhu",
+        "cholit",
+        "verse",
+        "verses",
+        "সাধু",
+        "চলিত",
+        "ভাষা",
+        "লেখা",
+        "কবিতা",
+    ),
+    "bengali date": ("panjika", "tithi", "পঞ্জিকা", "তিথি", "তারিখ"),
+    "map qr": ("qr", "map", "venue", "directions", "ম্যাপ", "কিউআর", "ঠিকানা"),
+    "privacy": ("privacy", "private", "login", "offline", "account", "লগইন", "অফলাইন"),
+    "pricing": ("price", "prices", "premium", "₹", "rupees", "দাম", "প্রিমিয়াম"),
+    "other family": ("groom", "bride", "বরপক্ষ", "কনেপক্ষ", "বর", "কনে"),
+    "wedding season": ("season", "seasonal", "মরশুম", "মরসুম"),
+    "gaye holud": ("holud", "haldi", "হলুদ"),
+    "bou-bhat / walima": ("boubhat", "walima", "reception", "বৌভাত", "বউভাত", "ওয়ালিমা"),
+    "annaprashan": ("annaprashan", "mukhebhat", "aqiqah", "অন্নপ্রাশন", "মুখেভাত", "আকিকা"),
+    "birthday": ("birthday", "জন্মদিন"),
+    "upanayan / griha pravesh": ("upanayan", "griha", "pravesh", "পৈতে", "উপনয়ন", "গৃহপ্রবেশ"),
+    "biodata": ("biodata", "বায়োডাটা", "পাত্র", "পাত্রী"),
+    "shraddha / memorial": ("shraddha", "memorial", "milad", "শ্রাদ্ধ", "মিলাদ"),
+    "puja": ("puja", "pujo", "durga", "lakshmi", "kali", "saraswati", "পূজা", "পুজো"),
+}
+_CONCEPTS = {word: concept for concept, words in _CONCEPT_WORDS.items() for word in words}
+
+
+def concepts(texts: list[str]) -> set[str]:
+    """Language-free subjects named in some text (see `_CONCEPT_WORDS`)."""
+    out: set[str] = set()
+    for text in texts:
+        for raw in _WORD.findall((text or "").replace("*", " ").lower()):
+            hit = _CONCEPTS.get(raw) or _CONCEPTS.get(_stem(raw))
+            if hit:
+                out.add(hit)
+        if "₹" in (text or ""):
+            out.add("pricing")
+    return out
+
+
 def terms(texts: list[str]) -> set[str]:
     """Distinctive words across some headlines (lower-cased, stemmed, generic words dropped)."""
     out: set[str] = set()
@@ -199,10 +264,16 @@ def draft_terms(draft: CarouselDraft) -> set[str]:
     return terms(texts)
 
 
+def hook_concepts(draft: CarouselDraft) -> set[str]:
+    first = draft.slides[0]
+    return concepts([first.headline_bn or "", first.headline_en or ""])
+
+
 @dataclass(frozen=True)
 class RecentPost:
     title: str
     terms: frozenset[str]
+    hook_concepts: frozenset[str] = frozenset()  # the subject its hook names, in any language
 
 
 @dataclass(frozen=True)
@@ -228,17 +299,36 @@ def recent_posts(
     out = []
     for pkg in rows:
         texts = [pkg.title or "", pkg.hook or ""]
-        for s in pkg.slide_data or []:
+        hook_texts = list(texts)
+        for i, s in enumerate(pkg.slide_data or []):
             if isinstance(s, dict):
-                texts += [str(s.get("headline_bn") or ""), str(s.get("headline_en") or "")]
+                pair = [str(s.get("headline_bn") or ""), str(s.get("headline_en") or "")]
+                texts += pair
+                if i == 0:
+                    hook_texts += pair
         title = (pkg.title or pkg.hook or "Untitled").replace("*", "").strip()
-        out.append(RecentPost(title=title[:120], terms=frozenset(terms(texts))))
+        out.append(
+            RecentPost(
+                title=title[:120],
+                terms=frozenset(terms(texts)),
+                hook_concepts=frozenset(concepts(hook_texts)),
+            )
+        )
     return out
 
 
 def closest_repeat(draft: CarouselDraft, recent: list[RecentPost]) -> Repeat | None:
+    """The recent post this draft repeats most, if any.
+
+    Two ways to repeat: the hooks name the same subject (in any language), or the headlines share
+    at least two distinctive words making up half the smaller set."""
     mine = draft_terms(draft)
+    my_hook = hook_concepts(draft)
     best: Repeat | None = None
+    for post in recent:
+        same_subject = my_hook & post.hook_concepts
+        if same_subject:
+            return Repeat(title=post.title, shared=tuple(sorted(same_subject)), overlap=1.0)
     for post in recent:
         shared = mine & post.terms
         if len(shared) < MIN_SHARED:
