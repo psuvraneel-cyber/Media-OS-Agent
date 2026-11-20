@@ -46,9 +46,12 @@ from media_os_api.notify.service import (
     handle_send_telegram,
     handle_watchdog,
 )
+from media_os_api.publish.cleanup import CLEANUP_TASK, handle_cleanup_media
 from media_os_api.publish.service import (
+    CANCEL_TASK,
     SCHEDULE_TASK,
     SYNC_TASK,
+    handle_cancel_post,
     handle_schedule_carousel,
     handle_sync_status,
 )
@@ -124,6 +127,8 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     RENDER_TASK: handle_render_carousel,  # executes only in the creative container
     SCHEDULE_TASK: handle_schedule_carousel,  # N3: worker only (GitHub + Postiz credentials)
     SYNC_TASK: handle_sync_status,
+    CANCEL_TASK: handle_cancel_post,  # cancel or move a scheduled post (Postiz key)
+    CLEANUP_TASK: handle_cleanup_media,  # daily: delete published media from GitHub Pages
     SYNC_METRICS_TASK: handle_sync_post_metrics,  # worker only (Postiz credentials)
     ACCOUNT_TASK: handle_sync_account_metrics,  # worker only (Postiz credentials)
     GENERATE_TASK: handle_generate_carousel,  # worker only (AI keys)

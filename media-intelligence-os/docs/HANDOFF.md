@@ -30,6 +30,8 @@
 | Analytics | Live. Per-post metrics (every 6 h, nightly 21:40, **Sync now**) plus **whole-account** Instagram and Facebook totals (daily 21:35). |
 | Alerts | Live. Telegram alerts for failed, stuck and overdue posts, a **22:00 nightly report**, and bot commands `/status` `/queue` `/help`. |
 | Self-healer | Live (Windows Task Scheduler). It restarts a broken Postiz worker and unhealthy or stopped containers, watches the in-app watchdog, rebuilds lost dashboard and API port links, starts **Docker on demand 1 h before each post**, and carries out the dashboard's **Restart Postiz** requests. |
+| Review and publishing fixes (PR #40) | Edit a carousel's text before approving; rejection notes and the owner's edits steer the writer; **cancel or move** a scheduled post from Media OS; daily clean-up of hosted media (`publish.cleanup_media`, migration 0016); cross-language repeat check; live process status on the Agents page. |
+| Results so far | Reels ≈1,800 Instagram views each; carousels ≈4; Facebook ≈0. Video (N4) and learning from results (N5) are the priorities. |
 | Content counts | 8 carousels + 2 reels published · 2 carousels scheduled (4 platform posts, last 21 Nov 19:00) · **4 drafts waiting in Approvals** · 1 render-failed and 1 text-failed draft · 1 rejected. |
 
 ## 2. How to use it
@@ -40,8 +42,8 @@
   - **Autopilot card:** daily drafts (0–3), **posts per day** per platform (1–10), auto-schedule on/off, and posting times (up to 3).
   - **Upload:** reels, photos and carousels; then caption, approve and schedule.
 - **Approvals:**
-  - **Review tab:** generated carousels with QA checks, including the `novelty` warning, and the score; approve or reject.
-  - **Approved tab:** pick a time and channels, then **Schedule**.
+  - **Review tab:** generated carousels with QA checks, including the `novelty` warning, and the score; **Edit text** (re-checks and re-renders), approve or reject. Rejection notes and edits are given to the writer for the next drafts.
+  - **Approved tab:** pick a time and channels, then **Schedule**. Scheduled posts have **Move** and **Cancel post** (all channels; not in the last 5 minutes).
 - **Assets:**
   - **Brand logo**, shown beside the brand name and in the switcher.
   - **Design templates:** cover, content and closing backgrounds at 1080×1350, each with a text area (top/middle/bottom) and text colour (light/dark), plus occasion tags.
@@ -50,13 +52,13 @@
 - **Dashboard home:** the ↻ icon on the **Postiz gateway** tile restarts Postiz. A Windows task does it within a minute; the web app never gets Docker access.
 - **Telegram:** `/status`, `/queue` and `/help` (owner chat only). Alerts and the 22:00 report arrive automatically.
 - **CLI, if ever needed:** `docker exec media-os-worker python -m media_os_api.carousel.admin generate --pillar … --hook … --language …`. Use `draft` instead of `generate` to preview without saving.
-- **Postiz:** http://localhost:4007 (separate stack). Delete a scheduled post there to cancel it; the sync marks it CANCELLED.
+- **Postiz:** http://localhost:4007 (separate stack). Cancelling in Media OS deletes the post there; deleting it in Postiz directly still works (the sync marks it CANCELLED).
 
 ## 3. Runtime
 
 - **Media OS stack:** `infra/docker/compose.app.yml`, with env in `C:\Media OS Agent\media-os-runtime\.env`.
   - **Containers:** `media-os-{api,worker,scheduler,web,creative,postgres,redis}`.
-  - **Database:** at migration **`0015_design_templates`**.
+  - **Database:** at migration **`0015_design_templates`**. PR #40 adds **`0016_media_cleanup`** (one schedule row, no table changes): back up, then migrate on deploy.
   - **Deploy:** pull the main checkout `C:\Media OS Agent`, then run `docker compose --env-file "C:/Media OS Agent/media-os-runtime/.env" -f infra/docker/compose.app.yml up -d --build --wait`, then `docker exec media-os-api alembic upgrade head`.
   - **Back up first:** `scripts/backup_db.py` (dumps go to `C:\Media OS Agent\media-os-backups`; latest `media_os_20261117T094130Z.dump`).
 - **Volumes:**
@@ -73,6 +75,7 @@
   - `analytics.sync_post_metrics`: 6 h, plus `.nightly` at 21:40.
   - `analytics.sync_account_metrics`: 21:35.
   - `content.daily_drafts`: 08:00.
+  - `publish.cleanup_media`: 03:30 (after 0016).
   - `notify.watchdog`: 5 min.
   - `notify.telegram_commands`: 1 min.
   - `notify.daily_digest`: 22:00.
@@ -86,7 +89,7 @@
   - Meta app "Nimontron Publisher", in Development mode. That's fine for the owner's own accounts: posts are public and no App Review is needed.
   - Channels: Instagram `@com.nimontron.app` and the Facebook Page "Nimontron: Bengali Invitations".
   - It has a startup gate that waits for Temporal. The Temporal web UI is stopped (`--restart=no`). Elasticsearch still runs.
-- **Media hosting:** public repo `psuvraneel-cyber/nimontron-media` on GitHub Pages. Reels add up in its history; GitHub recommends keeping a repo under about 1 GB, roughly 25–30 reels.
+- **Media hosting:** public repo `psuvraneel-cyber/nimontron-media` on GitHub Pages. After PR #40, `publish.cleanup_media` deletes a post's files 3 days after it publishes (15 if a platform failed). Deleted files still count in the repo's git history, so its size grows more slowly but doesn't shrink.
 - **Windows host** (scripts in the main checkout's `infra/ops/windows`):
   - **Tasks:** **Media OS Watchdog** (every 5 min) and **Media OS Restart Requests** (every 1 min). Reinstall with `install-watchdog.ps1`.
   - **Files:** in `%LOCALAPPDATA%\MediaOS`: `watchdog.log`, `watchdog-state.json`, `upcoming-posts.json` (post times saved for Docker on demand), and `watchdog.pause` (create it to pause).
@@ -129,7 +132,7 @@
 ## 5. Open items
 
 1. **Remove Postiz's Elasticsearch** (saves ~700 MB and CPU spikes).
-   - **Blocked while any post is scheduled:** Postiz searches it to cancel a post's job, and existing jobs wouldn't be findable afterwards.
+   - **Blocked while any post is scheduled:** Postiz searches it to cancel a post's job (that includes **Cancel post** and **Move** in Media OS), and existing jobs wouldn't be findable afterwards.
    - **When:** after the last scheduled post (currently 21 Nov 19:00), with nothing new scheduled.
    - **Steps:** back up the Postiz setup and Temporal database; set `ENABLE_ES=false` (Temporal uses its SQL visibility store) and stop Elasticsearch, keeping its volume; then test scheduling and cancelling a post.
 2. **Disable Docker's Windows startup entry:** Task Manager → Startup apps → Docker Desktop → Disable. It's a leftover HKCU Run entry; Docker's own setting is already off.
@@ -143,10 +146,10 @@
    - Then add a **New brand** form.
 7. **Research for Nimontron:** the current sources are tech-only. Add wedding, festival and occasion sources, then feed research into generation.
 8. **Housekeeping:**
-   - GitHub Pages repo size from reels, which needs cleanup if many are posted;
+   - ~~GitHub Pages repo size~~: published media is now deleted daily (PR #40); history still grows;
    - staged Studio images that were never turned into posts (needs a daily cleanup);
    - the creative image is 3.76 GB;
-   - hook text shows `*asterisks*` in some lists.
+   - ~~hook text shows `*asterisks*`~~: fixed in PR #40.
 9. **Local quirks:**
    - commits from a worktree need `MEDIA_OS_VENV_PATH="C:/Media OS Agent/media-intelligence-os/.venv"` and `MEDIA_OS_WORKSPACE_ROOT="C:/Media OS Agent"`;
    - `test_manifest_verification_on_real_references` fails in worktrees (CI skips it);

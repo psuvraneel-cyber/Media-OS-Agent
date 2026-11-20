@@ -52,6 +52,7 @@ from media_os_api.jobs.routing import queue_for_task
 from media_os_api.publish.service import (
     RESCHEDULABLE_STATES,
     ScheduleRequestError,
+    can_cancel,
     can_schedule,
     package_schedules,
     request_schedule,
@@ -114,6 +115,7 @@ def _reel(db: Session, pkg: ContentPackage) -> ReelItem:
         schedules=_schedules(db, pkg),
         scheduling=_scheduling(db, pkg),
         can_schedule=can_schedule(pkg, package_schedules(db, pkg)),
+        can_cancel=can_cancel(db, pkg, datetime.now(UTC)),
         caption=pkg.caption,
         hashtags=list(pkg.hashtags or []),
         slide_asset_ids=[] if video else [str(a.id) for a in shown],

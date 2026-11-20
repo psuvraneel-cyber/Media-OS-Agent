@@ -183,6 +183,43 @@ class GitHubPagesHost:
             )
         return [HostedFile(p, self.url_for(p)) for p in paths]
 
+    def remove_matching(self, wanted: Callable[[str], bool], message: str) -> list[str]:
+        """Delete every file whose repo path `wanted` accepts, in one commit. Returns the paths.
+
+        Lists the branch's whole tree once (recursive), so one call covers many posts."""
+        ref = self._call("GET", f"/git/ref/heads/{self._branch}")
+        head_sha = ref["object"]["sha"]
+        head = self._call("GET", f"/git/commits/{head_sha}")
+        listing = self._call("GET", f"/git/trees/{head['tree']['sha']}?recursive=1")
+        if listing.get("truncated"):
+            raise MediaHostError(
+                "The media repo is too large to list in one call.",
+                code="GITHUB_TREE_TRUNCATED",
+                retryable=False,
+            )
+        paths = sorted(
+            str(item["path"])
+            for item in listing.get("tree", [])
+            if item.get("type") == "blob" and wanted(str(item.get("path", "")))
+        )
+        if not paths:
+            return []
+        tree = [
+            {"path": _check_path(p), "mode": "100644", "type": "blob", "sha": None} for p in paths
+        ]
+        new_tree = self._call(
+            "POST", "/git/trees", json={"base_tree": head["tree"]["sha"], "tree": tree}
+        )
+        commit = self._call(
+            "POST",
+            "/git/commits",
+            json={"message": message, "tree": new_tree["sha"], "parents": [head_sha]},
+        )
+        self._call(
+            "PATCH", f"/git/refs/heads/{self._branch}", json={"sha": commit["sha"], "force": False}
+        )
+        return paths
+
     def wait_until_live(
         self, files: list[HostedFile], *, timeout_s: float = 420.0, every_s: float = 15.0
     ) -> None:

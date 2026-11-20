@@ -17,6 +17,8 @@ from media_os_api.observability.telemetry import RequestTelemetryStore
 from media_os_api.schemas.system import (
     AuditEventItem,
     AuditLogResponse,
+    ProcessStatusItem,
+    ProcessStatusResponse,
     SystemStatusResponse,
     TelemetryEventItem,
     TelemetryLogResponse,
@@ -84,6 +86,40 @@ async def system_status(
             redis_ok=redis_ok,
         ),
         timestamp_utc=datetime.now(UTC).isoformat(),
+    )
+
+
+@router.get("/processes", response_model=ProcessStatusResponse)
+def system_processes(
+    request: Request,
+    _session: Annotated[SessionPayload, Depends(require_session)],
+) -> ProcessStatusResponse:
+    """Scheduler, worker, renderer and research state, read from the job ledger."""
+    from media_os_api.services.process_status import process_states
+
+    now = datetime.now(UTC)
+    factory = getattr(request.app.state, "session_factory", None)
+    if factory is None:
+        return ProcessStatusResponse(items=[], checked_at=now.isoformat())
+    try:
+        with session_scope(factory) as db:
+            states = process_states(db, now)
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "DATABASE_UNAVAILABLE", "message": "Job ledger is unavailable."},
+        ) from exc
+    return ProcessStatusResponse(
+        items=[
+            ProcessStatusItem(
+                key=s.key,
+                state=s.state,
+                detail=s.detail,
+                last_activity_at=s.last_activity_at.isoformat() if s.last_activity_at else None,
+            )
+            for s in states
+        ],
+        checked_at=now.isoformat(),
     )
 
 

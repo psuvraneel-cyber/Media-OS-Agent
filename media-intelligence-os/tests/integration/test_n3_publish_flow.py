@@ -63,6 +63,7 @@ def _db_url() -> str:
 class FakeHost:
     def __init__(self) -> None:
         self.published: list[tuple[str, bytes]] = []
+        self.removed: list[str] = []
 
     def publish(self, files: list[tuple[str, bytes]], message: str) -> list[HostedFile]:
         self.published.extend(files)
@@ -70,6 +71,12 @@ class FakeHost:
 
     def wait_until_live(self, files: list[HostedFile], **_: Any) -> None:
         return None
+
+    def remove_matching(self, wanted: Any, message: str) -> list[str]:
+        gone = sorted({p for p, _ in self.published if wanted(p)})
+        self.published = [(p, d) for p, d in self.published if p not in gone]
+        self.removed.extend(gone)
+        return gone
 
     def close(self) -> None:
         return None
@@ -79,6 +86,7 @@ class FakePostiz:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.posts: list[dict[str, Any]] = []
+        self.deleted: list[str] = []
         self.integrations_list = [
             Integration("ig-int", "instagram", "Nimontron: Bengali Invitations", False),
             Integration("fb-int", "facebook", "Nimontron: Bengali Invitations", False),
@@ -134,6 +142,11 @@ class FakePostiz:
 
     def posts_between(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
         return list(self.posts)
+
+    def delete_post(self, post_id: str) -> None:
+        # Postiz deletes the whole group (every channel); tests treat one carousel as one group.
+        self.deleted.append(post_id)
+        self.posts.clear()
 
     def close(self) -> None:
         return None
@@ -434,6 +447,165 @@ def test_sync_marks_published_and_package_published(env: dict[str, Any]) -> None
             "CAROUSEL_PUBLISHED",
         } <= actions
     _ = uuid  # keep import for readability of ids above
+
+
+# ------------------------------------------------------------------ cancel and move
+
+
+def _schedule_done(env: dict[str, Any], when: datetime, platforms: list[str]) -> None:
+    """Schedule the env carousel and finish its job, as the worker would."""
+    with session_scope(env["factory"]) as db:
+        job = _schedule(db, env, when, platforms)
+        svc.handle_schedule_carousel(db, job, clients=env["clients"])
+        job.status = "SUCCEEDED"
+
+
+def _run_cancel_jobs(env: dict[str, Any]) -> list[dict[str, Any]]:
+    outs = []
+    with session_scope(env["factory"]) as db:
+        jobs = list(
+            db.execute(
+                select(JobRun).where(
+                    JobRun.task_name == svc.CANCEL_TASK, JobRun.status == "PENDING"
+                )
+            ).scalars()
+        )
+        for job in jobs:
+            outs.append(svc.handle_cancel_post(db, job, clients=env["clients"]))
+            job.status = "SUCCEEDED"
+    return outs
+
+
+def test_owner_cancels_a_scheduled_post_from_media_os(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM", "FACEBOOK"])
+    url = f"/api/v1/content/carousels/{env['pid']}"
+    detail = client.get(f"{url}?{BRAND_Q}").json()
+    assert detail["can_cancel"] is True
+
+    res = client.post(f"{url}/cancel?{BRAND_Q}", json={})
+    assert res.status_code == 202 and res.json()["scheduling"] is True
+    again = client.post(f"{url}/cancel?{BRAND_Q}", json={})
+    assert again.status_code == 409 and again.json()["error"]["code"] == "ALREADY_CANCELLING"
+
+    [out] = _run_cancel_jobs(env)
+    assert out["cancelled"] == 2 and out["status"] == "FAILED_RETRYABLE"
+    assert env["postiz"].deleted  # deleted in Postiz
+    with session_scope(f) as db:
+        assert {r.status for r in db.execute(select(PublishSchedule)).scalars()} == {"CANCELLED"}
+    after = client.get(f"{url}?{BRAND_Q}").json()
+    assert after["can_schedule"] is True and after["can_cancel"] is False
+    nothing = client.post(f"{url}/cancel?{BRAND_Q}", json={})
+    assert nothing.status_code == 409 and nothing.json()["error"]["code"] == "NOTHING_TO_CANCEL"
+
+
+def test_owner_moves_a_post_to_a_new_time(env: dict[str, Any], client: TestClient) -> None:
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM"])
+    later = when + timedelta(days=1, hours=2)
+    url = f"/api/v1/content/carousels/{env['pid']}/cancel?{BRAND_Q}"
+    same = client.post(url, json={"move_to": when.isoformat()})
+    assert same.status_code == 409 and same.json()["error"]["code"] == "SAME_TIME"
+    res = client.post(url, json={"move_to": later.isoformat()})
+    assert res.status_code == 202
+
+    [out] = _run_cancel_jobs(env)
+    assert out["moved_to"] == later.astimezone(UTC).isoformat()
+    with session_scope(f) as db:
+        job = db.execute(
+            select(JobRun).where(JobRun.task_name == svc.SCHEDULE_TASK, JobRun.status == "PENDING")
+        ).scalar_one()
+        assert job.payload["scheduled_at"] == later.astimezone(UTC).isoformat()
+        assert job.payload["platforms"] == ["INSTAGRAM"]
+        svc.handle_schedule_carousel(db, job, clients=env["clients"])
+    with session_scope(f) as db:
+        rows = {r.status: r for r in db.execute(select(PublishSchedule)).scalars()}
+        assert set(rows) == {"CANCELLED", "SCHEDULED"}
+        assert rows["SCHEDULED"].scheduled_at == later
+        pkg = db.get(ContentPackage, env["pid"])
+        assert pkg is not None and pkg.status == "SCHEDULED"
+
+
+def test_cant_cancel_in_the_last_minutes(env: dict[str, Any]) -> None:
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM"])
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            r.scheduled_at = datetime.now(UTC) + timedelta(minutes=3)
+    with session_scope(f) as db:
+        pkg = db.get(ContentPackage, env["pid"])
+        brand = db.get(BrandProfile, env["bid"])
+        assert pkg and brand
+        with pytest.raises(svc.ScheduleRequestError) as late:
+            svc.request_cancel(db, pkg=pkg, brand=brand, actor_id="owner:t")
+        assert late.value.code == "TOO_LATE"
+
+
+# ------------------------------------------------------------------ hosted media clean-up
+
+
+def test_published_media_is_removed_from_github_pages_after_three_days(
+    env: dict[str, Any],
+) -> None:
+    from media_os_api.publish import cleanup
+
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM", "FACEBOOK"])
+    hosted = [p for p, _ in env["host"].published]
+    assert hosted and all(f"/{env['pid']}/" in p for p in hosted)
+    for p in env["postiz"].posts:
+        p["state"] = "PUBLISHED"
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            r.scheduled_at = datetime.now(UTC) - timedelta(days=1)
+    with session_scope(f) as db:
+        svc.handle_sync_status(
+            db, JobRun(task_name=svc.SYNC_TASK, payload={}), clients=env["clients"]
+        )
+
+    def run() -> dict[str, Any]:
+        with session_scope(f) as db:
+            return cleanup.handle_cleanup_media(
+                db,
+                JobRun(task_name=cleanup.CLEANUP_TASK, payload={}),
+                host_factory=lambda: env["host"],
+            )
+
+    assert run() == {"packages": 0, "files": 0}  # published a day ago: kept for now
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            r.scheduled_at = datetime.now(UTC) - timedelta(days=4)
+    assert run() == {"packages": 1, "files": len(hosted)}
+    assert sorted(env["host"].removed) == sorted(hosted)
+    assert run() == {"packages": 0, "files": 0}  # never looked at twice
+
+
+def test_failed_posts_keep_their_media_for_manual_retries(env: dict[str, Any]) -> None:
+    from media_os_api.publish import cleanup
+
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM"])
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            r.status = "FAILED"
+            r.scheduled_at = datetime.now(UTC) - timedelta(days=5)
+    with session_scope(f) as db:
+        assert cleanup.settled_packages(db, datetime.now(UTC)) == []
+        assert len(cleanup.settled_packages(db, datetime.now(UTC) + timedelta(days=11))) == 1
+
+
+def test_media_paths_are_matched_to_their_post() -> None:
+    from media_os_api.publish.cleanup import belongs_to
+
+    pid = uuid.uuid4()
+    assert belongs_to(f"brand-app-promo/2026-11/{pid}/v1/slide-01.jpg", "brand-app-promo", pid)
+    assert not belongs_to(f"other-brand/2026-11/{pid}/v1/slide-01.jpg", "brand-app-promo", pid)
+    assert not belongs_to(
+        f"brand-app-promo/2026-11/{uuid.uuid4()}/v1/a.jpg", "brand-app-promo", pid
+    )
+    assert not belongs_to("index.html", "brand-app-promo", pid)
 
 
 # ------------------------------------------------------------------ review fixes (bugs 1-4)
@@ -1170,6 +1342,34 @@ def test_bot_answers_the_owner_only_and_remembers_its_place(env: dict[str, Any])
             db.execute(delete(JobRun).where(JobRun.task_name == commands.COMMANDS_TASK))
 
 
+def test_bot_network_blip_is_not_a_failure(env: dict[str, Any]) -> None:
+    from media_os_api.jobs.ledger import enqueue_durable_job
+    from media_os_api.notify import commands
+    from media_os_api.notify.telegram import TelegramError
+
+    class _Flaky(_FakeBot):
+        def get_updates(self, *, offset: int | None = None, limit: int = 50) -> list[Any]:
+            raise TelegramError("timed out", code="TELEGRAM_TIMEOUT", retryable=True)
+
+    f = env["factory"]
+    try:
+        with session_scope(f) as db:
+            job, _ = enqueue_durable_job(
+                db,
+                task_name=commands.COMMANDS_TASK,
+                task_type="NOTIFY",
+                payload={},
+                idempotency_key="test:commands:blip",
+            )
+            out = commands.handle_telegram_commands(db, job, telegram=lambda: _Flaky([]))  # type: ignore[arg-type,return-value]
+        assert out["skipped"] == "TELEGRAM_TIMEOUT" and out["handled"] == 0
+    finally:
+        with session_scope(f) as db:
+            ids = select(JobRun.id).where(JobRun.task_name == commands.COMMANDS_TASK)
+            db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(ids)))
+            db.execute(delete(JobRun).where(JobRun.task_name == commands.COMMANDS_TASK))
+
+
 # ------------------------------------------------------------------ owner reels (Studio)
 
 BRAND_Q = "brand=brand-app-promo"
@@ -1596,7 +1796,7 @@ def test_restart_postiz_request_is_recorded_once_and_reported(
 # ------------------------------------------------------------------ autopilot
 
 
-def _fake_produce(calls: list[Any]) -> Any:
+def _fake_produce(calls: list[Any], seen_guidance: list[str] | None = None) -> Any:
     """Stands in for the AI writer: saves a real draft package, exactly like produce() does."""
 
     def produce(
@@ -1607,8 +1807,11 @@ def _fake_produce(calls: list[Any]) -> Any:
         factory: Any = None,
         design: dict[str, Any] | None = None,
         recent: Any = None,
+        guidance: str = "",
     ) -> dict[str, Any]:
         calls.append(brief)
+        if seen_guidance is not None:
+            seen_guidance.append(guidance)
         draft = _draft()
         qa = run_text_qa(NIMONTRON, brief, draft)
         with session_scope(factory) as db:
@@ -1676,6 +1879,137 @@ def test_generate_button_queues_jobs_that_write_drafts_and_ping_telegram(
     assert len(alerts) == 2 and "New post ready for review" in alerts[0].payload["text"]
     recent = client.get(f"/api/v1/content/generate/recent?{BRAND_Q}").json()["items"]
     assert len(recent) == 2 and all(r["qa_passed"] for r in recent)
+
+
+def test_rejection_notes_reach_the_next_draft(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from media_os_api.carousel import admin
+    from media_os_api.content import autopilot as ap
+
+    calls: list[Any] = []
+    guidance: list[str] = []
+    monkeypatch.setattr(admin, "produce", _fake_produce(calls, guidance))
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        [job] = ap.request_generation(
+            db, brand, count=1, brief={}, trigger="test", key_prefix="test:notes:1"
+        )
+        ap.handle_generate_carousel(db, job)
+        job.status = "SUCCEEDED"
+    pid = next(
+        r["id"]
+        for r in client.get(f"/api/v1/content/carousels?{BRAND_Q}").json()["items"]
+        if r["approval_status"] == "PENDING"
+    )
+    rejected = client.post(
+        f"/api/v1/content/carousels/{pid}/decision?{BRAND_Q}",
+        json={"decision": "REJECT", "reason": "Too salesy, sounds like an ad"},
+    )
+    assert rejected.status_code == 200
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        [job] = ap.request_generation(
+            db, brand, count=1, brief={}, trigger="test", key_prefix="test:notes:2"
+        )
+        ap.handle_generate_carousel(db, job)
+        job.status = "SUCCEEDED"
+    assert guidance[0] == ""
+    assert "Too salesy, sounds like an ad" in guidance[1]
+    assert "rejected: Too salesy" in guidance[1]
+
+
+def _pending_carousel(env: dict[str, Any], client: TestClient, monkeypatch: Any, key: str) -> str:
+    """A fresh generated carousel awaiting review (written by the fake writer)."""
+    from media_os_api.carousel import admin
+    from media_os_api.content import autopilot as ap
+
+    monkeypatch.setattr(admin, "produce", _fake_produce([]))
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        [job] = ap.request_generation(
+            db, brand, count=1, brief={"language": "BN_EN"}, trigger="test", key_prefix=key
+        )
+        out = ap.handle_generate_carousel(db, job)
+        job.status = "SUCCEEDED"
+    return str(out["content_package_id"])
+
+
+def test_owner_edits_text_then_it_rechecks_rerenders_and_teaches(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from media_os_api.carousel.feedback import notes_block, owner_notes
+    from media_os_api.carousel.render_job import RENDER_TASK
+
+    pid = _pending_carousel(env, client, monkeypatch, "test:edit:1")
+    url = f"/api/v1/content/carousels/{pid}?{BRAND_Q}"
+    before = client.get(url).json()
+    assert before["status"] == "DRAFTED"
+
+    # Fill in the first slide's English headline only; other slides untouched.
+    edits: list[dict[str, Any]] = [{} for _ in before["slides"]]
+    edits[0] = {"headline_en": "Wedding *season* is here"}
+    res = client.patch(url, json={"slides": edits, "caption": before["caption"] + " 🎉"})
+    assert res.status_code == 200, res.text
+    after = res.json()
+    assert after["slides"][0]["headline_en"] == "Wedding *season* is here"
+    assert after["slides"][1] == before["slides"][1]
+    assert after["title"] == "Wedding season is here"  # stored without the markers
+    assert after["caption"].endswith("🎉") and after["qa_passed"] is True
+
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None and pkg.version == 2 and pkg.status == "DRAFTED"
+        renders = list(
+            db.execute(
+                select(JobRun.idempotency_key).where(
+                    JobRun.task_name == RENDER_TASK,
+                    JobRun.payload["content_package_id"].astext == pid,
+                )
+            ).scalars()
+        )
+        assert f"render:{pid}:v2" in renders
+        notes = owner_notes(db, env["bid"])
+        assert (
+            notes
+            and "corrected it" in notes[0].note
+            and "Wedding season is here" in (notes[0].note)
+        )
+        assert "the corrections show" in notes_block(notes)
+
+    # Nothing changed: no new version.
+    same = client.patch(url, json={"slides": edits})
+    assert same.status_code == 200
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None and pkg.version == 2
+
+    # An edit that breaks a rule is saved but fails QA, so it isn't rendered.
+    edits[0] = {"headline_en": "The best wedding card app"}
+    bad = client.patch(url, json={"slides": edits})
+    assert bad.status_code == 200 and bad.json()["qa_passed"] is False
+    with session_scope(env["factory"]) as db:
+        renders = list(
+            db.execute(
+                select(JobRun.idempotency_key).where(
+                    JobRun.task_name == RENDER_TASK,
+                    JobRun.payload["content_package_id"].astext == pid,
+                )
+            ).scalars()
+        )
+        assert f"render:{pid}:v3" not in renders
+
+    wrong_count = client.patch(url, json={"slides": [{}]})
+    assert wrong_count.status_code == 422 and wrong_count.json()["error"]["code"] == "BAD_EDIT"
+
+
+def test_approved_carousels_cant_be_edited(env: dict[str, Any], client: TestClient) -> None:
+    url = f"/api/v1/content/carousels/{env['pid']}?{BRAND_Q}"
+    res = client.patch(url, json={"caption": "changed"})
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NOT_EDITABLE"
 
 
 def test_automatic_topics_rotate_away_from_recent_posts(env: dict[str, Any]) -> None:

@@ -11,38 +11,113 @@ import {
   Timer,
 } from "lucide-react";
 
-import { Badge, StatusDot } from "@/components/ui/Badge";
+import { Badge, StatusDot, type BadgeTone } from "@/components/ui/Badge";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
+import type { ProcessStatusItem, SystemStatusResponse } from "@/lib/types";
 
 export { StudioView } from "@/components/views/StudioView";
 export { AssetsView } from "@/components/views/AssetsView";
 export { CalendarView } from "@/components/views/CalendarView";
 export { AnalyticsView } from "@/components/views/AnalyticsView";
 
-const WORKER_SPEC = [
-  { name: "API control plane (media-os-api)", status: "Running", tone: "live" as const, note: "Health, auth, CSRF, brands, content review, publishing and analytics APIs on 127.0.0.1:8000." },
-  { name: "Operator UI (media-os-web)", status: "Running", tone: "live" as const, note: "Next.js App Router BFF + UI on 127.0.0.1:3100." },
-  { name: "Worker (media-os-worker)", status: "Running", tone: "live" as const, note: "Durable JobRun executor for control, research, publishing and analytics-sync queues. Holds AI and Postiz keys." },
-  { name: "Scheduler & outbox (media-os-scheduler)", status: "Running", tone: "live" as const, note: "PostgreSQL-backed Asia/Kolkata scheduler, stale-lease sweeper and transactional outbox dispatcher." },
-  { name: "Creative renderer (media-os-creative)", status: "Running", tone: "live" as const, note: "Headless Chromium on the creative queue renders carousel slides. No AI or publishing keys." },
-  { name: "Research ingestion", status: "Built · sources off", tone: "disabled" as const, note: "Five verified fetchers; schedules disabled until the owner enables them. Reddit is blocked by policy." },
-  { name: "Custom MCP server (services/mcp)", status: "Planned", tone: "disabled" as const, note: "Media OS MCP tool surface is not built yet." },
+type Tone = BadgeTone;
+
+interface ProcessRow {
+  name: string;
+  status: string;
+  tone: Tone;
+  note: string;
+  Icon: typeof Cpu;
+}
+
+const STATE_LABEL: Record<ProcessStatusItem["state"], { status: string; tone: Tone }> = {
+  running: { status: "Running", tone: "live" },
+  idle: { status: "Idle · ready", tone: "info" },
+  stalled: { status: "Stuck", tone: "blocked" },
+  down: { status: "Not running", tone: "blocked" },
+  off: { status: "Switched off", tone: "disabled" },
+  unknown: { status: "Unknown", tone: "neutral" },
+};
+
+const LEDGER_PROCESSES: ReadonlyArray<{ key: string; name: string; Icon: typeof Cpu; role: string }> = [
+  { key: "worker", name: "Worker (media-os-worker)", Icon: Cpu, role: "Runs durable jobs: AI writing, publishing, analytics sync, alerts." },
+  { key: "scheduler", name: "Scheduler & outbox (media-os-scheduler)", Icon: Timer, role: "Queues scheduled jobs and dispatches the outbox." },
+  { key: "creative", name: "Creative renderer (media-os-creative)", Icon: Palette, role: "Headless Chromium that renders carousel slides on demand." },
+  { key: "research", name: "Research ingestion", Icon: Radar, role: "Official-source fetchers. Reddit is blocked by policy." },
 ];
 
-// Same order as WORKER_SPEC: API, UI, worker, scheduler, renderer, research, MCP.
-const WORKER_ICONS = [Server, MonitorSmartphone, Cpu, Timer, Palette, Radar, Plug];
+function buildRows(
+  processes: ProcessStatusItem[] | null,
+  systemStatus: SystemStatusResponse | null,
+): ProcessRow[] {
+  const apiUp = systemStatus !== null;
+  const rows: ProcessRow[] = [
+    {
+      name: "API control plane (media-os-api)",
+      Icon: Server,
+      ...(apiUp ? { status: "Running", tone: "live" as const } : { status: "Not answering", tone: "blocked" as const }),
+      note: apiUp
+        ? `Database ${systemStatus.database_status} · Redis ${systemStatus.redis_status}.`
+        : "The dashboard couldn't reach the API.",
+    },
+    {
+      name: "Operator UI (media-os-web)",
+      Icon: MonitorSmartphone,
+      status: "Running",
+      tone: "live",
+      note: "You're looking at it.",
+    },
+  ];
+  for (const proc of LEDGER_PROCESSES) {
+    const item = processes?.find((p) => p.key === proc.key);
+    const label = STATE_LABEL[item?.state ?? "unknown"];
+    rows.push({
+      name: proc.name,
+      Icon: proc.Icon,
+      status: label.status,
+      tone: label.tone,
+      note: item ? `${proc.role} ${item.detail}` : `${proc.role} Status unavailable.`,
+    });
+  }
+  const postiz = systemStatus?.postiz;
+  rows.push({
+    name: "Postiz (separate stack)",
+    Icon: Plug,
+    ...(postiz?.status === "reachable"
+      ? { status: "Answering", tone: "live" as const }
+      : postiz
+        ? { status: "Not answering", tone: "blocked" as const }
+        : { status: "Unknown", tone: "neutral" as const }),
+    note: "Publishes scheduled posts to Instagram and Facebook.",
+  });
+  return rows;
+}
 
-export function AgentsView() {
+export function AgentsView({
+  processes = null,
+  systemStatus = null,
+}: {
+  processes?: ProcessStatusItem[] | null;
+  systemStatus?: SystemStatusResponse | null;
+}) {
+  const rows = buildRows(processes, systemStatus);
+  const problems = rows.filter((r) => r.tone === "blocked").length;
   return (
     <div className="space-y-6">
       <SurfaceCard
         icon={<Cpu />} title="Agent & worker processes"
-        subtitle="Process roles under the 16 GB Windows + WSL2 Docker memory ceiling."
-        badge={<Badge tone="live" dot>Durable jobs active</Badge>}
+        subtitle="Live state, worked out from the job ledger when this page loaded."
+        badge={
+          problems ? (
+            <Badge tone="blocked" dot>{problems} need attention</Badge>
+          ) : (
+            <Badge tone="live" dot>All good</Badge>
+          )
+        }
       >
         <div className="stagger-children space-y-2.5">
-          {WORKER_SPEC.map((worker, i) => {
-            const Icon = WORKER_ICONS[i] ?? Cpu;
+          {rows.map((worker) => {
+            const Icon = worker.Icon;
             const live = worker.tone === "live";
             return (
               <div

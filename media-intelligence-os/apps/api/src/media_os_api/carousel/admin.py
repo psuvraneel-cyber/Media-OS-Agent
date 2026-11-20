@@ -52,6 +52,7 @@ def produce(
     factory: Any = None,
     design: dict[str, Any] | None = None,
     recent: Any = None,
+    guidance: str = "",
 ) -> dict[str, Any]:
     """Write, check and score one carousel; with save=True store it as a draft.
 
@@ -86,6 +87,7 @@ def produce(
             on_attempt=on_attempt,
             design=design,
             recent=recent,
+            guidance=guidance,
         )
     finally:
         if own_engine is not None:
@@ -102,10 +104,13 @@ def _produce(
     on_attempt: Any,
     design: dict[str, Any] | None = None,
     recent: Any = None,
+    guidance: str = "",
 ) -> dict[str, Any]:
     router = build_router(quota_store=_quota_store(), on_attempt=on_attempt)
     try:
-        draft, written_by, attempts, qa = write_with_qa(router, kit, brief, recent=recent)
+        draft, written_by, attempts, qa = write_with_qa(
+            router, kit, brief, recent=recent, guidance=guidance
+        )
         score = score_carousel(brief, draft, ai_review(router, draft))
     finally:
         router.close()

@@ -4,7 +4,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   CheckCircle2,
   ImageOff,
+  Pencil,
   RefreshCw,
+  Save,
   ShieldCheck,
   XCircle,
 } from "lucide-react";
@@ -84,6 +86,195 @@ function QueueRow({
   );
 }
 
+type SlideField = "kicker" | "headline_bn" | "body_bn" | "headline_en" | "body_en" | "sticker";
+
+const SLIDE_FIELDS: SlideField[] = ["kicker", "headline_bn", "body_bn", "headline_en", "body_en", "sticker"];
+
+const FIELD_LABEL: Record<SlideField, string> = {
+  kicker: "Label above the headline",
+  headline_bn: "Headline (Bengali)",
+  body_bn: "Body (Bengali)",
+  headline_en: "Headline (English)",
+  body_en: "Body (English)",
+  sticker: "Sticker",
+};
+
+const FIELD_MAX: Record<SlideField, number> = {
+  kicker: 28,
+  headline_bn: 96,
+  body_bn: 170,
+  headline_en: 96,
+  body_en: 170,
+  sticker: 26,
+};
+
+function textOf(slide: Record<string, unknown>, field: SlideField): string {
+  const v = slide[field];
+  return typeof v === "string" ? v : "";
+}
+
+function fieldsFor(language: string | null, slide: Record<string, unknown>, index: number): SlideField[] {
+  const fields: SlideField[] = ["kicker"];
+  if (language === "BN") fields.push("headline_bn", "body_bn");
+  else if (language === "EN") fields.push("headline_en", "body_en");
+  else fields.push("headline_bn", "body_bn", "headline_en", "body_en");
+  if (index === 0 && slide.sticker) fields.push("sticker");
+  return fields;
+}
+
+const INPUT_CLASS =
+  "w-full rounded-md border border-white/[0.1] bg-[var(--surface-canvas)] p-2 text-sm text-slate-100";
+
+function EditPanel({
+  detail,
+  brand,
+  onSaved,
+  onCancel,
+}: {
+  detail: CarouselDetail;
+  brand: string;
+  onSaved: () => void;
+  onCancel: () => void;
+}) {
+  const original = detail.slides as Record<string, unknown>[];
+  const [slides, setSlides] = useState<Record<SlideField, string>[]>(() =>
+    original.map((s) => {
+      const out = {} as Record<SlideField, string>;
+      for (const f of SLIDE_FIELDS) out[f] = textOf(s, f);
+      return out;
+    }),
+  );
+  const [caption, setCaption] = useState(detail.caption ?? "");
+  const [hashtags, setHashtags] = useState(detail.hashtags.join(" "));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const setField = (i: number, field: SlideField, value: string) =>
+    setSlides((prev) => prev.map((s, j) => (j === i ? { ...s, [field]: value } : s)));
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    // Only what changed is sent, slide by slide.
+    const edits = original.map((orig, i) => {
+      const changed: Partial<Record<SlideField, string | null>> = {};
+      for (const f of SLIDE_FIELDS) {
+        const now = slides[i][f].trim();
+        if (now !== textOf(orig, f)) changed[f] = now || null;
+      }
+      return changed;
+    });
+    try {
+      await browserApiFetch(
+        `/content/carousels/${encodeURIComponent(detail.id)}?brand=${encodeURIComponent(brand)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            slides: edits,
+            caption,
+            hashtags: hashtags.split(/\s+/).filter(Boolean),
+          }),
+        },
+      );
+      onSaved();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-slate-400">
+        Wrap the key words of a headline in *asterisks* for the gold highlight. Saving runs the
+        checks again and re-renders the slides, and the writer learns from your corrections.
+      </p>
+      {original.map((slide, i) => (
+        <fieldset
+          key={i}
+          className="space-y-2 rounded-lg border border-white/[0.06] bg-[var(--surface-inset)] p-3"
+        >
+          <legend className="px-1 text-xs font-semibold text-slate-300">
+            Slide {i + 1} · {String(slide.role ?? "")}
+          </legend>
+          {fieldsFor(detail.language, slide, i).map((field) => {
+            const id = `edit-${i}-${field}`;
+            return (
+              <div key={field} className="space-y-1">
+                <label htmlFor={id} className="text-[11px] text-slate-400">
+                  {FIELD_LABEL[field]}
+                </label>
+                {field.startsWith("body") ? (
+                  <textarea
+                    id={id}
+                    rows={2}
+                    maxLength={FIELD_MAX[field]}
+                    value={slides[i][field]}
+                    onChange={(e) => setField(i, field, e.target.value)}
+                    className={INPUT_CLASS}
+                  />
+                ) : (
+                  <input
+                    id={id}
+                    maxLength={FIELD_MAX[field]}
+                    value={slides[i][field]}
+                    onChange={(e) => setField(i, field, e.target.value)}
+                    className={INPUT_CLASS}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </fieldset>
+      ))}
+      <div className="space-y-1">
+        <label htmlFor="edit-caption" className="text-xs font-semibold text-slate-300">
+          Caption
+        </label>
+        <textarea
+          id="edit-caption"
+          rows={6}
+          maxLength={2200}
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          className={INPUT_CLASS}
+        />
+      </div>
+      <div className="space-y-1">
+        <label htmlFor="edit-hashtags" className="text-xs font-semibold text-slate-300">
+          Hashtags (separated by spaces)
+        </label>
+        <input
+          id="edit-hashtags"
+          value={hashtags}
+          onChange={(e) => setHashtags(e.target.value)}
+          className={INPUT_CLASS}
+        />
+      </div>
+      {error ? <ErrorBanner title="Could not save the changes" message={error} /> : null}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => void save()}
+          className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+        >
+          <Save className="h-4 w-4" aria-hidden="true" /> {saving ? "Saving…" : "Save and re-check"}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onCancel}
+          className="rounded-md border border-white/[0.1] px-3 py-1.5 text-sm text-slate-300"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function DetailPanel({
   detail,
   brand,
@@ -96,7 +287,9 @@ function DetailPanel({
   const [reason, setReason] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const canApprove = detail.status === "QA_PASSED" && detail.approval_status === "PENDING";
+  const canEdit = detail.approval_status === "PENDING";
 
   const decide = async (decision: "APPROVE" | "REJECT") => {
     setPending(true);
@@ -132,6 +325,19 @@ function DetailPanel({
   };
 
   const checks: QaCheck[] = detail.qa_report?.checks ?? [];
+  if (editing) {
+    return (
+      <EditPanel
+        detail={detail}
+        brand={brand}
+        onCancel={() => setEditing(false)}
+        onSaved={() => {
+          setEditing(false);
+          onDecided();
+        }}
+      />
+    );
+  }
   return (
     <div className="space-y-5">
       <div className="flex gap-3 overflow-x-auto pb-2" aria-label="Slides">
@@ -198,7 +404,7 @@ function DetailPanel({
 
       <div className="space-y-2 rounded-lg border border-white/[0.06] bg-[var(--surface-inset)] p-4">
         <label htmlFor="decision-reason" className="text-xs font-semibold text-slate-300">
-          Note (optional; required context for a rejection helps the next draft)
+          Note (optional). A rejection note is given to the writer for the next drafts.
         </label>
         <textarea
           id="decision-reason"
@@ -219,6 +425,14 @@ function DetailPanel({
           </button>
           <button
             type="button"
+            disabled={!canEdit || pending}
+            onClick={() => setEditing(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.15] px-3 py-1.5 text-sm font-medium text-slate-100 disabled:opacity-40"
+          >
+            <Pencil className="h-4 w-4" aria-hidden="true" /> Edit text
+          </button>
+          <button
+            type="button"
             disabled={detail.approval_status !== "PENDING" || pending}
             onClick={() => void decide("REJECT")}
             className="inline-flex items-center gap-1.5 rounded-md bg-rose-700 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
@@ -227,7 +441,8 @@ function DetailPanel({
           </button>
         </div>
         <p className="text-[11px] text-slate-500">
-          Approving records your decision only. Nothing is posted until publishing (N3) is set up.
+          Approving alone posts nothing: schedule it under Approved, or auto-scheduling (when
+          it&apos;s on) puts it in the next free slot.
         </p>
       </div>
     </div>

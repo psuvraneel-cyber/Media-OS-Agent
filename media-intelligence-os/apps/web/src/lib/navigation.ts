@@ -65,7 +65,7 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     label: "Studio",
     shortDesc: "Upload your own reels, photos and carousels, then approve and schedule them",
     group: "production",
-    targetPhase: "N2 · CLI generation",
+    targetPhase: "Live",
     iconName: "clapperboard",
   },
   {
@@ -74,7 +74,7 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     label: "Assets",
     shortDesc: "Your brand logo, uploaded reels and photos, and rendered carousel slides",
     group: "production",
-    targetPhase: "Phase 7",
+    targetPhase: "Live",
     iconName: "folder-kanban",
   },
   {
@@ -92,7 +92,7 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     label: "Approvals",
     shortDesc: "Human-in-the-loop factual, editorial & visual QA sign-off",
     group: "production",
-    targetPhase: "N2–N3 live",
+    targetPhase: "Live",
     iconName: "shield-check",
   },
   {
@@ -101,7 +101,7 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     label: "Analytics",
     shortDesc: "Platform-reported views and engagement for published posts",
     group: "performance",
-    targetPhase: "N5 · views live",
+    targetPhase: "Views live · learning planned",
     iconName: "line-chart",
   },
   {
@@ -119,7 +119,7 @@ export const NAV_ROUTES: ReadonlyArray<NavRouteItem> = [
     label: "Agents",
     shortDesc: "Celery workers, transactional outbox, persistent scheduler & MCP",
     group: "system",
-    targetPhase: "Phase 4 live",
+    targetPhase: "Live status",
     iconName: "bot",
   },
   {

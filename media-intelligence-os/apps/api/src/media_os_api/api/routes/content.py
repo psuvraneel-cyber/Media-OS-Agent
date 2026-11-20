@@ -3,7 +3,11 @@
 * `GET  /api/v1/content/carousels?brand=<ref>&queue=review|all` — carousels with QA and score.
 * `GET  /api/v1/content/carousels/{id}?brand=<ref>` — one carousel with slides and assets.
 * `GET  /api/v1/content/assets/{id}/file?brand=<ref>` — a rendered slide PNG (read-only volume).
+* `PATCH /api/v1/content/carousels/{id}` (CSRF) — edit the text of a carousel awaiting review;
+  QA runs again and the slides re-render.
 * `POST /api/v1/content/carousels/{id}/decision` (CSRF) — approve or reject.
+* `POST /api/v1/content/carousels/{id}/cancel` (CSRF) — cancel a scheduled post on every platform,
+  or move it to a new time (`move_to`). The worker deletes it in Postiz.
 * `POST /api/v1/content/carousels/{id}/schedule` (CSRF) — schedule an APPROVED carousel to
   Instagram/Facebook at a chosen time (N3). The worker uploads the images and creates the post in
   Postiz; Postiz publishes at that time. Approving alone never publishes anything.
@@ -34,8 +38,10 @@ from media_os_api.publish.service import (
     RESCHEDULABLE_STATES,
     SCHEDULABLE_FORMATS,
     ScheduleRequestError,
+    can_cancel,
     can_schedule,
     package_schedules,
+    request_cancel,
     request_schedule,
 )
 from media_os_api.services import BrandNotFoundError, get_brand
@@ -101,6 +107,7 @@ class CarouselSummary(BaseModel):
     schedules: list[ScheduleEntry] = Field(default_factory=list)
     scheduling: bool = False
     can_schedule: bool = False  # QA-passed, or every earlier platform post failed/cancelled
+    can_cancel: bool = False  # scheduled, and more than 5 minutes before the post time
 
 
 class CarouselDetail(CarouselSummary):
@@ -198,7 +205,9 @@ def _scheduling(db: Session, pkg: ContentPackage) -> bool:
     return (
         db.execute(
             select(JobRun.id).where(
-                JobRun.task_name == "media_os.publish.schedule_carousel",
+                JobRun.task_name.in_(
+                    ("media_os.publish.schedule_carousel", "media_os.publish.cancel_post")
+                ),
                 JobRun.status.in_(("PENDING", "DISPATCHED", "RUNNING", "FAILED_RETRYABLE")),
                 JobRun.payload["content_package_id"].astext == str(pkg.id),
             )
@@ -216,8 +225,9 @@ def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
         "format": pkg.format,
         "status": pkg.status,
         "approval_status": pkg.approval_status,
-        "title": pkg.title,
-        "hook": pkg.hook,
+        # Older carousels stored *emphasis* markers in the title and hook.
+        "title": pkg.title.replace("*", "") if pkg.title else pkg.title,
+        "hook": pkg.hook.replace("*", "") if pkg.hook else pkg.hook,
         "language": tags.get("language"),
         "pillar": tags.get("pillar"),
         "hook_type": tags.get("hook_type"),
@@ -268,6 +278,7 @@ def list_carousels(
                 schedules=_schedules(db, p),
                 scheduling=_scheduling(db, p),
                 can_schedule=can_schedule(p, package_schedules(db, p)),
+                can_cancel=can_cancel(db, p, datetime.now(UTC)),
             )
             for p in pkgs
         ]
@@ -289,6 +300,7 @@ def get_carousel(
             schedules=_schedules(db, pkg),
             scheduling=_scheduling(db, pkg),
             can_schedule=can_schedule(pkg, package_schedules(db, pkg)),
+            can_cancel=can_cancel(db, pkg, datetime.now(UTC)),
             caption=pkg.caption,
             hashtags=list(pkg.hashtags or []),
             alt_text=pkg.description,
@@ -553,3 +565,103 @@ def recheck_carousel(
                 status.HTTP_409_CONFLICT, {"code": "NOT_RECHECKABLE", "message": str(exc)}
             ) from exc
         return CarouselSummary(**_summary(pkg, _slide_assets(db, pkg)))
+
+
+class SlideEdit(BaseModel):
+    """Only the fields sent are changed; send null to clear one."""
+
+    kicker: str | None = Field(default=None, max_length=28)
+    headline_bn: str | None = Field(default=None, max_length=96)
+    body_bn: str | None = Field(default=None, max_length=170)
+    headline_en: str | None = Field(default=None, max_length=96)
+    body_en: str | None = Field(default=None, max_length=170)
+    sticker: str | None = Field(default=None, max_length=26)
+
+
+class CarouselEdit(BaseModel):
+    slides: list[SlideEdit] | None = Field(default=None, max_length=10)
+    caption: str | None = Field(default=None, max_length=2200)
+    hashtags: list[str] | None = Field(default=None, max_length=12)
+
+
+@router.patch("/content/carousels/{package_id}", response_model=CarouselDetail)
+def edit_carousel(
+    package_id: uuid.UUID,
+    payload: CarouselEdit,
+    request: Request,
+    session: Annotated[SessionPayload, Depends(require_csrf)],
+    brand: Annotated[str, Query(min_length=1, max_length=128)],
+) -> CarouselDetail:
+    """Change a carousel's text before approving it. QA runs again and the slides re-render;
+    the carousel comes back to the review queue once the new slides pass."""
+    from media_os_api.carousel.service import EditError, edit_package
+
+    with _db(request) as db:
+        pkg = _package(db, _brand_id(db, brand), package_id)
+        try:
+            edit_package(
+                db,
+                pkg,
+                actor_id=f"owner:{session.subject}",
+                slides=(
+                    [s.model_dump(exclude_unset=True) for s in payload.slides]
+                    if payload.slides is not None
+                    else None
+                ),
+                caption=payload.caption,
+                hashtags=payload.hashtags,
+            )
+        except EditError as exc:
+            code = status.HTTP_409_CONFLICT if exc.code == "NOT_EDITABLE" else 422
+            raise HTTPException(code, {"code": exc.code, "message": str(exc)}) from exc
+    return get_carousel(package_id, request, session, brand)
+
+
+class CancelRequest(BaseModel):
+    move_to: datetime | None = None  # None = just cancel
+    platforms: list[Literal["INSTAGRAM", "FACEBOOK"]] | None = Field(
+        default=None, min_length=1, max_length=2
+    )
+
+
+@router.post(
+    "/content/carousels/{package_id}/cancel", response_model=CarouselSummary, status_code=202
+)
+def cancel_post(
+    package_id: uuid.UUID,
+    payload: CancelRequest,
+    request: Request,
+    session: Annotated[SessionPayload, Depends(require_csrf)],
+    brand: Annotated[str, Query(min_length=1, max_length=128)],
+) -> CarouselSummary:
+    """Cancel a scheduled post (all platforms: Postiz deletes a post everywhere at once), or move
+    it to `move_to`. Works for generated carousels and Studio uploads alike."""
+    with _db(request) as db:
+        brand_id = _brand_id(db, brand)
+        pkg = _package(db, brand_id, package_id)
+        profile = db.get(BrandProfile, brand_id)
+        if profile is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, {"code": "NOT_FOUND", "message": "Brand not found."}
+            )
+        try:
+            request_cancel(
+                db,
+                pkg=pkg,
+                brand=profile,
+                actor_id=f"owner:{session.subject}",
+                move_to=payload.move_to,
+                platforms=list(payload.platforms) if payload.platforms else None,
+            )
+        except ScheduleRequestError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, {"code": exc.code, "message": str(exc)}
+            ) from exc
+        db.flush()
+        return CarouselSummary(
+            **_summary(pkg, _slide_assets(db, pkg)),
+            schedules=_schedules(db, pkg),
+            scheduling=True,
+            can_schedule=False,
+            can_cancel=False,
+        )

@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from media_os_api.carousel.qa import QaReport
-from media_os_api.carousel.schema import CarouselBrief, CarouselDraft
+from media_os_api.carousel.schema import CarouselBrief, CarouselDraft, plain
 from media_os_api.content.taxonomy import validate_for_brand
 from media_os_api.db.models import BrandProfile, ContentPackage, ContentStateTransition
 from media_os_api.jobs.ledger import enqueue_durable_job
 from media_os_api.jobs.routing import CREATIVE_QUEUE
 from media_os_api.services.audit_service import record_audit_event
+from media_os_api.workflow.state_machine import ContentLifecycleStatus, transition_content_status
 
 ACTOR = "system:carousel"
 
@@ -46,8 +50,8 @@ def create_carousel_package(
         status="DRAFTED",
         approval_status="PENDING",
         angle=brief.angle,
-        hook=(first.headline_bn or first.headline_en or "")[:500],
-        title=(first.headline_en or first.headline_bn or "Carousel")[:512],
+        hook=plain(first.headline_bn or first.headline_en or "")[:500],
+        title=plain(first.headline_en or first.headline_bn or "Carousel")[:512],
         caption=compose_caption(draft),
         hashtags=list(draft.hashtags),
         slide_data=[s.model_dump(mode="json") for s in draft.slides],
@@ -109,25 +113,9 @@ class RecheckError(ValueError):
     pass
 
 
-def recheck_package(session: Session, pkg: ContentPackage, *, actor_id: str) -> QaReport:
-    """Re-run text QA with the current rules on a draft that failed earlier; render if it passes.
-
-    The stored caption is the composed Bengali+English text, so it stands in for both caption
-    parts (EN-only posts use it as the English caption only). Slides are unchanged.
-    """
-    from media_os_api.carousel.brand_kit import kit_for
-    from media_os_api.carousel.qa import run_text_qa
-    from media_os_api.content.taxonomy import Language
-
-    if pkg.format != "CAROUSEL" or pkg.status != "DRAFTED" or pkg.approval_status != "PENDING":
-        raise RecheckError("Only pending drafts can be re-checked.")
-    if (pkg.qa_report or {}).get("passed"):
-        raise RecheckError("This draft already passed QA.")
+def _stored_brief(pkg: ContentPackage) -> CarouselBrief:
     tags = dict(pkg.post_tags or {})
-    brand = session.get(BrandProfile, pkg.brand_profile_id)
-    if brand is None:
-        raise RecheckError("Brand not found.")
-    brief = CarouselBrief(
+    return CarouselBrief(
         pillar=tags["pillar"],
         hook_type=tags["hook_type"],
         occasion=tags["occasion"],
@@ -137,16 +125,50 @@ def recheck_package(session: Session, pkg: ContentPackage, *, actor_id: str) -> 
         posting_slot=tags["posting_slot"],
         angle=pkg.angle,
     )
+
+
+def _stored_draft(
+    pkg: ContentPackage,
+    brief: CarouselBrief,
+    *,
+    slides: list[dict[str, Any]] | None = None,
+    caption: str | None = None,
+    hashtags: list[str] | None = None,
+) -> CarouselDraft:
+    """The stored caption is the composed Bengali+English text, so it stands in for both caption
+    parts (EN-only posts use it as the English caption only)."""
+    from media_os_api.content.taxonomy import Language
+
+    text = pkg.caption if caption is None else caption
     english_only = brief.language is Language.EN
-    draft = CarouselDraft.model_validate(
+    return CarouselDraft.model_validate(
         {
-            "slides": pkg.slide_data,
-            "caption_bn": None if english_only else pkg.caption,
-            "caption_en": pkg.caption,
-            "hashtags": pkg.hashtags,
+            "slides": pkg.slide_data if slides is None else slides,
+            "caption_bn": None if english_only else text,
+            "caption_en": text,
+            "hashtags": pkg.hashtags if hashtags is None else hashtags,
             "alt_text_en": pkg.description or "Carousel",
         }
     )
+
+
+def recheck_package(session: Session, pkg: ContentPackage, *, actor_id: str) -> QaReport:
+    """Re-run text QA with the current rules on a draft that failed earlier; render if it passes.
+
+    Slides are unchanged.
+    """
+    from media_os_api.carousel.brand_kit import kit_for
+    from media_os_api.carousel.qa import run_text_qa
+
+    if pkg.format != "CAROUSEL" or pkg.status != "DRAFTED" or pkg.approval_status != "PENDING":
+        raise RecheckError("Only pending drafts can be re-checked.")
+    if (pkg.qa_report or {}).get("passed"):
+        raise RecheckError("This draft already passed QA.")
+    brand = session.get(BrandProfile, pkg.brand_profile_id)
+    if brand is None:
+        raise RecheckError("Brand not found.")
+    brief = _stored_brief(pkg)
+    draft = _stored_draft(pkg, brief)
     qa = run_text_qa(kit_for(brand.slug), brief, draft)
     pkg.qa_report = qa.to_json()
     record_audit_event(
@@ -157,6 +179,153 @@ def recheck_package(session: Session, pkg: ContentPackage, *, actor_id: str) -> 
         target_id=str(pkg.id),
         outcome="SUCCESS" if qa.passed else "QA_FAILED",
         metadata={"failures": [c.name for c in qa.failures]},
+    )
+    if qa.passed:
+        enqueue_render(session, pkg)
+    session.flush()
+    return qa
+
+
+# --------------------------------------------------------------------------- owner edits
+
+EDITABLE_FIELDS = ("kicker", "headline_bn", "body_bn", "headline_en", "body_en", "sticker")
+EDITABLE_STATUSES = ("DRAFTED", "RENDERED", "QA_PASSED")
+EDIT_REASON_PREFIX = "Owner edit: "
+
+
+class EditError(ValueError):
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _clean(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise EditError("Slide text must be text.", code="BAD_EDIT")
+    text = value.strip()
+    return text or None
+
+
+def _quote(text: str | None) -> str:
+    return "'" + " ".join(plain(text or "").split())[:60] + "'" if text else "(empty)"
+
+
+def edit_package(
+    session: Session,
+    pkg: ContentPackage,
+    *,
+    actor_id: str,
+    slides: list[dict[str, Any]] | None = None,
+    caption: str | None = None,
+    hashtags: list[str] | None = None,
+) -> QaReport | None:
+    """Apply the owner's text edits to a carousel awaiting review, re-run text QA and re-render.
+
+    `slides` has one entry per slide (same order); each entry holds only the fields to change
+    (kicker, headlines, bodies, sticker). Roles, visuals and claim ids never change here. Returns
+    the new QA report, or None when nothing changed.
+
+    The version goes up, so the slides render into a new folder and the old render's jobs can
+    never apply to the new text. The edit is recorded on a state transition, and the writer sees
+    it later as one of the owner's notes.
+    """
+    from media_os_api.carousel.brand_kit import kit_for
+    from media_os_api.carousel.qa import Check, run_text_qa
+    from media_os_api.content.uploads import is_owner_upload
+
+    if pkg.format != "CAROUSEL" or is_owner_upload(pkg):
+        raise EditError("Only generated carousels can be edited here.", code="NOT_EDITABLE")
+    if pkg.approval_status != "PENDING" or pkg.status not in EDITABLE_STATUSES:
+        raise EditError("Only carousels waiting for review can be edited.", code="NOT_EDITABLE")
+    brand = session.get(BrandProfile, pkg.brand_profile_id)
+    if brand is None:
+        raise EditError("Brand not found.", code="NOT_FOUND")
+
+    new_slides = [dict(s) for s in (pkg.slide_data or [])]
+    changes: list[str] = []
+    if slides is not None:
+        if len(slides) != len(new_slides):
+            raise EditError(
+                f"Send one entry per slide ({len(new_slides)} slides).", code="BAD_EDIT"
+            )
+        for i, (edit, slide) in enumerate(zip(slides, new_slides, strict=True), 1):
+            unknown = set(edit) - set(EDITABLE_FIELDS)
+            if unknown:
+                raise EditError(f"Can't edit {sorted(unknown)} here.", code="BAD_EDIT")
+            for field_name, value in edit.items():
+                new = _clean(value)
+                if new != slide.get(field_name):
+                    changes.append(
+                        f"slide {i} {field_name} {_quote(slide.get(field_name))} → {_quote(new)}"
+                    )
+                    slide[field_name] = new
+    new_caption = pkg.caption
+    if caption is not None and caption.strip() != (pkg.caption or "").strip():
+        new_caption = caption.strip()
+        changes.append("caption")
+    new_tags = list(pkg.hashtags or [])
+    if hashtags is not None:
+        cleaned = [h.strip() for h in hashtags if h and h.strip()]
+        if cleaned != new_tags:
+            new_tags = cleaned
+            changes.append("hashtags")
+    if not changes:
+        return None
+
+    brief = _stored_brief(pkg)
+    try:
+        draft = _stored_draft(pkg, brief, slides=new_slides, caption=new_caption, hashtags=new_tags)
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        where = ".".join(str(p) for p in err.get("loc", ()))
+        raise EditError(f"{where}: {err.get('msg', 'invalid')}", code="BAD_EDIT") from exc
+    qa = run_text_qa(kit_for(brand.slug), brief, draft)
+    # Keep the writer's novelty verdict: what the post is about didn't change.
+    novelty = [c for c in (pkg.qa_report or {}).get("checks", []) if c.get("name") == "novelty"]
+    qa.checks += [Check.model_validate(c) for c in novelty]
+
+    first = draft.slides[0]
+    pkg.slide_data = [s.model_dump(mode="json") for s in draft.slides]
+    pkg.caption = new_caption
+    pkg.hashtags = new_tags
+    pkg.hook = plain(first.headline_bn or first.headline_en or "")[:500]
+    pkg.title = plain(first.headline_en or first.headline_bn or "Carousel")[:512]
+    pkg.version = (pkg.version or 1) + 1
+    pkg.qa_report = qa.to_json()
+    session.flush()
+    reason = (EDIT_REASON_PREFIX + "; ".join(changes[:4]))[:500]
+    if pkg.status != ContentLifecycleStatus.DRAFTED.value:
+        transition_content_status(
+            session,
+            content_package_id=pkg.id,
+            to_status=ContentLifecycleStatus.DRAFTED,
+            actor_id=actor_id,
+            reason=reason,
+            expected_brand_id=pkg.brand_profile_id,
+        )
+        session.refresh(pkg)
+    else:
+        session.add(
+            ContentStateTransition(
+                content_package_id=pkg.id,
+                brand_profile_id=pkg.brand_profile_id,
+                from_status=pkg.status,
+                to_status=pkg.status,
+                actor_id=actor_id,
+                reason=reason,
+                content_version=pkg.version,
+            )
+        )
+    record_audit_event(
+        session,
+        actor_id=actor_id,
+        action="CAROUSEL_EDITED",
+        target_type="content_package",
+        target_id=str(pkg.id),
+        outcome="SUCCESS" if qa.passed else "QA_FAILED",
+        metadata={"changes": len(changes), "version": pkg.version},
     )
     if qa.passed:
         enqueue_render(session, pkg)

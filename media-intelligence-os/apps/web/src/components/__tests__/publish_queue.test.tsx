@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -130,6 +130,29 @@ describe("PublishQueueView", () => {
     const body = JSON.parse(post?.body ?? "{}");
     expect(body.platforms).toEqual(["INSTAGRAM"]);
     expect(new Date(body.scheduled_at).toISOString()).toBe(body.scheduled_at);
+  });
+
+  it("cancels a scheduled post after confirming", async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      calls.push({ url, method: (init?.method ?? "GET").toUpperCase(), body: init?.body as string });
+      if (url.includes("/cancel")) return json({ ...SCHEDULED, scheduling: true });
+      return json({ items: [{ ...SCHEDULED, can_cancel: true }] });
+    });
+    render(
+      <BrandProvider brands={[BRAND]} initialBrandId={APP}>
+        <PublishQueueView />
+      </BrandProvider>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /Cancel post/ }));
+    expect(screen.getByRole("dialog")).toHaveTextContent(/deleted in Postiz on every channel/);
+    expect(calls.some((c) => c.url.includes("/cancel"))).toBe(false);
+    const dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel post" }));
+    const cancel = calls.find((c) => c.url.includes("/cancel"));
+    expect(cancel?.method).toBe("POST");
+    expect(JSON.parse(cancel?.body ?? "{}")).toEqual({ move_to: null });
   });
 
   it("defaults to the next 19:00 slot at least an hour away", () => {
