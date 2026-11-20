@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from media_os_api.carousel.qa import QaReport
-from media_os_api.carousel.schema import CarouselBrief, CarouselDraft
+from media_os_api.carousel.schema import CarouselBrief, CarouselDraft, plain
 from media_os_api.content.taxonomy import validate_for_brand
 from media_os_api.db.models import BrandProfile, ContentPackage, ContentStateTransition
 from media_os_api.jobs.ledger import enqueue_durable_job
@@ -46,8 +46,8 @@ def create_carousel_package(
         status="DRAFTED",
         approval_status="PENDING",
         angle=brief.angle,
-        hook=(first.headline_bn or first.headline_en or "")[:500],
-        title=(first.headline_en or first.headline_bn or "Carousel")[:512],
+        hook=plain(first.headline_bn or first.headline_en or "")[:500],
+        title=plain(first.headline_en or first.headline_bn or "Carousel")[:512],
         caption=compose_caption(draft),
         hashtags=list(draft.hashtags),
         slide_data=[s.model_dump(mode="json") for s in draft.slides],

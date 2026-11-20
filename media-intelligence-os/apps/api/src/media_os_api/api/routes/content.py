@@ -216,8 +216,9 @@ def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
         "format": pkg.format,
         "status": pkg.status,
         "approval_status": pkg.approval_status,
-        "title": pkg.title,
-        "hook": pkg.hook,
+        # Older carousels stored *emphasis* markers in the title and hook.
+        "title": pkg.title.replace("*", "") if pkg.title else pkg.title,
+        "hook": pkg.hook.replace("*", "") if pkg.hook else pkg.hook,
         "language": tags.get("language"),
         "pillar": tags.get("pillar"),
         "hook_type": tags.get("hook_type"),

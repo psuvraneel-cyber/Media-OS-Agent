@@ -53,6 +53,24 @@ class SystemStatusResponse(BaseModel):
     timestamp_utc: str
 
 
+class ProcessStatusItem(BaseModel):
+    """One Media OS process, with its state worked out from the job ledger."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    state: Literal["running", "idle", "stalled", "down", "off", "unknown"]
+    detail: str
+    last_activity_at: str | None = None
+
+
+class ProcessStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[ProcessStatusItem]
+    checked_at: str
+
+
 class TelemetryEventItem(BaseModel):
     """Sanitized in-memory request trace item."""
 

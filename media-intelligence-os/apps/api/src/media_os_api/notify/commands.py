@@ -26,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from media_os_api.db.models import ContentPackage, JobRun, PublishSchedule
-from media_os_api.jobs.errors import PermanentTaskError, RetryableTaskError
+from media_os_api.jobs.errors import PermanentTaskError
 from media_os_api.notify import messages as msg
 from media_os_api.notify.telegram import TelegramClient, TelegramError, telegram_from_env
 
@@ -235,7 +235,15 @@ def handle_telegram_commands(
             handled += 1
     except TelegramError as exc:
         if exc.retryable:
-            raise RetryableTaskError(str(exc), code=exc.code) from None
+            # A timeout or network blip: the next run (one minute later) polls again anyway, so
+            # this is a normal outcome, not a failure. Keep any offset already advanced, so
+            # commands answered before the blip are never answered twice.
+            return {
+                "offset": offset,
+                "handled": handled,
+                "ignored_other_chats": ignored,
+                "skipped": exc.code,
+            }
         raise PermanentTaskError(str(exc), code=exc.code) from None
     finally:
         client.close()

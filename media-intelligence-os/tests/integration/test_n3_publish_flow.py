@@ -1170,6 +1170,34 @@ def test_bot_answers_the_owner_only_and_remembers_its_place(env: dict[str, Any])
             db.execute(delete(JobRun).where(JobRun.task_name == commands.COMMANDS_TASK))
 
 
+def test_bot_network_blip_is_not_a_failure(env: dict[str, Any]) -> None:
+    from media_os_api.jobs.ledger import enqueue_durable_job
+    from media_os_api.notify import commands
+    from media_os_api.notify.telegram import TelegramError
+
+    class _Flaky(_FakeBot):
+        def get_updates(self, *, offset: int | None = None, limit: int = 50) -> list[Any]:
+            raise TelegramError("timed out", code="TELEGRAM_TIMEOUT", retryable=True)
+
+    f = env["factory"]
+    try:
+        with session_scope(f) as db:
+            job, _ = enqueue_durable_job(
+                db,
+                task_name=commands.COMMANDS_TASK,
+                task_type="NOTIFY",
+                payload={},
+                idempotency_key="test:commands:blip",
+            )
+            out = commands.handle_telegram_commands(db, job, telegram=lambda: _Flaky([]))  # type: ignore[arg-type,return-value]
+        assert out["skipped"] == "TELEGRAM_TIMEOUT" and out["handled"] == 0
+    finally:
+        with session_scope(f) as db:
+            ids = select(JobRun.id).where(JobRun.task_name == commands.COMMANDS_TASK)
+            db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(ids)))
+            db.execute(delete(JobRun).where(JobRun.task_name == commands.COMMANDS_TASK))
+
+
 # ------------------------------------------------------------------ owner reels (Studio)
 
 BRAND_Q = "brand=brand-app-promo"

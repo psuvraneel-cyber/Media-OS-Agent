@@ -95,6 +95,18 @@ export interface SystemStatusResponse {
   timestamp_utc: string;
 }
 
+export interface ProcessStatusItem {
+  key: string;
+  state: "running" | "idle" | "stalled" | "down" | "off" | "unknown";
+  detail: string;
+  last_activity_at?: string | null;
+}
+
+export interface ProcessStatusResponse {
+  items: ProcessStatusItem[];
+  checked_at: string;
+}
+
 export interface TelemetryEventItem {
   timestamp_utc: string;
   request_id: string;
