@@ -31,7 +31,8 @@ accounts on one provider to evade its limits). Nimontron is live on Google Play 
 | Review: edit text before approving; rejection notes and edits steer the writer | Live (20 Nov) |
 | Publishing: cancel and move from Media OS; hosted media cleaned up after publishing | Live (20 Nov) |
 | Analytics: per-post and whole-account numbers, nightly report | Live (descriptive only) |
-| N4 Reels/Shorts engine, N5 learning loop, N6 YouTube, N7 autonomy, Track T | Not started |
+| N5 learning loop: per-post lift at 72 h, per-tag results, learned score, steering, weekly report | Built (21 Nov); verdicts wait for 30 posts per group (`docs/N5_LEARNING_LOOP.md`) |
+| N4 Reels/Shorts engine, N6 YouTube, N7 autonomy, Track T | Not started |
 
 **What the first week of data says (15–19 Nov):** the two owner-uploaded reels averaged ~1,800
 Instagram views each; the eight AI carousels averaged ~4. Facebook reach was close to zero. N4

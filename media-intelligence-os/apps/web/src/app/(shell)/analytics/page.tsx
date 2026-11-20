@@ -3,7 +3,15 @@ import React from "react";
 import { AnalyticsView } from "@/components/views/AnalyticsView";
 import type { PipelineSummary, PostsPage, ViewsReport } from "@/lib/analytics";
 import type { AccountReport } from "@/components/analytics/AccountTotals";
-import { DEFAULT_RANGE, accountPath, pipelinePath, postsPath, viewsPath } from "@/lib/analytics-paths";
+import type { LearningReport } from "@/components/analytics/LearningPanel";
+import {
+  DEFAULT_RANGE,
+  accountPath,
+  learningPath,
+  pipelinePath,
+  postsPath,
+  viewsPath,
+} from "@/lib/analytics-paths";
 import { serverApiGet, type ServerFetchResult } from "@/lib/server-api";
 
 export const dynamic = "force-dynamic";
@@ -27,11 +35,13 @@ export default async function AnalyticsPage({
     : null;
   const pPath = brand ? pipelinePath(brand) : null;
   const aPath = brand ? accountPath(brand) : null;
-  const [views, posts, pipeline, account] = await Promise.all([
+  const learnPath = brand ? learningPath(brand) : null;
+  const [views, posts, pipeline, account, learning] = await Promise.all([
     vPath ? serverApiGet<ViewsReport>(vPath) : Promise.resolve(null),
     lPath ? serverApiGet<PostsPage>(lPath) : Promise.resolve(null),
     pPath ? serverApiGet<PipelineSummary>(pPath) : Promise.resolve(null),
     aPath ? serverApiGet<AccountReport>(aPath) : Promise.resolve(null),
+    learnPath ? serverApiGet<LearningReport>(learnPath) : Promise.resolve(null),
   ]);
   return (
     <AnalyticsView
@@ -39,6 +49,7 @@ export default async function AnalyticsPage({
       initialPosts={seed(lPath, posts)}
       initialPipeline={seed(pPath, pipeline)}
       initialAccount={seed(aPath, account)}
+      initialLearning={seed(learnPath, learning)}
     />
   );
 }

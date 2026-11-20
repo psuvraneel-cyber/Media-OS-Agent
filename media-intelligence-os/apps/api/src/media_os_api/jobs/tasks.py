@@ -37,6 +37,7 @@ from media_os_api.jobs.routing import (
     RESEARCH_SOFT_TIME_LIMIT,
     RESEARCH_TIME_LIMIT,
 )
+from media_os_api.learning.weekly import WEEKLY_TASK, handle_weekly_report
 from media_os_api.notify.commands import COMMANDS_TASK, handle_telegram_commands
 from media_os_api.notify.service import (
     DIGEST_TASK,
@@ -129,6 +130,7 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     SYNC_TASK: handle_sync_status,
     CANCEL_TASK: handle_cancel_post,  # cancel or move a scheduled post (Postiz key)
     CLEANUP_TASK: handle_cleanup_media,  # daily: delete published media from GitHub Pages
+    WEEKLY_TASK: handle_weekly_report,  # Monday 09:00 IST: what worked, what to stop
     SYNC_METRICS_TASK: handle_sync_post_metrics,  # worker only (Postiz credentials)
     ACCOUNT_TASK: handle_sync_account_metrics,  # worker only (Postiz credentials)
     GENERATE_TASK: handle_generate_carousel,  # worker only (AI keys)

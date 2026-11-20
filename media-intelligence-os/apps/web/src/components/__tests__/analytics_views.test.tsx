@@ -11,7 +11,8 @@ vi.mock("next/navigation", () => ({
 
 import { AnalyticsView } from "@/components/views/AnalyticsView";
 import type { PipelineSummary, PostsPage, ViewsReport } from "@/lib/analytics";
-import { accountPath, pipelinePath, postsPath, viewsPath } from "@/lib/analytics-paths";
+import { accountPath, learningPath, pipelinePath, postsPath, viewsPath } from "@/lib/analytics-paths";
+import type { LearningReport } from "@/components/analytics/LearningPanel";
 import { BrandProvider } from "@/lib/brand-context";
 import type { BrandProfileSummary } from "@/lib/types";
 
@@ -173,6 +174,57 @@ const POSTS: PostsPage = {
   items: [POST],
 };
 
+const GROUP = (value: string, n: number, lift: number) => ({
+  value,
+  n,
+  median_lift: lift,
+  avg_views: 100,
+  avg_engagement_rate: 0.05,
+  verdict: "NOT_ENOUGH_DATA" as const,
+  needed: 30 - n,
+});
+
+const LEARNING: LearningReport = {
+  platform: "INSTAGRAM",
+  settings: { min_posts: 30, mature_after_hours: 72, baseline_posts: 20, explore_share: 0.25 },
+  counts: { published: 3, measured: 2, waiting_for_72h: 1 },
+  model: { active: false, n: 2, mae_model: 1.2, mae_baseline: 1.0, rank_corr: null, v0_rank_corr: null },
+  groups: { format: [GROUP("REEL", 1, 22.4), GROUP("CAROUSEL", 1, 0.4)] },
+  winners: {},
+  best_times: { recommended: [], by_hour: [GROUP("18:00", 1, 22.4)], by_slot: [], by_weekday: [] },
+  winning_hooks: [],
+  posts: [
+    {
+      schedule_id: "lp-1",
+      package_id: "p-1",
+      platform: "INSTAGRAM",
+      title: "Nimontron promo 27s",
+      published_at: "2026-11-17T12:30:00Z",
+      mature: true,
+      views_72h: 228,
+      baseline_views: 9,
+      actual_lift: 22.4,
+      predicted_lift: 0.6,
+      v0_score: null,
+      features: { format: "REEL", weekday: "Tue", hour: "18:00" },
+    },
+    {
+      schedule_id: "lp-2",
+      package_id: "p-2",
+      platform: "INSTAGRAM",
+      title: "Too new to measure",
+      published_at: "2026-11-20T13:30:00Z",
+      mature: false,
+      views_72h: null,
+      baseline_views: null,
+      actual_lift: null,
+      predicted_lift: null,
+      v0_score: 82,
+      features: { format: "CAROUSEL" },
+    },
+  ],
+};
+
 function renderView() {
   return render(
     <BrandProvider brands={BRANDS}>
@@ -181,6 +233,7 @@ function renderView() {
         initialPosts={{ path: postsPath(BRAND, "30d", "views", 1, {}, 10), data: POSTS }}
         initialPipeline={{ path: pipelinePath(BRAND), data: PIPELINE }}
         initialAccount={{ path: accountPath(BRAND), data: ACCOUNT }}
+        initialLearning={{ path: learningPath(BRAND), data: LEARNING }}
       />
     </BrandProvider>,
   );
@@ -227,6 +280,7 @@ describe("Views analytics page", () => {
           }}
           initialPipeline={{ path: pipelinePath(BRAND), data: PIPELINE }}
           initialAccount={{ path: accountPath(BRAND), data: ACCOUNT }}
+          initialLearning={{ path: learningPath(BRAND), data: LEARNING }}
         />
       </BrandProvider>,
     );
@@ -281,6 +335,22 @@ describe("Views analytics page", () => {
     await waitFor(() => expect(within(dialog).getAllByText("1,500").length).toBeGreaterThan(0));
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("What's working (learning loop)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows early numbers without verdicts, predicted vs actual, and an untrusted model", () => {
+    renderView();
+    expect(screen.getByText("What's working")).toBeInTheDocument();
+    expect(screen.getAllByText("Not enough data yet (1/30)")).toHaveLength(2);
+    expect(screen.getByText("Not trusted yet")).toBeInTheDocument();
+    const row = screen.getByText("Nimontron promo 27s").closest("tr") as HTMLElement;
+    expect(within(row).getAllByText("22×").length).toBeGreaterThan(0); // actual
+    expect(within(row).getByText("0.6×")).toBeInTheDocument(); // predicted
+    expect(screen.getByText(/Measured once it.s 72 hours old/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing proven yet/)).toBeInTheDocument();
   });
 });
 

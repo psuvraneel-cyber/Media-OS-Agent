@@ -706,6 +706,155 @@ def test_scheduling_refuses_empty_slide_files(env: dict[str, Any], tmp_path: Pat
         assert err.value.code == "SLIDE_MISSING" and "empty" in str(err.value)
 
 
+# ------------------------------------------------------------------ learning loop (N5)
+
+
+def _published_posts(env: dict[str, Any], specs: list[tuple[str, str, int]]) -> list[uuid.UUID]:
+    """Published Instagram posts with metrics: (format, hook, views at 96 h) each, a day apart."""
+    from decimal import Decimal
+
+    from media_os_api.db.models import PostMetricObservation
+
+    now = datetime.now(UTC)
+    made: list[uuid.UUID] = []
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        svc.sync_channels(db, brand, env["postiz"])
+        chan = db.execute(
+            select(ChannelAccount).where(
+                ChannelAccount.brand_profile_id == brand.id, ChannelAccount.platform == "INSTAGRAM"
+            )
+        ).scalar_one()
+        for i, (fmt, hook, views) in enumerate(specs):
+            pkg = ContentPackage(
+                brand_profile_id=brand.id,
+                platform="INSTAGRAM",
+                format=fmt,
+                status="PUBLISHED",
+                approval_status="APPROVED",
+                title=f"Learning post {i}",
+                hashtags=[],
+                slide_data=[],
+                source_manifest=[],
+                # Studio reels have no tags: leave the column unset (SQL NULL), as uploads do.
+                **(
+                    {
+                        "post_tags": {
+                            "hook_type": hook,
+                            "language": "BN_EN",
+                            "pillar": "wedding_season",
+                        }
+                    }
+                    if fmt == "CAROUSEL"
+                    else {}
+                ),
+            )
+            db.add(pkg)
+            db.flush()
+            when = now - timedelta(days=10 - i, hours=1)
+            sched = PublishSchedule(
+                brand_profile_id=brand.id,
+                channel_account_id=chan.id,
+                content_package_id=pkg.id,
+                platform="INSTAGRAM",
+                postiz_post_id=f"learn-{i}",
+                scheduled_at=when,
+                status="PUBLISHED",
+                idempotency_key=f"learn-{uuid.uuid4().hex}",
+            )
+            db.add(sched)
+            db.flush()
+            for hours, share in ((24, 0.5), (96, 1.0)):
+                db.add(
+                    PostMetricObservation(
+                        brand_profile_id=brand.id,
+                        channel_account_id=chan.id,
+                        content_package_id=pkg.id,
+                        publish_schedule_id=sched.id,
+                        platform="INSTAGRAM",
+                        metric_key="views",
+                        value=Decimal(int(views * share)),
+                        observed_at=when + timedelta(hours=hours),
+                        source="test",
+                    )
+                )
+            made.append(sched.id)
+    return made
+
+
+def _drop_observations(env: dict[str, Any]) -> None:
+    from media_os_api.db.models import PostMetricObservation
+
+    with session_scope(env["factory"]) as db:
+        db.execute(delete(PostMetricObservation).where(PostMetricObservation.source == "test"))
+
+
+def test_learning_report_measures_posts_and_holds_back_verdicts(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    from media_os_api.learning.weekly import WEEKLY_TASK, handle_weekly_report
+
+    _published_posts(
+        env,
+        [
+            ("CAROUSEL", "QUESTION", 10),
+            ("CAROUSEL", "MISTAKE", 8),
+            ("CAROUSEL", "QUESTION", 12),
+            ("REEL", "", 300),
+            ("CAROUSEL", "MISTAKE", 9),
+        ],
+    )
+    try:
+        res = client.get(f"/api/v1/analytics/learning?{BRAND_Q}")
+        assert res.status_code == 200, res.text
+        r = res.json()
+        assert r["counts"] == {"published": 5, "measured": 5, "waiting_for_72h": 0}
+        reel = next(p for p in r["posts"] if p["features"]["format"] == "REEL")
+        # Views at 72 h are interpolated between the 24 h (150) and 96 h (300) syncs.
+        assert reel["views_72h"] == 250 and reel["actual_lift"] > 10
+        assert reel["predicted_lift"] is not None
+        formats = {g["value"]: g for g in r["groups"]["format"]}
+        assert formats["REEL"]["verdict"] == "NOT_ENOUGH_DATA" and formats["REEL"]["needed"] == 29
+        assert r["model"]["active"] is False and r["winners"] == {}
+        assert r["best_times"]["recommended"] == []
+
+        with session_scope(env["factory"]) as db:
+            job = JobRun(task_name=WEEKLY_TASK, payload={"trigger": "manual"})
+            out = handle_weekly_report(db, job)
+        assert out["sent"] == ["brand-app-promo"]
+        [alert] = _alerts(env, "weekly")
+        text = alert.payload["text"]
+        assert "Weekly insights" in text and "No firm conclusions yet" in text
+    finally:
+        _drop_observations(env)
+
+
+def test_weekly_report_only_goes_out_on_mondays(env: dict[str, Any]) -> None:
+    from media_os_api.learning.weekly import WEEKLY_TASK, handle_weekly_report
+
+    tuesday = datetime(2026, 11, 24, 3, 30, tzinfo=UTC)  # 09:00 IST on a Tuesday
+    with session_scope(env["factory"]) as db:
+        out = handle_weekly_report(
+            db, JobRun(task_name=WEEKLY_TASK, payload={"trigger": "schedule"}), now=tuesday
+        )
+    assert out == {"sent": [], "skipped": "not Monday"}
+
+
+def test_generated_drafts_carry_strategy_and_a_learned_prediction(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid = _pending_carousel(env, client, monkeypatch, "test:learning:1")
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None
+        learned = (pkg.score or {})["learned"]
+        assert learned["version"] == "learned-v1" and learned["active"] is False
+        assert learned["predicted_lift"] > 0
+        # No group has enough posts to be a proven winner, so nothing is steered.
+        assert (pkg.post_tags or {})["strategy"] == "EXPLORE"
+
+
 # ------------------------------------------------------------------ review fixes (bugs 1-4)
 
 

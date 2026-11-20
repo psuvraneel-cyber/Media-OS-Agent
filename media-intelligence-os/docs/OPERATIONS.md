@@ -126,6 +126,13 @@ Migration `0004_add_brand_topic_assignments` establishes the multi-brand editori
   - **Choosing a design:** Generate posts offers the built-in design, any ready and active set, or "Let Media OS choose" (also what daily drafts use). Automatic choice prefers sets tagged for the post's occasion, otherwise rotates the least recently used of untagged sets and the built-in design. Sets marked "manual only" are never chosen automatically.
   - **Snapshots:** the chosen design is copied into the post's `source_manifest`, so editing or deleting a set never changes posts already written. A missing image falls back to the built-in design for that slide, with a render warning.
 
+### Learning loop (N5): what's working, learned score, weekly report
+
+- **Analytics → What's working:** every post measured at 72 hours against the account's usual post (lift), results per format, topic, hook, language, occasion, design, time of day and weekday, predicted vs actual for every post, best posting times. A verdict needs 30 measured posts per group (`LEARNING_MIN_POSTS`); below that it reads "Not enough data yet".
+- **Generation:** about 25 % of generated posts are experiments (EXPLORE); the rest fill blank fields with proven winners (EXPLOIT) once any exist. The best hooks are given to the writer as style examples. Each draft saves its learned prediction in `score.learned`.
+- **Weekly report:** `learning.weekly_report`, Mondays 09:00 IST on Telegram.
+- Details: `docs/N5_LEARNING_LOOP.md`.
+
 ### Studio: the owner's own reels, photos and carousels, brand logo, Sync now
 
 - **Photos and carousels.** Images (PNG, JPEG or WebP, up to 8 MB each) are staged one by one, then become one post: 1 image is a photo post (`POST`), 2–10 a carousel, in the order the owner set. Checks flag shapes Instagram would crop. At publish time images are converted to JPEG with phone rotation applied, and capped at 2160 px. Owner uploads are marked by `qa_report.version` starting `owner-`, so they're reviewed in Studio and kept out of the generated-carousel review queue.

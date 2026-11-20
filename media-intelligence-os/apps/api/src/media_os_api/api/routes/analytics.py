@@ -139,3 +139,29 @@ def get_account(
         report = account_report(db, _brand_id(db, brand), window)
     response.headers["Cache-Control"] = CACHE
     return report
+
+
+@router.get("/analytics/learning")
+def get_learning(
+    request: Request,
+    response: Response,
+    _session: Annotated[SessionPayload, Depends(require_session)],
+    brand: BrandParam,
+    platform: Annotated[Literal["INSTAGRAM", "FACEBOOK"], Query()] = "INSTAGRAM",
+) -> dict[str, Any]:
+    """What's working: per-tag results, the learned score with predicted vs actual for every
+    post, best posting times and the hooks given to the writer as examples."""
+    from media_os_api.learning.service import learning_report
+    from media_os_api.services import BrandNotFoundError, get_brand
+
+    with _db(request) as db:
+        brand_id = _brand_id(db, brand)
+        try:
+            profile = get_brand(db, str(brand_id))
+        except BrandNotFoundError as exc:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, {"code": "NOT_FOUND", "message": "Brand not found."}
+            ) from exc
+        report = learning_report(db, profile, platform=platform)
+    response.headers["Cache-Control"] = CACHE
+    return report

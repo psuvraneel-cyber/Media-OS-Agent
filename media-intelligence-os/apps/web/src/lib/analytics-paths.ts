@@ -44,6 +44,10 @@ export function assetUrl(brand: string, assetId: string): string {
   return `/api/v1/content/assets/${encodeURIComponent(assetId)}/file?${buildQuery({ brand })}`;
 }
 
+export function learningPath(brand: string): string {
+  return `/analytics/learning?${buildQuery({ brand })}`;
+}
+
 export function accountPath(brand: string, window: "7" | "30" = "7"): string {
   return `/analytics/account?${buildQuery({ brand, window })}`;
 }
