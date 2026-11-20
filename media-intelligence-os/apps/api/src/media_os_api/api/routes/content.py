@@ -5,6 +5,8 @@
 * `GET  /api/v1/content/assets/{id}/file?brand=<ref>` — a rendered slide PNG (read-only volume).
 * `PATCH /api/v1/content/carousels/{id}` (CSRF) — edit the text of a carousel awaiting review;
   QA runs again and the slides re-render.
+* `POST /api/v1/content/carousels/{id}/rerender` (CSRF) — render the slides again (lost files,
+  or a failed render check).
 * `POST /api/v1/content/carousels/{id}/decision` (CSRF) — approve or reject.
 * `POST /api/v1/content/carousels/{id}/cancel` (CSRF) — cancel a scheduled post on every platform,
   or move it to a new time (`move_to`). The worker deletes it in Postiz.
@@ -108,6 +110,7 @@ class CarouselSummary(BaseModel):
     scheduling: bool = False
     can_schedule: bool = False  # QA-passed, or every earlier platform post failed/cancelled
     can_cancel: bool = False  # scheduled, and more than 5 minutes before the post time
+    slides_missing: int = 0  # rendered slides missing or empty on disk (re-render to fix)
 
 
 class CarouselDetail(CarouselSummary):
@@ -217,6 +220,8 @@ def _scheduling(db: Session, pkg: ContentPackage) -> bool:
 
 
 def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
+    from media_os_api.carousel.service import missing_slides
+
     tags = pkg.post_tags or {}
     qa = pkg.qa_report or {}
     score = pkg.score or {}
@@ -228,6 +233,7 @@ def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
         # Older carousels stored *emphasis* markers in the title and hook.
         "title": pkg.title.replace("*", "") if pkg.title else pkg.title,
         "hook": pkg.hook.replace("*", "") if pkg.hook else pkg.hook,
+        "slides_missing": missing_slides(assets) if pkg.format == "CAROUSEL" else 0,
         "language": tags.get("language"),
         "pillar": tags.get("pillar"),
         "hook_type": tags.get("hook_type"),
@@ -458,6 +464,16 @@ def decide_carousel(
                         "message": "Only QA-passed carousels can be approved.",
                     },
                 )
+            from media_os_api.carousel.service import missing_slides
+
+            if pkg.format == "CAROUSEL" and missing_slides(_slide_assets(db, pkg)):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    {
+                        "code": "SLIDES_MISSING",
+                        "message": "Some slide images are missing. Re-render the slides first.",
+                    },
+                )
             pkg.approval_status = "APPROVED"
         else:
             pkg.approval_status = "REJECTED"
@@ -665,3 +681,24 @@ def cancel_post(
             can_schedule=False,
             can_cancel=False,
         )
+
+
+@router.post("/content/carousels/{package_id}/rerender", response_model=CarouselSummary)
+def rerender_carousel(
+    package_id: uuid.UUID,
+    request: Request,
+    session: Annotated[SessionPayload, Depends(require_csrf)],
+    brand: Annotated[str, Query(min_length=1, max_length=128)],
+) -> CarouselSummary:
+    """Render the slides again. Use when slide images are missing or a render check failed."""
+    from media_os_api.carousel.service import EditError, rerender_package
+
+    with _db(request) as db:
+        pkg = _package(db, _brand_id(db, brand), package_id)
+        try:
+            rerender_package(db, pkg, actor_id=f"owner:{session.subject}")
+        except EditError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, {"code": exc.code, "message": str(exc)}
+            ) from exc
+        return CarouselSummary(**_summary(pkg, _slide_assets(db, pkg)))

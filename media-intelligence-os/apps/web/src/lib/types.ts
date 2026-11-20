@@ -266,6 +266,7 @@ export interface CarouselSummary {
   scheduling: boolean;
   can_schedule: boolean;
   can_cancel?: boolean;
+  slides_missing?: number;
 }
 
 export interface ScheduleEntry {

@@ -41,12 +41,13 @@ from media_os_api.db import (
     create_session_factory,
     session_scope,
 )
-from media_os_api.jobs.errors import PolicyRefusalError, RetryableTaskError
+from media_os_api.jobs.errors import PermanentTaskError, PolicyRefusalError, RetryableTaskError
 from media_os_api.main import create_app
 from media_os_api.notify import service as notify
 from media_os_api.publish import service as svc
 from media_os_api.publish.media_host import HostedFile
 from media_os_api.publish.postiz import Integration
+from media_os_api.workflow.state_machine import ContentLifecycleStatus, transition_content_status
 
 pytestmark = pytest.mark.integration
 PILLARS = ["wedding_season", "how_it_works", "wording_help", "design_showcase", "other_occasions"]
@@ -606,6 +607,96 @@ def test_media_paths_are_matched_to_their_post() -> None:
         f"brand-app-promo/2026-11/{uuid.uuid4()}/v1/a.jpg", "brand-app-promo", pid
     )
     assert not belongs_to("index.html", "brand-app-promo", pid)
+
+
+# ------------------------------------------------------------------ lost slides and re-render
+
+
+def test_lost_slide_files_are_flagged_block_approval_and_can_be_rerendered(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from media_os_api.carousel.render_job import RENDER_TASK
+
+    pid = _pending_carousel(env, client, monkeypatch, "test:rerender:1")
+    rel = Path("carousels") / pid / "v1"
+    (tmp_path / rel).mkdir(parents=True)
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None
+        for i in range(1, 4):
+            # Docker stopped before the data reached the disk: the files are empty.
+            (tmp_path / rel / f"slide-{i:02d}.png").write_bytes(b"")
+            db.add(
+                Asset(
+                    brand_profile_id=pkg.brand_profile_id,
+                    content_package_id=pkg.id,
+                    asset_type="CAROUSEL_SLIDE",
+                    local_path=f"{rel.as_posix()}/slide-{i:02d}.png",
+                    mime_type="image/png",
+                    file_size=900_000,
+                    checksum="x",
+                    width=1080,
+                    height=1350,
+                    status="ACTIVE",
+                )
+            )
+        # The first render finished (its job is done) but the files were lost afterwards.
+        for job in db.execute(
+            select(JobRun).where(
+                JobRun.task_name == RENDER_TASK, JobRun.payload["content_package_id"].astext == pid
+            )
+        ).scalars():
+            job.status = "SUCCEEDED"
+        transition_content_status(
+            db, content_package_id=pkg.id, to_status=ContentLifecycleStatus.RENDERED, actor_id="t"
+        )
+        transition_content_status(
+            db, content_package_id=pkg.id, to_status=ContentLifecycleStatus.QA_PASSED, actor_id="t"
+        )
+
+    url = f"/api/v1/content/carousels/{pid}"
+    detail = client.get(f"{url}?{BRAND_Q}").json()
+    assert detail["status"] == "QA_PASSED" and detail["slides_missing"] == 3
+    queue = client.get(f"/api/v1/content/carousels?{BRAND_Q}").json()["items"]
+    assert next(i for i in queue if i["id"] == pid)["slides_missing"] == 3
+
+    approve = client.post(f"{url}/decision?{BRAND_Q}", json={"decision": "APPROVE"})
+    assert approve.status_code == 409 and approve.json()["error"]["code"] == "SLIDES_MISSING"
+
+    res = client.post(f"{url}/rerender?{BRAND_Q}")
+    assert res.status_code == 200 and res.json()["status"] == "DRAFTED"
+    again = client.post(f"{url}/rerender?{BRAND_Q}")
+    assert again.status_code == 409 and again.json()["error"]["code"] == "ALREADY_RENDERING"
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None and pkg.version == 2
+        keys = set(
+            db.execute(
+                select(JobRun.idempotency_key).where(
+                    JobRun.task_name == RENDER_TASK,
+                    JobRun.payload["content_package_id"].astext == pid,
+                )
+            ).scalars()
+        )
+        assert f"render:{pid}:v2" in keys
+
+
+def test_scheduling_refuses_empty_slide_files(env: dict[str, Any], tmp_path: Path) -> None:
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, env["pid"])
+        assert pkg is not None
+        first = (
+            db.execute(
+                select(Asset).where(Asset.content_package_id == pkg.id).order_by(Asset.local_path)
+            )
+            .scalars()
+            .first()
+        )
+        assert first is not None
+        (tmp_path / first.local_path).write_bytes(b"")
+        with pytest.raises(PermanentTaskError) as err:
+            svc._slides(db, pkg)
+        assert err.value.code == "SLIDE_MISSING" and "empty" in str(err.value)
 
 
 # ------------------------------------------------------------------ review fixes (bugs 1-4)

@@ -54,6 +54,30 @@ async () => {
 """
 
 
+def write_durably(path: Path, data: bytes) -> None:
+    """Write a file so it survives the Docker VM stopping right afterwards.
+
+    Without fsync the data can sit in the page cache; when Docker Desktop stopped uncleanly, the
+    slides of a carousel that had already passed QA were left as 0-byte files. Write to a temp
+    file, flush it to disk, rename it into place, then flush the folder so the rename sticks."""
+    if not data:
+        raise OSError(f"Refusing to write an empty file: {path.name}")
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    tmp.replace(path)
+    try:
+        fd = os.open(path.parent, os.O_RDONLY)
+    except OSError:  # some filesystems don't allow opening a folder
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 @dataclass(frozen=True)
 class RenderedSlide:
     index: int
@@ -178,11 +202,9 @@ def render_carousel(
                 if visual and ctx.image_uri is None:
                     problems.append(f"visual '{visual.id}' not found in brand assets")
                 png = out_dir / f"slide-{i:02d}.png"
-                tmp = png.with_suffix(".tmp.png")
-                page.screenshot(path=str(tmp), type="png", full_page=False)
-                tmp.replace(png)
+                data = page.screenshot(type="png", full_page=False)
+                write_durably(png, data)
                 html_path.unlink(missing_ok=True)
-                data = png.read_bytes()
                 rendered.append(
                     RenderedSlide(
                         index=i,
