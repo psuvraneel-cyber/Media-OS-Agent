@@ -20,8 +20,17 @@
 4. `media_os.publish.sync_status` (every 15 min once enabled) reads post states back from Postiz:
    PUBLISHED (with the post link), FAILED, or CANCELLED (deleted in Postiz).
 
-To cancel a scheduled post, delete it in Postiz (http://localhost:4007); the next sync marks it
-CANCELLED.
+5. **Cancel or move** (Approved list → *Cancel post* / *Move*): job
+   `media_os.publish.cancel_post` deletes the post in Postiz (every channel at once: Postiz
+   deletes by group), marks its schedules CANCELLED, and for a move schedules it again at the new
+   time through the normal checks (if that fails, the owner is told on Telegram and picks another
+   time). Refused in the last 5 minutes before the post time. Deleting a post directly in Postiz
+   still works; the next sync marks it CANCELLED.
+6. **Media clean-up** (`publish.cleanup_media`, daily 03:30 IST, migration 0016): deletes the
+   hosted slides and reels of posts that settled at least 3 days ago (15 days when a platform
+   failed, because a manual retry in Postiz downloads the same files), in one commit. Instagram
+   and Facebook keep their own copies; rescheduling uploads the files again. Each cleaned post
+   gets a `MEDIA_UNHOSTED` audit event.
 
 ## Configuration (worker only; never in API/web/creative)
 

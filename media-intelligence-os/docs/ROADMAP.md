@@ -19,15 +19,23 @@ failover across *different* providers when one tier's quota is used up (never mu
 accounts on one provider to evade its limits). Nimontron is live on Google Play (34 installs as of
 2026-11-14).
 
-## Where we are
+## Where we are (updated 2026-11-20)
 
 | Area | Status |
 |---|---|
 | Foundation: Docker stack, PostgreSQL, Redis, jobs/outbox/scheduler, auth, multi-brand schema | Done |
-| Postiz v2.25.3 running separately | Done (no social accounts connected) |
-| Research: source registry, safe HTTP, runner (M1–M3) | Done |
-| Research connectors | Hacker News ✅ · arXiv ✅ · OpenAI News ✅ · GitHub ✅ · Hugging Face ✅ — **all five live-verified** |
-| Content generation, rendering, QA, scoring, publishing, analytics, learning | Not started |
+| Postiz v2.25.3 running separately | Done; Instagram and the Facebook Page connected |
+| Research: registry, safe HTTP, five live-verified connectors | Built; all sources **off**, not yet feeding content |
+| N0–N3: brand onboarding, free-tier AI, carousels with QA and review, publishing | Live since 15 Nov 2026 |
+| Studio: owner reels, photos and carousels; autopilot (daily drafts, auto-schedule); design templates | Live |
+| Review: edit text before approving; rejection notes and edits steer the writer | Live (20 Nov) |
+| Publishing: cancel and move from Media OS; hosted media cleaned up after publishing | Live (20 Nov) |
+| Analytics: per-post and whole-account numbers, nightly report | Live (descriptive only) |
+| N4 Reels/Shorts engine, N5 learning loop, N6 YouTube, N7 autonomy, Track T | Not started |
+
+**What the first week of data says (15–19 Nov):** the two owner-uploaded reels averaged ~1,800
+Instagram views each; the eight AI carousels averaged ~4. Facebook reach was close to zero. N4
+(video) and N5 (learning from results) are therefore the next priorities.
 
 ## Sequence
 

@@ -1,6 +1,7 @@
 # Handoff: Media OS current state
 
-**Updated:** 15 Nov 2026 (main at `e3e8bd9`, PR #17).
+**Updated:** 20 Nov 2026. Sections 1, 3 and 5 reflect the week-1 fixes branch
+(`claude/week1-fixes`); the rest is from 15 Nov and still accurate unless noted.
 **Owner goal:** market the Nimontron Android app on Instagram and Facebook, and later on YouTube.
 Carousels are written by free-tier AI, checked automatically, approved by the owner, and
 published through Postiz. Constraints:
@@ -19,8 +20,10 @@ published through Postiz. Constraints:
 | N1 free-tier AI router | Live. Gemini → Groq → OpenRouter (`:free`) → Cloudflare, with automatic failover. |
 | N2 carousels → review | Live. Writer (BN / BN_EN / EN), design v2 renderer, text and render QA, score v0, review queue. |
 | N3 publishing | Live. GitHub Pages image hosting → Postiz → Instagram and Facebook; status sync every 15 min. |
-| First real post | **Scheduled for 15 Nov 2026, 19:00 IST** on Instagram and Facebook: the bilingual "বিয়ের কার্ডে দেরি? নিজেই বানান নিমন্ত্রণ।" (package `deacb4f5`). |
-| Approved, not yet scheduled | 5 carousels (2 in the old design, 3 in the new design). |
+| Posting | Live since 15 Nov. By 19 Nov: 8 carousels and 2 owner reels published on Instagram and Facebook. |
+| Results so far | Reels ≈1,800 Instagram views each; carousels ≈4; Facebook ≈0. Video is the priority. |
+| Studio, autopilot, design templates | Live: own uploads, Generate button, daily drafts (08:00 IST), auto-scheduling, posts per day. |
+| Review and publishing (20 Nov) | Edit text before approving; rejection notes and edits steer the writer; cancel or move a post from Media OS; daily clean-up of hosted media; cross-language repeat check; live process status on the Agents page. |
 
 Next on the roadmap (`docs/ROADMAP.md`):
 1. **Scheduled generation:** a daily job that drafts carousels from the content calendar into the review queue.
@@ -49,7 +52,8 @@ Next on the roadmap (`docs/ROADMAP.md`):
 
 - **Media OS stack** (`infra/docker/compose.app.yml`, env `C:\Media OS Agent\media-os-runtime\.env`):
   - containers: `media-os-{api,worker,scheduler,web,creative,postgres,redis}`;
-  - the database is at migration `0007_facebook_platform`;
+  - the database is at migration `0015_design_templates`; the week-1 fixes add
+    `0016_media_cleanup` (one schedule row, no table changes), so back up and migrate on deploy;
   - rebuild and deploy with `docker compose --env-file "C:\Media OS Agent\media-os-runtime\.env" -f infra/docker/compose.app.yml build|up -d --no-deps <services>`;
   - migrate with `... run --rm --no-deps media-os-api alembic upgrade head`;
   - always back up first with `scripts/backup_db.py` and `scripts/restore_verify.py` (dumps go to `C:\Media OS Agent\media-os-backups`; latest `media_os_20261114T195350Z.dump`).
@@ -72,7 +76,8 @@ Next on the roadmap (`docs/ROADMAP.md`):
   - its compose file now reads those values from `.env`; a backup is in `postiz-runtime/backups/`;
   - channels connected: Instagram `@com.nimontron.app` and the Facebook Page, both "Nimontron: Bengali Invitations".
 - **Image hosting:** public repo `psuvraneel-cyber/nimontron-media` on GitHub Pages, served at `https://psuvraneel-cyber.github.io/nimontron-media/`. It is separate from the legal site `nimontron-site`. The token is fine-grained, limited to that repo with Contents read/write, and expires in about a year.
-- **Schedules:** `publish.sync_status` is **enabled**; the 5 `research.fetch.*` schedules are disabled.
+- **Schedules:** `publish.sync_status`, `content.daily_drafts` and (after 0016)
+  `publish.cleanup_media` are **enabled**; the 5 `research.fetch.*` schedules are disabled.
 - **Rollback image tags:** `rollback-pre-n3`, `rollback-pre-n2-design`, `rollback-pre-n2`, `rollback-pre-n1` (api and web; creative has `rollback-pre-n2-design`).
 - **Docker Desktop sometimes stops on its own.** Restart it from `C:\Users\Sauvraneel Paul\AppData\Local\Programs\DockerDesktop\Docker Desktop.exe`. The PC and Docker must be running at post times, because Postiz publishes locally.
 
@@ -103,11 +108,13 @@ Next on the roadmap (`docs/ROADMAP.md`):
 
 ## 5. Open items and known issues
 
-1. **First post outcome:** check after 19:00 IST on 15 Nov that the dashboard shows **Published** with a link. If it shows **Failed**, check the error on the post in Postiz. The Meta app in Development mode may need adjusting.
+1. **Carousels barely reach anyone** (≈4 views each vs ≈1,800 for reels). Next: N4 reels engine
+   and N5 learning loop.
 2. **More card renders wanted:** only two clean cards exist (Muslim wedding, annaprashan). Exports from the app (Hindu wedding, gaye holud, a premium design, puja) would vary the posts. Suggested folder: `C:\nimontron\store\marketing\`.
 3. **Old-design approved carousels:** `3a71311d` and `13e99ba8` can be posted, or regenerated in design v2.
 4. **Creative image size:** 3.76 GB because the Playwright base ships three browsers; it can be trimmed.
-5. **Dashboard hook text:** the hook field stores `*emphasis*` markers, which show as asterisks in the queue list (cosmetic).
+5. ~~Dashboard hook text showed `*emphasis*` asterisks~~: fixed 20 Nov (new posts store plain
+   titles; older ones are shown without the markers).
 6. **Phase 5 follow-ups:** GitHub new-repo search mode, a Hugging Face brand-safety filter, ranking OpenAI case studies lower, persisting source metrics.
 7. **Local hook quirk:** the pre-commit manifest hook needs `MEDIA_OS_WORKSPACE_ROOT="C:/Media OS Agent"` when committing from a worktree.
 
