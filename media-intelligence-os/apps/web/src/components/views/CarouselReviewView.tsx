@@ -77,9 +77,11 @@ function QueueRow({
           <Badge tone="info">{LANGUAGE_LABEL[item.language ?? ""] ?? item.language ?? "—"}</Badge>
           {item.slides_missing ? (
             <Badge tone="blocked">Slides missing</Badge>
+          ) : item.render_failed ? (
+            <Badge tone="blocked">Render failed</Badge>
           ) : item.status === "RENDERED" && item.qa_passed === false ? (
             <Badge tone="blocked">Render check failed</Badge>
-          ) : item.status === "DRAFTED" && item.qa_passed !== false ? (
+          ) : item.status === "DRAFTED" && item.qa_passed !== false && !item.render_failed ? (
             <Badge tone="prototype">Rendering…</Badge>
           ) : (
             <Badge tone={item.status === "QA_PASSED" ? "live" : "disabled"}>{item.status}</Badge>
@@ -353,7 +355,7 @@ function DetailPanel({
 
   const checks: QaCheck[] = detail.qa_report?.checks ?? [];
   const renderFailures = checks.filter((c) => c.name.startsWith("render_") && c.status === "FAIL");
-  const slidesMissing = (detail.slides_missing ?? 0) > 0;
+  const slidesMissing = (detail.slides_missing ?? 0) > 0 || Boolean(detail.render_failed);
   if (editing) {
     return (
       <EditPanel
@@ -372,9 +374,9 @@ function DetailPanel({
       {slidesMissing ? (
         <div className="space-y-2 rounded-lg border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100">
           <p>
-            {detail.slides_missing} of {detail.assets.length} slide images are missing or empty on
-            disk (usually because Docker stopped while they were being saved). Render them again;
-            the text stays as it is.
+            {detail.render_failed
+              ? "Rendering the slides failed (the renderer stopped or crashed). Render them again; the text stays as it is."
+              : `${detail.slides_missing} slide image(s) are missing or empty on disk (usually because Docker stopped while they were being saved). Render them again; the text stays as it is.`}
           </p>
           <button
             type="button"
@@ -418,7 +420,7 @@ function DetailPanel({
               Re-check with latest rules
             </button>
           </div>
-        ) : detail.assets.length === 0 ? (
+        ) : detail.assets.length === 0 && detail.render_failed ? null : detail.assets.length === 0 ? (
           <p className="text-xs text-slate-400">
             Slides are rendering. This page checks again every few seconds.
           </p>
@@ -530,7 +532,9 @@ export function CarouselReviewView() {
   }, []);
 
   // While a carousel is rendering, look again every 8 s so it appears without a click.
-  const rendering = (items ?? []).some((i) => i.status === "DRAFTED" && i.qa_passed !== false);
+  const rendering = (items ?? []).some(
+    (i) => i.status === "DRAFTED" && i.qa_passed !== false && !i.render_failed,
+  );
   useEffect(() => {
     if (!rendering) return;
     const t = setInterval(() => setReloadKey((k) => k + 1), 8000);
