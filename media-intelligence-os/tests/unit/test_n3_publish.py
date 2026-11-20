@@ -30,6 +30,7 @@ class FakeGitHub:
         self.same_tree = same_tree
         self.live_after = live_after
         self.public_hits = 0
+        self.listing: list[dict[str, Any]] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content) if request.content else None
@@ -45,6 +46,8 @@ class FakeGitHub:
                 return httpx.Response(201, json={"sha": f"blob{len(self.calls)}"})
             if path == "/git/trees":
                 return httpx.Response(201, json={"sha": "tree0" if self.same_tree else "tree1"})
+            if path == "/git/trees/tree0":
+                return httpx.Response(200, json={"truncated": False, "tree": self.listing})
             if path == "/git/commits":
                 return httpx.Response(201, json={"sha": "commit1"})
             if path == "/git/refs/heads/main":
@@ -83,6 +86,27 @@ def test_publish_makes_one_commit_with_all_files() -> None:
     assert tree["base_tree"] == "tree0" and len(tree["tree"]) == 2
     assert [c[0] for c in fake.calls if c[1].endswith("/git/commits")] == ["POST"]
     assert any(c[0] == "PATCH" for c in fake.calls)
+
+
+def test_remove_matching_deletes_only_matching_files_in_one_commit() -> None:
+    fake = FakeGitHub()
+    fake.listing = [
+        {"path": "brand", "type": "tree"},
+        {"path": "brand/2026-11/p1/v1/slide-01.jpg", "type": "blob"},
+        {"path": "brand/2026-11/p1/v1/slide-02.jpg", "type": "blob"},
+        {"path": "brand/2026-11/p2/v1/reel.mp4", "type": "blob"},
+        {"path": "index.html", "type": "blob"},
+    ]
+    gone = host(fake).remove_matching(lambda p: "/p1/" in p, "clean")
+    assert gone == ["brand/2026-11/p1/v1/slide-01.jpg", "brand/2026-11/p1/v1/slide-02.jpg"]
+    tree = next(c for c in fake.calls if c[0] == "POST" and c[1].endswith("/git/trees"))[2]
+    assert tree["base_tree"] == "tree0"
+    assert [e["sha"] for e in tree["tree"]] == [None, None]  # null sha deletes the file
+    assert any(c[0] == "PATCH" for c in fake.calls)
+
+    nothing = FakeGitHub()
+    assert host(nothing).remove_matching(lambda p: False, "clean") == []
+    assert not any(c[0] in ("POST", "PATCH") for c in nothing.calls)
 
 
 def test_identical_content_skips_the_commit() -> None:

@@ -63,6 +63,7 @@ def _db_url() -> str:
 class FakeHost:
     def __init__(self) -> None:
         self.published: list[tuple[str, bytes]] = []
+        self.removed: list[str] = []
 
     def publish(self, files: list[tuple[str, bytes]], message: str) -> list[HostedFile]:
         self.published.extend(files)
@@ -70,6 +71,12 @@ class FakeHost:
 
     def wait_until_live(self, files: list[HostedFile], **_: Any) -> None:
         return None
+
+    def remove_matching(self, wanted: Any, message: str) -> list[str]:
+        gone = sorted({p for p, _ in self.published if wanted(p)})
+        self.published = [(p, d) for p, d in self.published if p not in gone]
+        self.removed.extend(gone)
+        return gone
 
     def close(self) -> None:
         return None
@@ -534,6 +541,71 @@ def test_cant_cancel_in_the_last_minutes(env: dict[str, Any]) -> None:
         with pytest.raises(svc.ScheduleRequestError) as late:
             svc.request_cancel(db, pkg=pkg, brand=brand, actor_id="owner:t")
         assert late.value.code == "TOO_LATE"
+
+
+# ------------------------------------------------------------------ hosted media clean-up
+
+
+def test_published_media_is_removed_from_github_pages_after_three_days(
+    env: dict[str, Any],
+) -> None:
+    from media_os_api.publish import cleanup
+
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM", "FACEBOOK"])
+    hosted = [p for p, _ in env["host"].published]
+    assert hosted and all(f"/{env['pid']}/" in p for p in hosted)
+    for p in env["postiz"].posts:
+        p["state"] = "PUBLISHED"
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            r.scheduled_at = datetime.now(UTC) - timedelta(days=1)
+    with session_scope(f) as db:
+        svc.handle_sync_status(
+            db, JobRun(task_name=svc.SYNC_TASK, payload={}), clients=env["clients"]
+        )
+
+    def run() -> dict[str, Any]:
+        with session_scope(f) as db:
+            return cleanup.handle_cleanup_media(
+                db,
+                JobRun(task_name=cleanup.CLEANUP_TASK, payload={}),
+                host_factory=lambda: env["host"],
+            )
+
+    assert run() == {"packages": 0, "files": 0}  # published a day ago: kept for now
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            r.scheduled_at = datetime.now(UTC) - timedelta(days=4)
+    assert run() == {"packages": 1, "files": len(hosted)}
+    assert sorted(env["host"].removed) == sorted(hosted)
+    assert run() == {"packages": 0, "files": 0}  # never looked at twice
+
+
+def test_failed_posts_keep_their_media_for_manual_retries(env: dict[str, Any]) -> None:
+    from media_os_api.publish import cleanup
+
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM"])
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            r.status = "FAILED"
+            r.scheduled_at = datetime.now(UTC) - timedelta(days=5)
+    with session_scope(f) as db:
+        assert cleanup.settled_packages(db, datetime.now(UTC)) == []
+        assert len(cleanup.settled_packages(db, datetime.now(UTC) + timedelta(days=11))) == 1
+
+
+def test_media_paths_are_matched_to_their_post() -> None:
+    from media_os_api.publish.cleanup import belongs_to
+
+    pid = uuid.uuid4()
+    assert belongs_to(f"brand-app-promo/2026-11/{pid}/v1/slide-01.jpg", "brand-app-promo", pid)
+    assert not belongs_to(f"other-brand/2026-11/{pid}/v1/slide-01.jpg", "brand-app-promo", pid)
+    assert not belongs_to(
+        f"brand-app-promo/2026-11/{uuid.uuid4()}/v1/a.jpg", "brand-app-promo", pid
+    )
+    assert not belongs_to("index.html", "brand-app-promo", pid)
 
 
 # ------------------------------------------------------------------ review fixes (bugs 1-4)
