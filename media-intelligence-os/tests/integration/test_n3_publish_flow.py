@@ -656,9 +656,11 @@ def test_lost_slide_files_are_flagged_block_approval_and_can_be_rerendered(
 
     url = f"/api/v1/content/carousels/{pid}"
     detail = client.get(f"{url}?{BRAND_Q}").json()
-    assert detail["status"] == "QA_PASSED" and detail["slides_missing"] == 3
+    assert (
+        detail["status"] == "QA_PASSED" and detail["slides_missing"] == 5
+    )  # 3 empty files + 2 slides with no image at all
     queue = client.get(f"/api/v1/content/carousels?{BRAND_Q}").json()["items"]
-    assert next(i for i in queue if i["id"] == pid)["slides_missing"] == 3
+    assert next(i for i in queue if i["id"] == pid)["slides_missing"] == 5
 
     approve = client.post(f"{url}/decision?{BRAND_Q}", json={"decision": "APPROVE"})
     assert approve.status_code == 409 and approve.json()["error"]["code"] == "SLIDES_MISSING"
@@ -679,6 +681,11 @@ def test_lost_slide_files_are_flagged_block_approval_and_can_be_rerendered(
             ).scalars()
         )
         assert f"render:{pid}:v2" in keys
+
+
+def test_approved_carousels_keep_their_slides(env: dict[str, Any], client: TestClient) -> None:
+    res = client.post(f"/api/v1/content/carousels/{env['pid']}/rerender?{BRAND_Q}")
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NOT_RERENDERABLE"
 
 
 def test_scheduling_refuses_empty_slide_files(env: dict[str, Any], tmp_path: Path) -> None:

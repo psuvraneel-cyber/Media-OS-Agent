@@ -68,8 +68,13 @@ def write_durably(path: Path, data: bytes) -> None:
         f.flush()
         os.fsync(f.fileno())
     tmp.replace(path)
+    fsync_dir(path.parent)
+
+
+def fsync_dir(folder: Path) -> None:
+    """Flush a folder's entries (new files, renames, new subfolders) to disk."""
     try:
-        fd = os.open(path.parent, os.O_RDONLY)
+        fd = os.open(folder, os.O_RDONLY)
     except OSError:  # some filesystems don't allow opening a folder
         return
     try:
@@ -148,6 +153,9 @@ def render_carousel(
     assets = brand_asset_root(kit.brand_slug)
     icon = assets / "icon-1024.png"
     out_dir.mkdir(parents=True, exist_ok=True)
+    # carousels/<id>/v<n>: make the new folders themselves durable, not just the files in them.
+    for folder in (out_dir.parent.parent, out_dir.parent):
+        fsync_dir(folder)
     roots = [assets, font_dir(), out_dir]
     roots += [p.parent for p in (design or {}).values()]
     allowed_roots = [str(p.resolve()) for p in roots]

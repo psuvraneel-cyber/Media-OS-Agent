@@ -111,6 +111,7 @@ class CarouselSummary(BaseModel):
     can_schedule: bool = False  # QA-passed, or every earlier platform post failed/cancelled
     can_cancel: bool = False  # scheduled, and more than 5 minutes before the post time
     slides_missing: int = 0  # rendered slides missing or empty on disk (re-render to fix)
+    render_failed: bool = False  # the render job gave up; re-render to try again
 
 
 class CarouselDetail(CarouselSummary):
@@ -220,9 +221,12 @@ def _scheduling(db: Session, pkg: ContentPackage) -> bool:
 
 
 def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
-    from media_os_api.carousel.service import missing_slides
+    from sqlalchemy.orm import object_session
+
+    from media_os_api.carousel.service import expected_slides, missing_slides, render_failed
 
     tags = pkg.post_tags or {}
+    db = object_session(pkg)
     qa = pkg.qa_report or {}
     score = pkg.score or {}
     return {
@@ -233,7 +237,10 @@ def _summary(pkg: ContentPackage, assets: list[Asset]) -> dict[str, Any]:
         # Older carousels stored *emphasis* markers in the title and hook.
         "title": pkg.title.replace("*", "") if pkg.title else pkg.title,
         "hook": pkg.hook.replace("*", "") if pkg.hook else pkg.hook,
-        "slides_missing": missing_slides(assets) if pkg.format == "CAROUSEL" else 0,
+        "slides_missing": (
+            missing_slides(assets, expected_slides(pkg)) if pkg.format == "CAROUSEL" else 0
+        ),
+        "render_failed": render_failed(db, pkg) if db is not None else False,
         "language": tags.get("language"),
         "pillar": tags.get("pillar"),
         "hook_type": tags.get("hook_type"),
@@ -464,9 +471,11 @@ def decide_carousel(
                         "message": "Only QA-passed carousels can be approved.",
                     },
                 )
-            from media_os_api.carousel.service import missing_slides
+            from media_os_api.carousel.service import expected_slides, missing_slides
 
-            if pkg.format == "CAROUSEL" and missing_slides(_slide_assets(db, pkg)):
+            if pkg.format == "CAROUSEL" and missing_slides(
+                _slide_assets(db, pkg), expected_slides(pkg)
+            ):
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
                     {

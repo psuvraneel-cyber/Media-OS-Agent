@@ -420,9 +420,10 @@ def _slides(session: Session, pkg: ContentPackage) -> list[bytes]:
         if path is None or not path.is_file():
             raise PermanentTaskError(f"Slide file missing: {a.local_path}", code="SLIDE_MISSING")
         data = path.read_bytes()
-        if not data:
+        if not data or (a.file_size and len(data) < a.file_size):
             raise PermanentTaskError(
-                f"Slide file is empty: {a.local_path}. Re-render the slides in Approvals.",
+                f"Slide file is empty or cut short: {a.local_path}. Re-render the slides in "
+                "Approvals.",
                 code="SLIDE_MISSING",
             )
         out.append(data)
