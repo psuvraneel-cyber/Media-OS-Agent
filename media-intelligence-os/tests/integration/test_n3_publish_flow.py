@@ -1930,7 +1930,9 @@ def _pending_carousel(env: dict[str, Any], client: TestClient, monkeypatch: Any,
     with session_scope(env["factory"]) as db:
         brand = db.get(BrandProfile, env["bid"])
         assert brand is not None
-        [job] = ap.request_generation(db, brand, count=1, brief={}, trigger="test", key_prefix=key)
+        [job] = ap.request_generation(
+            db, brand, count=1, brief={"language": "BN_EN"}, trigger="test", key_prefix=key
+        )
         out = ap.handle_generate_carousel(db, job)
         job.status = "SUCCEEDED"
     return str(out["content_package_id"])
