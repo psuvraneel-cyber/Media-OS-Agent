@@ -235,6 +235,7 @@ def edit_package(
     from media_os_api.carousel.qa import Check, run_text_qa
     from media_os_api.content.uploads import is_owner_upload
 
+    lock_package(session, pkg)
     if pkg.format != "CAROUSEL" or is_owner_upload(pkg):
         raise EditError("Only generated carousels can be edited here.", code="NOT_EDITABLE")
     if pkg.approval_status != "PENDING" or pkg.status not in EDITABLE_STATUSES:
@@ -347,23 +348,33 @@ def expected_slides(pkg: ContentPackage) -> int | None:
 
 
 def render_failed(session: Session, pkg: ContentPackage) -> bool:
-    """The current version's render job gave up (e.g. the renderer crashed), so it will never
-    finish on its own: the owner needs to re-render."""
+    """A drafted carousel whose text passed QA but has no live render job for its current
+    version: the job gave up (e.g. the renderer crashed), or its history was purged. It will never
+    finish on its own, so the owner needs to re-render."""
     from media_os_api.carousel.render_job import RENDER_TASK
     from media_os_api.db.models import JobRun
 
     if pkg.format != "CAROUSEL" or pkg.status != ContentLifecycleStatus.DRAFTED.value:
         return False
+    if not (pkg.qa_report or {}).get("passed"):
+        return False  # failed text QA: never rendered on purpose
     status = session.execute(
         select(JobRun.status).where(
             JobRun.task_name == RENDER_TASK,
             JobRun.idempotency_key == f"render:{pkg.id}:v{pkg.version}",
         )
     ).scalar_one_or_none()
-    return status == "FAILED_FINAL"
+    return status not in LIVE_JOB_STATES
 
 
 RERENDER_STATUSES = ("DRAFTED", "RENDERED", "QA_PASSED")
+LIVE_JOB_STATES = ("PENDING", "DISPATCHED", "RUNNING", "FAILED_RETRYABLE", "SUCCEEDED")
+
+
+def lock_package(session: Session, pkg: ContentPackage) -> None:
+    """Lock the carousel's row and re-read it, so edits, re-renders, approvals and the renderer
+    act one at a time on its current state (never on a copy another request has changed)."""
+    session.refresh(pkg, with_for_update=True)
 
 
 def missing_slides(assets: list[Any], expected: int | None = None) -> int:
@@ -393,6 +404,7 @@ def rerender_package(session: Session, pkg: ContentPackage, *, actor_id: str) ->
     from media_os_api.content.uploads import is_owner_upload
     from media_os_api.db.models import JobRun
 
+    lock_package(session, pkg)
     if pkg.format != "CAROUSEL" or is_owner_upload(pkg):
         raise EditError("Only generated carousels can be re-rendered.", code="NOT_RERENDERABLE")
     if pkg.status not in RERENDER_STATUSES or pkg.approval_status != "PENDING":

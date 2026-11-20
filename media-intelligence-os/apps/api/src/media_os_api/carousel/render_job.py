@@ -7,6 +7,7 @@ QA_PASSED when every text and render check passes (the package then appears in t
 
 from __future__ import annotations
 
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -124,6 +125,8 @@ def handle_render_carousel(session: Session, job: JobRun) -> dict[str, Any]:
     # meanwhile, this render is stale: record nothing, and the job for the new version renders.
     session.refresh(pkg, with_for_update=True)
     if pkg.version != version or pkg.status != ContentLifecycleStatus.DRAFTED.value:
+        # Nothing points at this version's files: remove them so they don't pile up.
+        shutil.rmtree(media_root() / rel, ignore_errors=True)
         return {"skipped": True, "stale_version": version, "current_version": pkg.version}
 
     session.execute(
