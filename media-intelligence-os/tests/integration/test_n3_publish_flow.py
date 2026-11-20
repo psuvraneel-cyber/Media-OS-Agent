@@ -730,9 +730,18 @@ def _published_posts(env: dict[str, Any], specs: list[tuple[str, str, int]]) -> 
                 hashtags=[],
                 slide_data=[],
                 source_manifest=[],
-                post_tags={"hook_type": hook, "language": "BN_EN", "pillar": "wedding_season"}
-                if fmt == "CAROUSEL"
-                else None,
+                # Studio reels have no tags: leave the column unset (SQL NULL), as uploads do.
+                **(
+                    {
+                        "post_tags": {
+                            "hook_type": hook,
+                            "language": "BN_EN",
+                            "pillar": "wedding_season",
+                        }
+                    }
+                    if fmt == "CAROUSEL"
+                    else {}
+                ),
             )
             db.add(pkg)
             db.flush()
