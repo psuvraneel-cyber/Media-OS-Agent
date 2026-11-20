@@ -122,6 +122,7 @@ STATIC_ALLOWED_TRANSITIONS: dict[ContentLifecycleStatus, frozenset[ContentLifecy
     ),
     ContentLifecycleStatus.QA_PASSED: frozenset(
         {
+            ContentLifecycleStatus.DRAFTED,  # the owner edited the text before approving
             ContentLifecycleStatus.POSTIZ_DRAFT,
             ContentLifecycleStatus.FAILED_RETRYABLE,
             ContentLifecycleStatus.FAILED_FINAL,

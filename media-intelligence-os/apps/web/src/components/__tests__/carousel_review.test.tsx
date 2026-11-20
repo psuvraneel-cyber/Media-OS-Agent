@@ -136,6 +136,39 @@ describe("CarouselReviewView", () => {
     expect(calls.some((c) => c.startsWith("POST") && c.includes("/recheck"))).toBe(true);
   });
 
+  it("edits slide text and sends only what changed", async () => {
+    const withSlides = {
+      ...DETAIL,
+      slides: [
+        { role: "HOOK", kicker: null, headline_bn: "বিয়ের মরশুম", headline_en: "Wedding season", body_bn: null, body_en: null },
+        { role: "CTA", kicker: null, headline_bn: "প্লে থেকে নিন", headline_en: "Get it on Play", body_bn: null, body_en: null },
+      ],
+    };
+    const calls: { url: string; method: string; body?: string }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      calls.push({ url, method, body: init?.body as string | undefined });
+      if (url.includes("/content/carousels/c1")) return json(withSlides);
+      return json({ items: [SUMMARY] });
+    });
+    render(
+      <BrandProvider brands={[BRAND]} initialBrandId={APP}>
+        <CarouselReviewView />
+      </BrandProvider>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /Edit text/ }));
+    const headline = screen.getAllByLabelText("Headline (English)")[0];
+    await userEvent.clear(headline);
+    await userEvent.type(headline, "Wedding *season* is here");
+    await userEvent.click(screen.getByRole("button", { name: /Save and re-check/ }));
+    const patch = calls.find((c) => c.method === "PATCH");
+    expect(patch?.url).toContain(`/content/carousels/c1?brand=${APP}`);
+    const body = JSON.parse(patch?.body ?? "{}");
+    expect(body.slides).toEqual([{ headline_en: "Wedding *season* is here" }, {}]);
+    expect(body.hashtags).toEqual(["#Nimontron"]);
+  });
+
   it("disables approve for carousels that have not passed QA", async () => {
     const draft = { ...DETAIL, status: "DRAFTED", qa_passed: true, assets: [] };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {

@@ -3,6 +3,8 @@
 * `GET  /api/v1/content/carousels?brand=<ref>&queue=review|all` — carousels with QA and score.
 * `GET  /api/v1/content/carousels/{id}?brand=<ref>` — one carousel with slides and assets.
 * `GET  /api/v1/content/assets/{id}/file?brand=<ref>` — a rendered slide PNG (read-only volume).
+* `PATCH /api/v1/content/carousels/{id}` (CSRF) — edit the text of a carousel awaiting review;
+  QA runs again and the slides re-render.
 * `POST /api/v1/content/carousels/{id}/decision` (CSRF) — approve or reject.
 * `POST /api/v1/content/carousels/{id}/schedule` (CSRF) — schedule an APPROVED carousel to
   Instagram/Facebook at a chosen time (N3). The worker uploads the images and creates the post in
@@ -554,3 +556,53 @@ def recheck_carousel(
                 status.HTTP_409_CONFLICT, {"code": "NOT_RECHECKABLE", "message": str(exc)}
             ) from exc
         return CarouselSummary(**_summary(pkg, _slide_assets(db, pkg)))
+
+
+class SlideEdit(BaseModel):
+    """Only the fields sent are changed; send null to clear one."""
+
+    kicker: str | None = Field(default=None, max_length=28)
+    headline_bn: str | None = Field(default=None, max_length=96)
+    body_bn: str | None = Field(default=None, max_length=170)
+    headline_en: str | None = Field(default=None, max_length=96)
+    body_en: str | None = Field(default=None, max_length=170)
+    sticker: str | None = Field(default=None, max_length=26)
+
+
+class CarouselEdit(BaseModel):
+    slides: list[SlideEdit] | None = Field(default=None, max_length=10)
+    caption: str | None = Field(default=None, max_length=2200)
+    hashtags: list[str] | None = Field(default=None, max_length=12)
+
+
+@router.patch("/content/carousels/{package_id}", response_model=CarouselDetail)
+def edit_carousel(
+    package_id: uuid.UUID,
+    payload: CarouselEdit,
+    request: Request,
+    session: Annotated[SessionPayload, Depends(require_csrf)],
+    brand: Annotated[str, Query(min_length=1, max_length=128)],
+) -> CarouselDetail:
+    """Change a carousel's text before approving it. QA runs again and the slides re-render;
+    the carousel comes back to the review queue once the new slides pass."""
+    from media_os_api.carousel.service import EditError, edit_package
+
+    with _db(request) as db:
+        pkg = _package(db, _brand_id(db, brand), package_id)
+        try:
+            edit_package(
+                db,
+                pkg,
+                actor_id=f"owner:{session.subject}",
+                slides=(
+                    [s.model_dump(exclude_unset=True) for s in payload.slides]
+                    if payload.slides is not None
+                    else None
+                ),
+                caption=payload.caption,
+                hashtags=payload.hashtags,
+            )
+        except EditError as exc:
+            code = status.HTTP_409_CONFLICT if exc.code == "NOT_EDITABLE" else 422
+            raise HTTPException(code, {"code": exc.code, "message": str(exc)}) from exc
+    return get_carousel(package_id, request, session, brand)

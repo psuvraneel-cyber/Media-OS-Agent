@@ -1746,7 +1746,96 @@ def test_rejection_notes_reach_the_next_draft(
         job.status = "SUCCEEDED"
     assert guidance[0] == ""
     assert "Too salesy, sounds like an ad" in guidance[1]
-    assert "OWNER REJECTED" in guidance[1]
+    assert "rejected: Too salesy" in guidance[1]
+
+
+def _pending_carousel(env: dict[str, Any], client: TestClient, monkeypatch: Any, key: str) -> str:
+    """A fresh generated carousel awaiting review (written by the fake writer)."""
+    from media_os_api.carousel import admin
+    from media_os_api.content import autopilot as ap
+
+    monkeypatch.setattr(admin, "produce", _fake_produce([]))
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        [job] = ap.request_generation(db, brand, count=1, brief={}, trigger="test", key_prefix=key)
+        out = ap.handle_generate_carousel(db, job)
+        job.status = "SUCCEEDED"
+    return str(out["content_package_id"])
+
+
+def test_owner_edits_text_then_it_rechecks_rerenders_and_teaches(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from media_os_api.carousel.feedback import notes_block, owner_notes
+    from media_os_api.carousel.render_job import RENDER_TASK
+
+    pid = _pending_carousel(env, client, monkeypatch, "test:edit:1")
+    url = f"/api/v1/content/carousels/{pid}?{BRAND_Q}"
+    before = client.get(url).json()
+    assert before["status"] == "DRAFTED"
+
+    # Fill in the first slide's English headline only; other slides untouched.
+    edits: list[dict[str, Any]] = [{} for _ in before["slides"]]
+    edits[0] = {"headline_en": "Wedding *season* is here"}
+    res = client.patch(url, json={"slides": edits, "caption": before["caption"] + " 🎉"})
+    assert res.status_code == 200, res.text
+    after = res.json()
+    assert after["slides"][0]["headline_en"] == "Wedding *season* is here"
+    assert after["slides"][1] == before["slides"][1]
+    assert after["title"] == "Wedding season is here"  # stored without the markers
+    assert after["caption"].endswith("🎉") and after["qa_passed"] is True
+
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None and pkg.version == 2 and pkg.status == "DRAFTED"
+        renders = list(
+            db.execute(
+                select(JobRun.idempotency_key).where(
+                    JobRun.task_name == RENDER_TASK,
+                    JobRun.payload["content_package_id"].astext == pid,
+                )
+            ).scalars()
+        )
+        assert f"render:{pid}:v2" in renders
+        notes = owner_notes(db, env["bid"])
+        assert (
+            notes
+            and "corrected it" in notes[0].note
+            and "Wedding season is here" in (notes[0].note)
+        )
+        assert "the corrections show" in notes_block(notes)
+
+    # Nothing changed: no new version.
+    same = client.patch(url, json={"slides": edits})
+    assert same.status_code == 200
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None and pkg.version == 2
+
+    # An edit that breaks a rule is saved but fails QA, so it isn't rendered.
+    edits[0] = {"headline_en": "The best wedding card app"}
+    bad = client.patch(url, json={"slides": edits})
+    assert bad.status_code == 200 and bad.json()["qa_passed"] is False
+    with session_scope(env["factory"]) as db:
+        renders = list(
+            db.execute(
+                select(JobRun.idempotency_key).where(
+                    JobRun.task_name == RENDER_TASK,
+                    JobRun.payload["content_package_id"].astext == pid,
+                )
+            ).scalars()
+        )
+        assert f"render:{pid}:v3" not in renders
+
+    wrong_count = client.patch(url, json={"slides": [{}]})
+    assert wrong_count.status_code == 422 and wrong_count.json()["error"]["code"] == "BAD_EDIT"
+
+
+def test_approved_carousels_cant_be_edited(env: dict[str, Any], client: TestClient) -> None:
+    url = f"/api/v1/content/carousels/{env['pid']}?{BRAND_Q}"
+    res = client.patch(url, json={"caption": "changed"})
+    assert res.status_code == 409 and res.json()["error"]["code"] == "NOT_EDITABLE"
 
 
 def test_automatic_topics_rotate_away_from_recent_posts(env: dict[str, Any]) -> None:
