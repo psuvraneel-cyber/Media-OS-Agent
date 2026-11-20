@@ -331,3 +331,86 @@ def edit_package(
         enqueue_render(session, pkg)
     session.flush()
     return qa
+
+
+# --------------------------------------------------------------------------- re-render
+
+RERENDER_STATUSES = ("DRAFTED", "RENDERED", "QA_PASSED")
+
+
+def missing_slides(assets: list[Any]) -> int:
+    """How many rendered slides are missing on disk, empty, or cut short (smaller than saved).
+
+    The API mounts the media volume read-only, so this only looks at file sizes."""
+    from media_os_api.content.uploads import resolve_asset_path
+
+    bad = 0
+    for a in assets:
+        path = resolve_asset_path(a.local_path)
+        try:
+            size = path.stat().st_size if path is not None else -1
+        except OSError:
+            size = -1
+        if size <= 0 or (a.file_size and size < a.file_size):
+            bad += 1
+    return bad
+
+
+def rerender_package(session: Session, pkg: ContentPackage, *, actor_id: str) -> None:
+    """Render a carousel's slides again (new version folder), e.g. after the files were lost or a
+    render check failed. Text QA results are kept; render checks are redone by the renderer."""
+    from media_os_api.carousel.render_job import RENDER_TASK
+    from media_os_api.content.uploads import is_owner_upload
+    from media_os_api.db.models import JobRun
+
+    if pkg.format != "CAROUSEL" or is_owner_upload(pkg):
+        raise EditError("Only generated carousels can be re-rendered.", code="NOT_RERENDERABLE")
+    if pkg.status not in RERENDER_STATUSES or pkg.approval_status == "REJECTED":
+        raise EditError(
+            "Only carousels that aren't scheduled or posted can be re-rendered.",
+            code="NOT_RERENDERABLE",
+        )
+    report = dict(pkg.qa_report or {})
+    text_checks = [
+        c for c in report.get("checks", []) if not str(c.get("name", "")).startswith("render_")
+    ]
+    if any(c.get("status") == "FAIL" for c in text_checks):
+        raise EditError(
+            "The text didn't pass the checks, so it can't be rendered. Edit the text instead.",
+            code="NOT_RERENDERABLE",
+        )
+    busy = session.execute(
+        select(JobRun.id).where(
+            JobRun.task_name == RENDER_TASK,
+            JobRun.status.in_(("PENDING", "DISPATCHED", "RUNNING", "FAILED_RETRYABLE")),
+            JobRun.payload["content_package_id"].astext == str(pkg.id),
+        )
+    ).first()
+    if busy is not None:
+        raise EditError("The slides are already being rendered.", code="ALREADY_RENDERING")
+
+    pkg.version = (pkg.version or 1) + 1
+    pkg.qa_report = {**report, "checks": text_checks, "passed": True}
+    session.flush()
+    reason = "Re-render requested by the owner"
+    if pkg.status != ContentLifecycleStatus.DRAFTED.value:
+        transition_content_status(
+            session,
+            content_package_id=pkg.id,
+            to_status=ContentLifecycleStatus.DRAFTED,
+            actor_id=actor_id,
+            reason=reason,
+            expected_brand_id=pkg.brand_profile_id,
+        )
+        session.refresh(pkg)
+    record_audit_event(
+        session,
+        actor_id=actor_id,
+        action="CAROUSEL_RERENDER_REQUESTED",
+        target_type="content_package",
+        target_id=str(pkg.id),
+        outcome="SUCCESS",
+        metadata={"version": pkg.version},
+    )
+    enqueue_render(session, pkg)
+    session.flush()

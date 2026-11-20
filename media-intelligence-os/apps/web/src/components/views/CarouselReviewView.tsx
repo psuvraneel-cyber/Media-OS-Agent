@@ -59,7 +59,7 @@ function QueueRow({
         selected ? "border-amber-500/60 bg-amber-500/10" : "border-white/[0.06] bg-[var(--surface-inset)] hover:border-slate-600"
       }`}
     >
-      {item.thumbnail_asset_id ? (
+      {item.thumbnail_asset_id && !item.slides_missing ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={slideUrl(item.thumbnail_asset_id, brand)}
@@ -75,7 +75,15 @@ function QueueRow({
         <p className="truncate text-sm font-medium text-slate-100">{item.hook ?? item.title ?? "Carousel"}</p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           <Badge tone="info">{LANGUAGE_LABEL[item.language ?? ""] ?? item.language ?? "—"}</Badge>
-          <Badge tone={item.status === "QA_PASSED" ? "live" : "disabled"}>{item.status}</Badge>
+          {item.slides_missing ? (
+            <Badge tone="blocked">Slides missing</Badge>
+          ) : item.status === "RENDERED" && item.qa_passed === false ? (
+            <Badge tone="blocked">Render check failed</Badge>
+          ) : item.status === "DRAFTED" && item.qa_passed !== false ? (
+            <Badge tone="prototype">Rendering…</Badge>
+          ) : (
+            <Badge tone={item.status === "QA_PASSED" ? "live" : "disabled"}>{item.status}</Badge>
+          )}
           {item.score_total !== null ? <Badge tone="prototype">score {item.score_total}</Badge> : null}
         </div>
         <p className="mt-1 text-[11px] text-slate-500">
@@ -288,7 +296,10 @@ function DetailPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
-  const canApprove = detail.status === "QA_PASSED" && detail.approval_status === "PENDING";
+  const canApprove =
+    detail.status === "QA_PASSED" &&
+    detail.approval_status === "PENDING" &&
+    !(detail.slides_missing ?? 0);
   const canEdit = detail.approval_status === "PENDING";
 
   const decide = async (decision: "APPROVE" | "REJECT") => {
@@ -324,7 +335,25 @@ function DetailPanel({
     }
   };
 
+  const rerender = async () => {
+    setPending(true);
+    setError(null);
+    try {
+      await browserApiFetch(
+        `/content/carousels/${encodeURIComponent(detail.id)}/rerender?brand=${encodeURIComponent(brand)}`,
+        { method: "POST" },
+      );
+      onDecided();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
   const checks: QaCheck[] = detail.qa_report?.checks ?? [];
+  const renderFailures = checks.filter((c) => c.name.startsWith("render_") && c.status === "FAIL");
+  const slidesMissing = (detail.slides_missing ?? 0) > 0;
   if (editing) {
     return (
       <EditPanel
@@ -340,6 +369,39 @@ function DetailPanel({
   }
   return (
     <div className="space-y-5">
+      {slidesMissing ? (
+        <div className="space-y-2 rounded-lg border border-amber-700/60 bg-amber-950/30 p-3 text-xs text-amber-100">
+          <p>
+            {detail.slides_missing} of {detail.assets.length} slide images are missing or empty on
+            disk (usually because Docker stopped while they were being saved). Render them again;
+            the text stays as it is.
+          </p>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => void rerender()}
+            className="inline-flex items-center gap-1.5 rounded-md border border-amber-600 px-2.5 py-1 text-amber-50 disabled:opacity-40"
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Re-render slides
+          </button>
+        </div>
+      ) : renderFailures.length > 0 && detail.status === "RENDERED" ? (
+        <div className="space-y-2 rounded-lg border border-rose-900/60 bg-rose-950/30 p-3 text-xs text-rose-200">
+          <p>
+            The slides rendered, but a check failed:{" "}
+            {renderFailures.map((c) => c.detail || c.name).join("; ")}. Usually a line is too long
+            for its box: use <strong>Edit text</strong> to shorten it, and the slides render again.
+          </p>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => void rerender()}
+            className="inline-flex items-center gap-1.5 rounded-md border border-rose-700 px-2.5 py-1 text-rose-100 disabled:opacity-40"
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Re-render as is
+          </button>
+        </div>
+      ) : null}
       <div className="flex gap-3 overflow-x-auto pb-2" aria-label="Slides">
         {detail.assets.length === 0 && detail.qa_passed === false ? (
           <div className="space-y-2 rounded-lg border border-rose-900/60 bg-rose-950/30 p-3 text-xs text-rose-200">
@@ -357,7 +419,9 @@ function DetailPanel({
             </button>
           </div>
         ) : detail.assets.length === 0 ? (
-          <p className="text-xs text-slate-400">Slides are still rendering — refresh in a moment.</p>
+          <p className="text-xs text-slate-400">
+            Slides are rendering. This page checks again every few seconds.
+          </p>
         ) : (
           detail.assets.map((asset) => (
             // eslint-disable-next-line @next/next/no-img-element
@@ -457,8 +521,21 @@ export function CarouselReviewView() {
   const [detail, setDetail] = useState<CarouselDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    setReloadKey((k) => k + 1);
+  }, []);
+
+  // While a carousel is rendering, look again every 8 s so it appears without a click.
+  const rendering = (items ?? []).some((i) => i.status === "DRAFTED" && i.qa_passed !== false);
+  useEffect(() => {
+    if (!rendering) return;
+    const t = setInterval(() => setReloadKey((k) => k + 1), 8000);
+    return () => clearInterval(t);
+  }, [rendering]);
 
   useEffect(() => {
     let cancelled = false;
@@ -469,12 +546,16 @@ export function CarouselReviewView() {
         if (cancelled) return;
         setError(null);
         setItems(res.items);
+        setRefreshing(false);
         setSelectedId((current) =>
           current && res.items.some((i) => i.id === current) ? current : (res.items[0]?.id ?? null),
         );
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(errorText(err));
+        if (!cancelled) {
+          setError(errorText(err));
+          setRefreshing(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -508,10 +589,15 @@ export function CarouselReviewView() {
         <div className="flex justify-end">
           <button
             type="button"
-            onClick={reload}
-            className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.1] px-2.5 py-1 text-xs text-slate-300"
+            onClick={refresh}
+            disabled={refreshing}
+            className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.1] px-2.5 py-1 text-xs text-slate-300 disabled:opacity-60"
           >
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> Refresh
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${refreshing ? "animate-spin motion-reduce:animate-none" : ""}`}
+              aria-hidden="true"
+            />{" "}
+            {refreshing ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </SurfaceCard>
