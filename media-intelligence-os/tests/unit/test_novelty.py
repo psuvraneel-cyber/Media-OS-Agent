@@ -113,3 +113,21 @@ def test_without_recent_posts_nothing_changes(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(writer, "write_carousel", lambda *a, **k: (REPEAT, "fake/model", []))
     _, _, _, qa = writer.write_with_qa(None, NIMONTRON, _brief())  # type: ignore[arg-type]
     assert not any(c.name == "novelty" for c in qa.checks)
+
+
+def test_owner_notes_go_first_in_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    from media_os_api.carousel.feedback import OwnerNote, notes_block
+
+    prompts: list[dict[str, Any]] = []
+
+    def fake_write(router: Any, kit: Any, brief: Any, **kw: Any) -> Any:
+        prompts.append(kw)
+        return FRESH, "fake/model", []
+
+    monkeypatch.setattr(writer, "write_carousel", fake_write)
+    block = notes_block([OwnerNote(title="Old post", note="Too salesy")])
+    writer.write_with_qa(None, NIMONTRON, _brief(), recent=_recent(), guidance=block)  # type: ignore[arg-type]
+    avoid = prompts[0]["avoid"]
+    assert avoid.startswith("THE OWNER REJECTED") and "On 'Old post': Too salesy" in avoid
+    assert "শ্রী/শ্রীমতী mistake" in avoid  # recent posts are still listed
+    assert notes_block([]) == ""

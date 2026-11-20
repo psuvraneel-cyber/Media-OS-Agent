@@ -1624,7 +1624,7 @@ def test_restart_postiz_request_is_recorded_once_and_reported(
 # ------------------------------------------------------------------ autopilot
 
 
-def _fake_produce(calls: list[Any]) -> Any:
+def _fake_produce(calls: list[Any], seen_guidance: list[str] | None = None) -> Any:
     """Stands in for the AI writer: saves a real draft package, exactly like produce() does."""
 
     def produce(
@@ -1635,8 +1635,11 @@ def _fake_produce(calls: list[Any]) -> Any:
         factory: Any = None,
         design: dict[str, Any] | None = None,
         recent: Any = None,
+        guidance: str = "",
     ) -> dict[str, Any]:
         calls.append(brief)
+        if seen_guidance is not None:
+            seen_guidance.append(guidance)
         draft = _draft()
         qa = run_text_qa(NIMONTRON, brief, draft)
         with session_scope(factory) as db:
@@ -1704,6 +1707,46 @@ def test_generate_button_queues_jobs_that_write_drafts_and_ping_telegram(
     assert len(alerts) == 2 and "New post ready for review" in alerts[0].payload["text"]
     recent = client.get(f"/api/v1/content/generate/recent?{BRAND_Q}").json()["items"]
     assert len(recent) == 2 and all(r["qa_passed"] for r in recent)
+
+
+def test_rejection_notes_reach_the_next_draft(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from media_os_api.carousel import admin
+    from media_os_api.content import autopilot as ap
+
+    calls: list[Any] = []
+    guidance: list[str] = []
+    monkeypatch.setattr(admin, "produce", _fake_produce(calls, guidance))
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        [job] = ap.request_generation(
+            db, brand, count=1, brief={}, trigger="test", key_prefix="test:notes:1"
+        )
+        ap.handle_generate_carousel(db, job)
+        job.status = "SUCCEEDED"
+    pid = next(
+        r["id"]
+        for r in client.get(f"/api/v1/content/carousels?{BRAND_Q}").json()["items"]
+        if r["approval_status"] == "PENDING"
+    )
+    rejected = client.post(
+        f"/api/v1/content/carousels/{pid}/decision?{BRAND_Q}",
+        json={"decision": "REJECT", "reason": "Too salesy, sounds like an ad"},
+    )
+    assert rejected.status_code == 200
+    with session_scope(env["factory"]) as db:
+        brand = db.get(BrandProfile, env["bid"])
+        assert brand is not None
+        [job] = ap.request_generation(
+            db, brand, count=1, brief={}, trigger="test", key_prefix="test:notes:2"
+        )
+        ap.handle_generate_carousel(db, job)
+        job.status = "SUCCEEDED"
+    assert guidance[0] == ""
+    assert "Too salesy, sounds like an ad" in guidance[1]
+    assert "OWNER REJECTED" in guidance[1]
 
 
 def test_automatic_topics_rotate_away_from_recent_posts(env: dict[str, Any]) -> None:

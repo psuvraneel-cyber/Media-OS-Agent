@@ -205,6 +205,7 @@ def write_with_qa(
     *,
     max_rewrites: int = 1,
     recent: list[RecentPost] | None = None,
+    guidance: str = "",
 ) -> tuple[CarouselDraft, str, list[AttemptRecord], QaReport]:
     """Write, run text QA, and on failure rewrite once with the failures as feedback.
 
@@ -213,8 +214,10 @@ def write_with_qa(
     `novelty` warning naming the post (the owner decides in review).
 
     Returns the last draft with its QA report; a draft that still fails is returned as-is so the
-    caller can save it as QA-failed (it never reaches the approval queue)."""
-    avoid = avoid_block(recent or [])
+    caller can save it as QA-failed (it never reaches the approval queue).
+
+    `guidance` is put first in the prompt: the owner's recent review notes (see `feedback`)."""
+    avoid = guidance + avoid_block(recent or [])
     draft, written_by, attempts = write_carousel(router, kit, brief, avoid=avoid)
     qa = run_text_qa(kit, brief, draft)
     for _ in range(max_rewrites):

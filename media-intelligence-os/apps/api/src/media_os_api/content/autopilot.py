@@ -345,6 +345,7 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
 
     bind = session.get_bind()
     engine = bind if isinstance(bind, Engine) else bind.engine
+    from media_os_api.carousel.feedback import notes_block, owner_notes
     from media_os_api.carousel.novelty import recent_posts
 
     result = produce(
@@ -354,6 +355,7 @@ def handle_generate_carousel(session: Session, job: JobRun) -> dict[str, Any]:
         factory=create_session_factory(engine),
         design=design,
         recent=recent_posts(session, brand.id),  # don't repeat a recent post's subject
+        guidance=notes_block(owner_notes(session, brand.id)),  # the owner's review notes
     )
     passed = bool(result.get("qa", {}).get("passed"))
     similar = next(
