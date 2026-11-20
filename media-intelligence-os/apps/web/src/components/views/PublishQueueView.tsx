@@ -7,9 +7,11 @@ import {
   ImageOff,
   RefreshCw,
   Send,
+  XCircle,
 } from "lucide-react";
 
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
+import { ConfirmActionDialog } from "@/components/ui/ConfirmActionDialog";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner, LoadingSkeleton } from "@/components/ui/FeedbackStates";
 import { SurfaceCard } from "@/components/ui/SurfaceCard";
@@ -119,11 +121,108 @@ function ScheduleForm({
       </div>
       <p className="text-[11px] text-slate-500">
         Times are in your local time. Postiz publishes at that time; images are uploaded to your
-        GitHub Pages media site first. Daily cap: 2 posts per platform.
+        GitHub Pages media site first. Daily caps are set in Studio → Autopilot.
       </p>
       {error ? (
         <ErrorBanner title={rescheduling ? "Could not reschedule" : "Could not schedule"} message={error} />
       ) : null}
+    </div>
+  );
+}
+
+function ChangeSchedule({
+  item,
+  brand,
+  onDone,
+}: {
+  item: CarouselSummary;
+  brand: string;
+  onDone: () => void;
+}) {
+  const current = item.schedules.find((s) => s.status === "SCHEDULED" || s.status === "OVERDUE");
+  const [moving, setMoving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [when, setWhen] = useState(defaultSlot());
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async (moveTo: string | null) => {
+    setPending(true);
+    setError(null);
+    try {
+      await browserApiFetch(
+        `/content/carousels/${encodeURIComponent(item.id)}/cancel?brand=${encodeURIComponent(brand)}`,
+        {
+          method: "POST",
+          body: JSON.stringify({ move_to: moveTo ? new Date(moveTo).toISOString() : null }),
+        },
+      );
+      setConfirming(false);
+      setMoving(false);
+      onDone();
+    } catch (err) {
+      setConfirming(false);
+      setError(errorText(err));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => setMoving((m) => !m)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-white/[0.12] px-2.5 py-1 text-slate-200 disabled:opacity-40"
+        >
+          <CalendarClock className="h-3.5 w-3.5" aria-hidden="true" /> Move
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => setConfirming(true)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-rose-500/30 px-2.5 py-1 text-rose-200 disabled:opacity-40"
+        >
+          <XCircle className="h-3.5 w-3.5" aria-hidden="true" /> Cancel post
+        </button>
+      </div>
+      {moving ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-white/[0.06] bg-[var(--surface-canvas)] p-3 text-xs text-slate-300">
+          <input
+            type="datetime-local"
+            aria-label="New post time"
+            value={when}
+            onChange={(e) => setWhen(e.target.value)}
+            className="rounded-md border border-white/[0.1] bg-[var(--surface-inset)] px-2 py-1 text-slate-100"
+          />
+          <button
+            type="button"
+            disabled={pending || !when}
+            onClick={() => void send(when)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+          >
+            Move here
+          </button>
+          <span className="w-full text-[11px] text-slate-500">
+            Same channels, new time. The current post is deleted in Postiz first.
+          </span>
+        </div>
+      ) : null}
+      {error ? <ErrorBanner title="Could not change the post" message={error} /> : null}
+      <ConfirmActionDialog
+        open={confirming}
+        title="Cancel this post?"
+        description={`It's deleted in Postiz on every channel${
+          current ? ` (it was set for ${fmt(current.scheduled_at)})` : ""
+        }. It stays approved, so you can schedule it again later.`}
+        confirmLabel="Cancel post"
+        cancelLabel="Keep it"
+        pending={pending}
+        onConfirm={() => void send(null)}
+        onCancel={() => setConfirming(false)}
+      />
     </div>
   );
 }
@@ -155,7 +254,7 @@ function Row({ item, brand, onChanged }: { item: CarouselSummary; brand: string;
               <Badge tone="info">{LANGUAGE_LABEL[item.language ?? ""] ?? item.language ?? "—"}</Badge>
             )}
             <Badge tone={statusTone(item.status)}>{item.status}</Badge>
-            {item.scheduling ? <Badge tone="prototype">Uploading & scheduling…</Badge> : null}
+            {item.scheduling ? <Badge tone="prototype">Working on it…</Badge> : null}
           </div>
           {item.schedules.length > 0 ? (
             <ul className="mt-2 space-y-1 text-xs text-slate-300">
@@ -181,6 +280,9 @@ function Row({ item, brand, onChanged }: { item: CarouselSummary; brand: string;
         </p>
       ) : null}
       {canSchedule ? <ScheduleForm item={item} brand={brand} onDone={onChanged} rescheduling={rescheduling} /> : null}
+      {item.can_cancel && !item.scheduling ? (
+        <ChangeSchedule item={item} brand={brand} onDone={onChanged} />
+      ) : null}
     </div>
   );
 }

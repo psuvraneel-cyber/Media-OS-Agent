@@ -265,6 +265,7 @@ export interface CarouselSummary {
   schedules: ScheduleEntry[];
   scheduling: boolean;
   can_schedule: boolean;
+  can_cancel?: boolean;
 }
 
 export interface ScheduleEntry {

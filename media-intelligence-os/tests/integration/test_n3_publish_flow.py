@@ -79,6 +79,7 @@ class FakePostiz:
     def __init__(self) -> None:
         self.created: list[dict[str, Any]] = []
         self.posts: list[dict[str, Any]] = []
+        self.deleted: list[str] = []
         self.integrations_list = [
             Integration("ig-int", "instagram", "Nimontron: Bengali Invitations", False),
             Integration("fb-int", "facebook", "Nimontron: Bengali Invitations", False),
@@ -134,6 +135,11 @@ class FakePostiz:
 
     def posts_between(self, start: datetime, end: datetime) -> list[dict[str, Any]]:
         return list(self.posts)
+
+    def delete_post(self, post_id: str) -> None:
+        # Postiz deletes the whole group (every channel); tests treat one carousel as one group.
+        self.deleted.append(post_id)
+        self.posts.clear()
 
     def close(self) -> None:
         return None
@@ -434,6 +440,100 @@ def test_sync_marks_published_and_package_published(env: dict[str, Any]) -> None
             "CAROUSEL_PUBLISHED",
         } <= actions
     _ = uuid  # keep import for readability of ids above
+
+
+# ------------------------------------------------------------------ cancel and move
+
+
+def _schedule_done(env: dict[str, Any], when: datetime, platforms: list[str]) -> None:
+    """Schedule the env carousel and finish its job, as the worker would."""
+    with session_scope(env["factory"]) as db:
+        job = _schedule(db, env, when, platforms)
+        svc.handle_schedule_carousel(db, job, clients=env["clients"])
+        job.status = "SUCCEEDED"
+
+
+def _run_cancel_jobs(env: dict[str, Any]) -> list[dict[str, Any]]:
+    outs = []
+    with session_scope(env["factory"]) as db:
+        jobs = list(
+            db.execute(
+                select(JobRun).where(
+                    JobRun.task_name == svc.CANCEL_TASK, JobRun.status == "PENDING"
+                )
+            ).scalars()
+        )
+        for job in jobs:
+            outs.append(svc.handle_cancel_post(db, job, clients=env["clients"]))
+            job.status = "SUCCEEDED"
+    return outs
+
+
+def test_owner_cancels_a_scheduled_post_from_media_os(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM", "FACEBOOK"])
+    url = f"/api/v1/content/carousels/{env['pid']}"
+    detail = client.get(f"{url}?{BRAND_Q}").json()
+    assert detail["can_cancel"] is True
+
+    res = client.post(f"{url}/cancel?{BRAND_Q}", json={})
+    assert res.status_code == 202 and res.json()["scheduling"] is True
+    again = client.post(f"{url}/cancel?{BRAND_Q}", json={})
+    assert again.status_code == 409 and again.json()["error"]["code"] == "ALREADY_CANCELLING"
+
+    [out] = _run_cancel_jobs(env)
+    assert out["cancelled"] == 2 and out["status"] == "FAILED_RETRYABLE"
+    assert env["postiz"].deleted  # deleted in Postiz
+    with session_scope(f) as db:
+        assert {r.status for r in db.execute(select(PublishSchedule)).scalars()} == {"CANCELLED"}
+    after = client.get(f"{url}?{BRAND_Q}").json()
+    assert after["can_schedule"] is True and after["can_cancel"] is False
+    nothing = client.post(f"{url}/cancel?{BRAND_Q}", json={})
+    assert nothing.status_code == 409 and nothing.json()["error"]["code"] == "NOTHING_TO_CANCEL"
+
+
+def test_owner_moves_a_post_to_a_new_time(env: dict[str, Any], client: TestClient) -> None:
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM"])
+    later = when + timedelta(days=1, hours=2)
+    url = f"/api/v1/content/carousels/{env['pid']}/cancel?{BRAND_Q}"
+    same = client.post(url, json={"move_to": when.isoformat()})
+    assert same.status_code == 409 and same.json()["error"]["code"] == "SAME_TIME"
+    res = client.post(url, json={"move_to": later.isoformat()})
+    assert res.status_code == 202
+
+    [out] = _run_cancel_jobs(env)
+    assert out["moved_to"] == later.astimezone(UTC).isoformat()
+    with session_scope(f) as db:
+        job = db.execute(
+            select(JobRun).where(JobRun.task_name == svc.SCHEDULE_TASK, JobRun.status == "PENDING")
+        ).scalar_one()
+        assert job.payload["scheduled_at"] == later.astimezone(UTC).isoformat()
+        assert job.payload["platforms"] == ["INSTAGRAM"]
+        svc.handle_schedule_carousel(db, job, clients=env["clients"])
+    with session_scope(f) as db:
+        rows = {r.status: r for r in db.execute(select(PublishSchedule)).scalars()}
+        assert set(rows) == {"CANCELLED", "SCHEDULED"}
+        assert rows["SCHEDULED"].scheduled_at == later
+        pkg = db.get(ContentPackage, env["pid"])
+        assert pkg is not None and pkg.status == "SCHEDULED"
+
+
+def test_cant_cancel_in_the_last_minutes(env: dict[str, Any]) -> None:
+    f, when = env["factory"], _when()
+    _schedule_done(env, when, ["INSTAGRAM"])
+    with session_scope(f) as db:
+        for r in db.execute(select(PublishSchedule)).scalars():
+            r.scheduled_at = datetime.now(UTC) + timedelta(minutes=3)
+    with session_scope(f) as db:
+        pkg = db.get(ContentPackage, env["pid"])
+        brand = db.get(BrandProfile, env["bid"])
+        assert pkg and brand
+        with pytest.raises(svc.ScheduleRequestError) as late:
+            svc.request_cancel(db, pkg=pkg, brand=brand, actor_id="owner:t")
+        assert late.value.code == "TOO_LATE"
 
 
 # ------------------------------------------------------------------ review fixes (bugs 1-4)

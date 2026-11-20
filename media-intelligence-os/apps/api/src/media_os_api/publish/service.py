@@ -19,6 +19,11 @@ Flow (nothing is published without the owner's approval AND an explicit schedule
    from the last 14 days are re-checked too, so a post the owner retried by hand in Postiz is
    picked up as PUBLISHED (and then gets analytics).
 
+4. API `request_cancel` (owner, CSRF) → job `media_os.publish.cancel_post`: deletes the post in
+   Postiz (every channel at once: Postiz deletes by group), marks its schedules CANCELLED (so the
+   carousel can be scheduled again) and, for a move, schedules it at the new time. Refused in the
+   last 5 minutes before the post time, when Postiz may already be posting.
+
 Postiz performs the actual publishing at the scheduled time (Meta Graph API).
 """
 
@@ -49,8 +54,8 @@ from media_os_api.db.models import (
 from media_os_api.jobs.errors import PermanentTaskError, PolicyRefusalError, RetryableTaskError
 from media_os_api.jobs.ledger import enqueue_durable_job
 from media_os_api.jobs.routing import queue_for_task
-from media_os_api.notify.messages import is_transient_postiz_error
-from media_os_api.notify.service import alert_post_failed, alert_post_status
+from media_os_api.notify.messages import e, is_transient_postiz_error, short
+from media_os_api.notify.service import alert_post_failed, alert_post_status, queue_alert
 from media_os_api.publish.media_host import GitHubPagesHost, MediaHostError
 from media_os_api.publish.postiz import Integration, PostizClient, PostizError
 from media_os_api.services.audit_service import record_audit_event
@@ -860,3 +865,198 @@ def _settle_package(session: Session, package_id: uuid.UUID) -> None:
             outcome="FAILURE",
             metadata={"platforms": states},
         )
+
+
+# --------------------------------------------------------------------------- cancel / move
+
+CANCEL_TASK = "media_os.publish.cancel_post"
+CANCEL_ACTOR = "worker:publish"
+# Postiz may already be uploading to Meta in the last minutes before the time.
+CANCEL_CUTOFF = timedelta(minutes=5)
+CANCELLABLE_STATES = ("SCHEDULED", "OVERDUE")
+
+
+def cancellable_schedules(session: Session, pkg: ContentPackage) -> list[PublishSchedule]:
+    return [s for s in package_schedules(session, pkg) if s.status in CANCELLABLE_STATES]
+
+
+def _in_flight(session: Session, task: str, pkg: ContentPackage) -> bool:
+    return (
+        session.execute(
+            select(JobRun.id).where(
+                JobRun.task_name == task,
+                JobRun.status.in_(IN_FLIGHT_JOB_STATES),
+                JobRun.payload["content_package_id"].astext == str(pkg.id),
+            )
+        ).first()
+        is not None
+    )
+
+
+def can_cancel(session: Session, pkg: ContentPackage, now: datetime) -> bool:
+    rows = cancellable_schedules(session, pkg)
+    return bool(rows) and all(
+        s.status == "OVERDUE" or s.scheduled_at > now + CANCEL_CUTOFF for s in rows
+    )
+
+
+def request_cancel(
+    session: Session,
+    *,
+    pkg: ContentPackage,
+    brand: BrandProfile,
+    actor_id: str,
+    move_to: datetime | None = None,
+    platforms: list[str] | None = None,
+    now: datetime | None = None,
+) -> JobRun:
+    """Cancel a scheduled post on every platform; with `move_to`, schedule it again then.
+
+    Postiz deletes a post for all its channels at once, so a cancel always covers the whole post.
+    The worker (which holds the Postiz key) deletes it, marks the schedules CANCELLED and, for a
+    move, schedules it again through the normal checks.
+    """
+    now = now or datetime.now(UTC)
+    rows = cancellable_schedules(session, pkg)
+    if not rows:
+        raise ScheduleRequestError("Nothing is scheduled to cancel.", code="NOTHING_TO_CANCEL")
+    if not can_cancel(session, pkg, now):
+        raise ScheduleRequestError(
+            "It's less than 5 minutes to the post time, so Postiz may already be posting it. "
+            "Delete it in Postiz if you still need to.",
+            code="TOO_LATE",
+        )
+    if _in_flight(session, SCHEDULE_TASK, pkg):
+        raise ScheduleRequestError(
+            "This post is still being set up. Try again in a minute.", code="STILL_SCHEDULING"
+        )
+    if _in_flight(session, CANCEL_TASK, pkg):
+        raise ScheduleRequestError("It's already being cancelled.", code="ALREADY_CANCELLING")
+    chosen = [p for p in PLATFORMS if p in set(platforms or [s.platform for s in rows])]
+    if move_to is not None:
+        if move_to.tzinfo is None:
+            raise ScheduleRequestError("Time must include a timezone.", code="NAIVE_TIME")
+        if move_to < now + MIN_LEAD:
+            raise ScheduleRequestError(
+                "Pick a time at least 20 minutes from now (images need time to go live).",
+                code="TOO_SOON",
+            )
+        if move_to > now + MAX_LEAD:
+            raise ScheduleRequestError("Pick a time within the next 30 days.", code="TOO_FAR")
+        if any(s.scheduled_at == move_to for s in rows):
+            raise ScheduleRequestError("That's the time it's already set for.", code="SAME_TIME")
+        if not chosen:
+            raise ScheduleRequestError("Choose Instagram and/or Facebook.", code="NO_PLATFORM")
+    job, _created = enqueue_durable_job(
+        session,
+        task_name=CANCEL_TASK,
+        task_type="PUBLISH",
+        payload={
+            "content_package_id": str(pkg.id),
+            "move_to": move_to.astimezone(UTC).isoformat() if move_to else None,
+            "platforms": chosen,
+            "actor_id": actor_id,
+        },
+        idempotency_key=f"cancel:{pkg.id}:{now.astimezone(UTC).isoformat()}",
+        brand_profile_id=brand.id,
+        queue_name=queue_for_task(CANCEL_TASK),
+        maximum_attempts=4,
+    )
+    record_audit_event(
+        session,
+        actor_id=actor_id,
+        action="POST_MOVE_REQUESTED" if move_to else "POST_CANCEL_REQUESTED",
+        target_type="content_package",
+        target_id=str(pkg.id),
+        outcome="SUCCESS",
+        metadata={"move_to": move_to.astimezone(UTC).isoformat() if move_to else None},
+    )
+    return job
+
+
+def handle_cancel_post(
+    session: Session,
+    job: JobRun,
+    *,
+    clients: ClientFactory = _clients,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    now = now or datetime.now(UTC)
+    payload = dict(job.payload or {})
+    try:
+        package_id = uuid.UUID(str(payload["content_package_id"]))
+        move_to = (
+            datetime.fromisoformat(str(payload["move_to"])) if payload.get("move_to") else None
+        )
+    except (KeyError, ValueError) as exc:
+        raise PermanentTaskError("Invalid cancel payload.", code="BAD_PAYLOAD") from exc
+    pkg = session.get(ContentPackage, package_id)
+    if pkg is None:
+        raise PermanentTaskError("Content package not found.", code="NOT_FOUND")
+    brand = session.get(BrandProfile, pkg.brand_profile_id)
+    if brand is None:
+        raise PermanentTaskError("Brand not found.", code="NOT_FOUND")
+    rows = cancellable_schedules(session, pkg)
+    if rows and any(
+        s.status == "SCHEDULED" and s.scheduled_at <= now + timedelta(minutes=1) for s in rows
+    ):
+        # The job waited (Postiz down?) until the post was due: never race the publish.
+        raise PermanentTaskError("Too close to the post time to cancel.", code="TOO_LATE")
+    cancelled = 0
+    if rows:
+        host, postiz = clients()
+        try:
+            for post_id in sorted({s.postiz_post_id for s in rows if s.postiz_post_id}):
+                try:
+                    postiz.delete_post(post_id)
+                except PostizError as exc:
+                    if exc.code == "POSTIZ_HTTP_404":
+                        continue  # already deleted in Postiz
+                    if exc.retryable:
+                        raise RetryableTaskError(str(exc), code=exc.code) from exc
+                    raise PermanentTaskError(str(exc), code=exc.code) from exc
+        finally:
+            host.close()
+            postiz.close()
+        for s in rows:
+            s.status = "CANCELLED"
+            cancelled += 1
+        session.flush()
+        _settle_package(session, pkg.id)
+        session.refresh(pkg)
+        record_audit_event(
+            session,
+            actor_id=str(payload.get("actor_id") or CANCEL_ACTOR),
+            action="POST_CANCELLED",
+            target_type="content_package",
+            target_id=str(pkg.id),
+            outcome="SUCCESS",
+            metadata={"platforms": sorted({s.platform for s in rows})},
+        )
+    out: dict[str, Any] = {"cancelled": cancelled, "status": pkg.status}
+    if move_to is not None:
+        try:
+            request_schedule(
+                session,
+                pkg=pkg,
+                brand=brand,
+                when=move_to,
+                platforms=list(payload.get("platforms") or PLATFORMS),
+                actor_id=str(payload.get("actor_id") or CANCEL_ACTOR),
+                now=now,
+            )
+            out["moved_to"] = move_to.astimezone(UTC).isoformat()
+        except ScheduleRequestError as exc:
+            # The old post is gone either way; the owner picks another time in Approved.
+            out["move_error"] = exc.code
+            queue_alert(
+                session,
+                key=f"move-failed:{pkg.id}:{move_to.isoformat()}",
+                text=(
+                    "⚠️ <b>Post cancelled, but not moved</b>\n"
+                    f"{e(short(pkg.title))}\n{e(str(exc))}\n"
+                    "Pick another time under Approvals → Approved."
+                ),
+                severity="warning",
+            )
+    return out
