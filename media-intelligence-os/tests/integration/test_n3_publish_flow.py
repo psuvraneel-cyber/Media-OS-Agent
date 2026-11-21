@@ -818,7 +818,7 @@ def test_learning_report_measures_posts_and_holds_back_verdicts(
         assert r["counts"] == {"published": 5, "measured": 5, "waiting_for_72h": 0}
         reel = next(p for p in r["posts"] if p["features"]["format"] == "REEL")
         # Views at 72 h are interpolated between the 24 h (150) and 96 h (300) syncs.
-        assert reel["views_72h"] == 250 and reel["actual_lift"] > 10
+        assert reel["audience_72h"] == 250 and reel["actual_lift"] > 10
         assert reel["predicted_lift"] is not None
         formats = {g["value"]: g for g in r["groups"]["format"]}
         assert formats["REEL"]["verdict"] == "NOT_ENOUGH_DATA" and formats["REEL"]["needed"] == 29
@@ -1540,6 +1540,7 @@ def test_permission_failure_is_never_retried(env: dict[str, Any]) -> None:
 
 class _FakeBot:
     chat_id = "4242"
+    bot_id = "8000"
 
     def __init__(self, updates: list[dict[str, Any]]) -> None:
         self.updates = updates
@@ -1562,7 +1563,12 @@ def _update(update_id: int, chat: str, text: str, age_minutes: int = 0) -> dict[
     sent = int((datetime.now(UTC) - timedelta(minutes=age_minutes)).timestamp())
     return {
         "update_id": update_id,
-        "message": {"chat": {"id": int(chat)}, "date": sent, "text": text},
+        "message": {
+            "chat": {"id": int(chat)},
+            "from": {"id": int(chat)},
+            "date": sent,
+            "text": text,
+        },
     }
 
 
@@ -2601,6 +2607,7 @@ class _ReviewBot(_FakeBot):
     def __init__(self, updates: list[dict[str, Any]]) -> None:
         super().__init__(updates)
         self.photos: list[int] = []
+        self.photo_bytes: list[bytes] = []
         self.cards: list[tuple[str, Any]] = []
         self.asks: list[str] = []
         self.answered: list[str] = []
@@ -2608,6 +2615,7 @@ class _ReviewBot(_FakeBot):
 
     def send_photos(self, photos: list[bytes], **_: Any) -> None:
         self.photos.append(len(photos))
+        self.photo_bytes.extend(photos)
 
     def send_message(self, text: str, **kw: Any) -> Any:
         self.sent.append(text)
@@ -2665,12 +2673,13 @@ def _ready_for_review(
     return pid
 
 
-def _press(update_id: int, chat: str, data: str) -> dict[str, Any]:
+def _press(update_id: int, chat: str, data: str, sender: str | None = None) -> dict[str, Any]:
     return {
         "update_id": update_id,
         "callback_query": {
             "id": f"q{update_id}",
             "data": data,
+            "from": {"id": int(sender or chat)},
             "message": {"message_id": 77, "chat": {"id": int(chat)}},
         },
     }
@@ -2682,9 +2691,10 @@ def _reply(update_id: int, asked: str, text: str) -> dict[str, Any]:
         "update_id": update_id,
         "message": {
             "chat": {"id": 4242},
+            "from": {"id": 4242},
             "date": sent,
             "text": text,
-            "reply_to_message": {"text": asked},
+            "reply_to_message": {"text": asked, "from": {"id": 8000, "is_bot": True}},
         },
     }
 
@@ -2729,12 +2739,21 @@ def test_review_card_sends_the_slides_and_approve_works_from_telegram(
     assert out["sent"] is True and bot.photos == [5]
     text, buttons = bot.cards[0]
     assert "Ready for your review" in text
-    assert [b["callback_data"] for b in buttons[0]] == [f"ap:{pid}", f"rj:{pid}"]
+    assert [b["callback_data"] for b in buttons[0]] == [f"ap:{pid}:1", f"rj:{pid}:1"]
+    # The album carries the real slide files, in order.
+    slides = sorted((tmp_path / "carousels" / pid / "v1").glob("slide-*.png"))
+    assert bot.photo_bytes == [f.read_bytes() for f in slides]
 
     try:
-        stranger = _ReviewBot([_press(40, "999", f"ap:{pid}")])
+        stranger = _ReviewBot([_press(40, "999", f"ap:{pid}:1")])
         assert _poll(env, stranger, "test:tg:poll:0")["ignored_other_chats"] == 1
-        owner = _ReviewBot([_press(41, "4242", f"ap:{pid}")])
+        # Someone else in the owner's chat (a group) can see the card but not act on it.
+        member = _ReviewBot([_press(39, "4242", f"ap:{pid}:1", sender="777")])
+        assert _poll(env, member, "test:tg:poll:00")["ignored_other_chats"] == 1
+        # A card for an older version can't act on the current one.
+        stale = _ReviewBot([_press(38, "4242", f"ap:{pid}:0")])
+        assert _poll(env, stale, "test:tg:poll:000")["review_actions"] == ["stale-card"]
+        owner = _ReviewBot([_press(41, "4242", f"ap:{pid}:1")])
         out = _poll(env, owner, "test:tg:poll:1")
         assert out["review_actions"] == ["approved"]
         assert owner.answered == ["Approved"] and owner.replaced == [77]
@@ -2742,7 +2761,7 @@ def test_review_card_sends_the_slides_and_approve_works_from_telegram(
             pkg = db.get(ContentPackage, uuid.UUID(pid))
             assert pkg is not None and pkg.approval_status == "APPROVED"
         # Pressing again is harmless.
-        again = _ReviewBot([_press(42, "4242", f"ap:{pid}")])
+        again = _ReviewBot([_press(42, "4242", f"ap:{pid}:1")])
         assert _poll(env, again, "test:tg:poll:2")["review_actions"] == [
             "approve-refused:ALREADY_DECIDED"
         ]
@@ -2767,14 +2786,23 @@ def test_reject_with_a_reason_and_edit_the_caption_from_telegram(
     edit_id = _ready_for_review(env, client, monkeypatch, "test:tg:3", tmp_path)
     try:
         bot = _ReviewBot(
-            [_press(50, "4242", f"rj:{reject_id}"), _press(51, "4242", f"ed:{edit_id}")]
+            [_press(50, "4242", f"rj:{reject_id}:1"), _press(51, "4242", f"ed:{edit_id}:1")]
         )
         assert _poll(env, bot, "test:tg:poll:3")["review_actions"] == [
             "asked-reason",
             "asked-caption",
         ]
         ask_reason, ask_caption = bot.asks
-        assert f"[ref:rj:{reject_id}]" in ask_reason and f"[ref:ed:{edit_id}]" in ask_caption
+        assert f"[ref:rj:{reject_id}:1]" in ask_reason and f"[ref:ed:{edit_id}:1]" in ask_caption
+        # A "question" someone else typed, with a copied marker, is never acted on.
+        forged = _reply(49, ask_reason, "Approve it")
+        forged["message"]["reply_to_message"]["from"] = {"id": 777, "is_bot": False}
+        out = _poll(env, _ReviewBot([forged]), "test:tg:poll:34")
+        assert "review_actions" not in out
+        # A sticker or voice note isn't an answer: nothing is rejected.
+        sticker = _reply(51, ask_reason, "")
+        out = _poll(env, _ReviewBot([sticker]), "test:tg:poll:35")
+        assert out["review_actions"] == ["no-text"]
 
         new_caption = f"বিয়ের কার্ড এখন সহজ। Bengali wedding cards, made easy. {PLAY}"
         replies = _ReviewBot(

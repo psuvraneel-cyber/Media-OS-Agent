@@ -195,6 +195,43 @@ def reply_for(session: Session, text: str, now: datetime) -> str:
     return HELP  # /help, /start, and anything else
 
 
+POLL_LOCK_ID = 74_210_001  # Postgres advisory lock: Telegram polling
+
+
+def _poll_lock(session: Session) -> bool:
+    from sqlalchemy import text
+
+    if session.get_bind().dialect.name != "postgresql":
+        return True
+    return bool(
+        session.execute(text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": POLL_LOCK_ID}).scalar()
+    )
+
+
+def _saved_offset(session: Session) -> int | None:
+    rows = session.execute(
+        select(JobRun.result_payload)
+        .where(JobRun.task_name == COMMANDS_TASK, JobRun.status == "SUCCEEDED")
+        .order_by(JobRun.worker_finished_at.desc().nulls_last())
+        .limit(50)
+    ).scalars()
+    offsets = [r.get("offset") for r in rows if isinstance(r, dict)]
+    ints = [o for o in offsets if isinstance(o, int)]
+    return max(ints) if ints else None
+
+
+def owner_user_id(chat_id: str) -> str:
+    """The Telegram user allowed to act on review cards: `TELEGRAM_OWNER_USER_ID`, or, in a
+    private chat with the bot, the chat id itself (it's the owner's user id there). A group chat
+    without `TELEGRAM_OWNER_USER_ID` allows nobody."""
+    import os
+
+    configured = os.environ.get("TELEGRAM_OWNER_USER_ID", "").strip()
+    if configured:
+        return configured
+    return chat_id if chat_id.isdigit() else "<no owner set for a group chat>"
+
+
 def handle_telegram_commands(
     session: Session,
     job: JobRun,
@@ -203,9 +240,11 @@ def handle_telegram_commands(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     now = now or datetime.now(UTC)
-    previous = _last_success(session, COMMANDS_TASK)
-    offset = (previous.result_payload or {}).get("offset") if previous else None
-    offset = offset if isinstance(offset, int) else None
+    # One poll at a time (a slow run can't overlap the next minute's), and the read position only
+    # ever moves forward: the highest offset any recent successful poll saved.
+    if not _poll_lock(session):
+        return {"skipped": "ANOTHER_POLL_RUNNING"}
+    offset = _saved_offset(session)
     try:
         client = telegram()
     except TelegramError as exc:
@@ -214,45 +253,51 @@ def handle_telegram_commands(
         return {"offset": offset, "handled": 0, "reason": "TELEGRAM_NOT_CONFIGURED"}
     handled = ignored = 0
     actions: list[str] = []
+    owner = owner_user_id(client.chat_id)
     try:
         updates = client.get_updates(offset=offset)
         for update in updates:
             update_id = update.get("update_id")
-            if isinstance(update_id, int):
-                offset = max(offset or 0, update_id + 1)
+            next_offset = update_id + 1 if isinstance(update_id, int) else None
             query = update.get("callback_query")
-            if isinstance(query, dict):
-                # A review button (Approve / Reject / Edit caption) from the owner's chat only.
-                q_chat = ((query.get("message") or {}).get("chat") or {}).get("id")
-                if str(q_chat) != client.chat_id:
-                    ignored += 1
-                    continue
-                actions.append(review.handle_button(session, client, query))
-                handled += 1
-                continue
             message = update.get("message")
-            if not isinstance(message, dict):
-                continue
-            chat = message.get("chat") or {}
-            sent_at = message.get("date")
-            text = str(message.get("text") or "")
-            if str(chat.get("id")) != client.chat_id:
-                ignored += 1  # someone else found the bot: never answer them
-                continue
-            if (
-                not isinstance(sent_at, int)
-                or now - datetime.fromtimestamp(sent_at, UTC) > MAX_MESSAGE_AGE
-            ):
-                continue
-            done = review.handle_reply(session, client, message)  # a reason or a new caption
-            if done is not None:
-                actions.append(done)
-                handled += 1
-                continue
-            if not text.startswith("/"):
-                continue
-            client.send_message(reply_for(session, text, now))
-            handled += 1
+            if isinstance(query, dict):
+                # A review button (Approve / Reject / Edit caption): the owner's chat, and pressed
+                # by the owner (in a group chat, other members can see the card but not act).
+                q_chat = ((query.get("message") or {}).get("chat") or {}).get("id")
+                presser = (query.get("from") or {}).get("id")
+                if str(q_chat) != client.chat_id or str(presser) != owner:
+                    ignored += 1
+                else:
+                    actions.append(review.handle_button(session, client, query))
+                    handled += 1
+            elif isinstance(message, dict):
+                chat = message.get("chat") or {}
+                sender = (message.get("from") or {}).get("id")
+                sent_at = message.get("date")
+                text = str(message.get("text") or "")
+                if str(chat.get("id")) != client.chat_id:
+                    ignored += 1  # someone else found the bot: never answer them
+                elif review.is_review_reply(message, client.bot_id):
+                    # A reason or a new caption: kept however late it comes (the owner may take a
+                    # while to answer), but only from the owner.
+                    if str(sender) != owner:
+                        ignored += 1
+                    else:
+                        actions.append(review.handle_reply(session, client, message) or "none")
+                        handled += 1
+                elif (
+                    isinstance(sent_at, int)
+                    and now - datetime.fromtimestamp(sent_at, UTC) <= MAX_MESSAGE_AGE
+                    and text.startswith("/")
+                    and str(sender) == owner  # status and queue are for the owner only
+                ):
+                    client.send_message(reply_for(session, text, now))
+                    handled += 1
+            # Only now is the update done: a Telegram blip above leaves it for the next poll, so a
+            # press or reply is never lost.
+            if next_offset is not None:
+                offset = max(offset or 0, next_offset)
     except TelegramError as exc:
         if exc.retryable:
             # A timeout or network blip: the next run (one minute later) polls again anyway, so

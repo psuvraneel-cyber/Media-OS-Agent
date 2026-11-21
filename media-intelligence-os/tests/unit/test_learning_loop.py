@@ -218,7 +218,7 @@ def _report(**over: Any) -> dict[str, Any]:
                 "schedule_id": "a",
                 "title": "Promo reel",
                 "published_at": (now - timedelta(days=4)).isoformat(),
-                "views_72h": 228,
+                "audience_72h": 228,
                 "actual_lift": 22.4,
                 "features": {"format": "REEL", "weekday": "Tue", "hour": "18:00"},
             },
@@ -226,7 +226,7 @@ def _report(**over: Any) -> dict[str, Any]:
                 "schedule_id": "b",
                 "title": "Card in minutes",
                 "published_at": (now - timedelta(days=5)).isoformat(),
-                "views_72h": 3,
+                "audience_72h": 3,
                 "actual_lift": 0.4,
                 "features": {"format": "CAROUSEL", "language": "EN", "pillar": "how_it_works"},
             },
@@ -273,15 +273,55 @@ def test_weekly_report_adds_a_facebook_line() -> None:
     from media_os_api.learning.weekly import facebook_line
 
     now = datetime(2026, 11, 23, 3, 30, tzinfo=UTC)
-    fb = {
+    old = (now - timedelta(days=5)).isoformat()
+    base: dict[str, Any] = {"settings": {"mature_after_hours": 72}, "generated_at": now.isoformat()}
+    fb: dict[str, Any] = {
+        **base,
         "counts": {"published": 2},
         "posts": [
-            {"title": "Card in minutes", "views_72h": 3},
-            {"title": "Promo reel", "views_72h": 11},
+            {
+                "title": "Card in minutes",
+                "audience_72h": 3,
+                "audience_metric": "unique_viewers",
+                "actual_lift": 0.5,
+                "published_at": old,
+            },
+            {
+                "title": "Promo reel",
+                "audience_72h": 11,
+                "audience_metric": "views",
+                "actual_lift": 2.0,
+                "published_at": old,
+            },
         ],
     }
-    assert "2 post(s) measured, 14 people reached" in facebook_line(fb)
-    assert "Promo reel (11)" in facebook_line(fb)
-    assert facebook_line({"counts": {"published": 0}, "posts": []}) == ""
+    line = facebook_line(fb)
+    # Reach and views are different numbers: never added up, each named for what it is.
+    assert "2 post(s) measured" in line and "14" not in line
+    assert "Promo reel (11 views, 2.0× the Page's usual)" in line
+    assert facebook_line({**base, "counts": {"published": 0}, "posts": []}) == ""
+    unmeasured: dict[str, Any] = {
+        **base,
+        "counts": {"published": 1},
+        "posts": [{"title": "x", "audience_72h": None, "actual_lift": None, "published_at": old}],
+    }
+    assert "hasn't reported audience numbers" in facebook_line(unmeasured)
+    young = {**unmeasured, "posts": [{**unmeasured["posts"][0], "published_at": now.isoformat()}]}
+    assert "no post has reached 3 days old" in facebook_line(young)
     text = weekly_text(_report(), brand_name="Nimontron", now=now, facebook=fb)
     assert "📘 <b>Facebook</b>" in text
+
+
+def test_each_account_and_metric_has_its_own_baseline() -> None:
+    page_a = [_outcome(i, 100) for i in range(4)]
+    page_b = [_outcome(10 + i, 2) for i in range(4)]
+    for o in page_a:
+        o.channel = "page-a"
+    for o in page_b:
+        o.channel = "page-b"
+    video = _outcome(20, 50)
+    video.channel, video.audience_metric = "page-a", "plays"
+    core.assign_lifts([*page_a, *page_b, video])
+    assert page_b[-1].baseline == 2  # not dragged up by page A's 100s
+    assert page_a[-1].baseline == 100
+    assert video.baseline == 50  # its own metric: only itself so far
