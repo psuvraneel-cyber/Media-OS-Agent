@@ -1,0 +1,25 @@
+# Applied on top of your existing Postiz compose file (copied from C:\Media OS Agent\postiz-runtime)
+# on the VM:
+#
+#   docker compose -f docker-compose.yaml -f postiz-cloud.override.yaml up -d
+#
+# It changes only what differs in the cloud:
+#   * Postiz's public URLs become the VM's Tailscale HTTPS name (set POSTIZ_PUBLIC_URL in .env,
+#     e.g. https://postiz.tail1234.ts.net). `tailscale serve` provides the certificate.
+#   * The web port stays as in your compose file (127.0.0.1:4007 on the VM); only `tailscale serve`
+#     exposes it, and only to your own Tailscale devices. Nothing is published to the internet.
+#   * The debugging-only services (Spotlight, Temporal UI) don't start.
+
+services:
+  postiz:
+    environment:
+      MAIN_URL: "${POSTIZ_PUBLIC_URL:?set POSTIZ_PUBLIC_URL in .env}"
+      FRONTEND_URL: "${POSTIZ_PUBLIC_URL}"
+      NEXT_PUBLIC_BACKEND_URL: "${POSTIZ_PUBLIC_URL}/api"
+    restart: unless-stopped
+
+  spotlight:
+    profiles: ["debug"]
+
+  temporal-ui:
+    profiles: ["debug"]
