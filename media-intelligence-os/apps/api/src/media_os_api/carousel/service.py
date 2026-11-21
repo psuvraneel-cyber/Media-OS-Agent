@@ -456,3 +456,87 @@ def rerender_package(session: Session, pkg: ContentPackage, *, actor_id: str) ->
     )
     enqueue_render(session, pkg)
     session.flush()
+
+
+# --------------------------------------------------------------------------- decisions
+
+
+class DecisionError(ValueError):
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def active_slides(session: Session, pkg: ContentPackage) -> list[Any]:
+    from media_os_api.db.models import Asset
+
+    return list(
+        session.execute(
+            select(Asset)
+            .where(
+                Asset.content_package_id == pkg.id,
+                Asset.asset_type == "CAROUSEL_SLIDE",
+                Asset.status == "ACTIVE",
+            )
+            .order_by(Asset.local_path)
+        ).scalars()
+    )
+
+
+def decide_package(
+    session: Session,
+    pkg: ContentPackage,
+    *,
+    approve: bool,
+    reason: str | None,
+    actor_id: str,
+) -> bool:
+    """Approve or reject a carousel awaiting review: the one set of rules the dashboard and the
+    Telegram buttons share. Returns True when auto-scheduling put an approved carousel in a slot.
+    """
+    lock_package(session, pkg)  # one at a time with re-renders and edits of this carousel
+    if pkg.approval_status != "PENDING":
+        raise DecisionError(f"Already {pkg.approval_status}.", code="ALREADY_DECIDED")
+    note = (reason or "").strip()[:500]
+    if approve:
+        if pkg.status != "QA_PASSED":
+            raise DecisionError("Only QA-passed carousels can be approved.", code="QA_NOT_PASSED")
+        if pkg.format == "CAROUSEL" and missing_slides(
+            active_slides(session, pkg), expected_slides(pkg)
+        ):
+            raise DecisionError(
+                "Some slide images are missing. Re-render the slides first.",
+                code="SLIDES_MISSING",
+            )
+        pkg.approval_status = "APPROVED"
+    else:
+        pkg.approval_status = "REJECTED"
+        transition_content_status(
+            session,
+            content_package_id=pkg.id,
+            to_status=ContentLifecycleStatus.REJECTED,
+            actor_id=actor_id,
+            reason=note or "Rejected in review",
+            expected_brand_id=pkg.brand_profile_id,
+        )
+        session.refresh(pkg)
+    record_audit_event(
+        session,
+        actor_id=actor_id,
+        action="CAROUSEL_APPROVED" if approve else "CAROUSEL_REJECTED",
+        target_type="content_package",
+        target_id=str(pkg.id),
+        outcome="SUCCESS",
+        metadata={"reason": note[:200]},
+    )
+    session.flush()
+    if not approve:
+        return False
+    # Autopilot: an approved Media OS carousel goes straight into the next free posting slot when
+    # the brand has auto-scheduling on (owner uploads are scheduled by hand).
+    from media_os_api.content.autopilot import auto_schedule
+
+    brand = session.get(BrandProfile, pkg.brand_profile_id)
+    scheduled = brand is not None and auto_schedule(session, pkg, brand) is not None
+    session.flush()
+    return scheduled

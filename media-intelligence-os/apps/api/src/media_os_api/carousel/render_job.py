@@ -188,6 +188,11 @@ def handle_render_carousel(session: Session, job: JobRun) -> dict[str, Any]:
             idempotency_key=f"qa:{pkg.id}:v{pkg.version}",
             expected_brand_id=pkg.brand_profile_id,
         )
+        if pkg.approval_status == "PENDING":
+            # Review it from the phone: the worker sends the slides and the buttons on Telegram.
+            from media_os_api.notify.review import enqueue_review_card
+
+            enqueue_review_card(session, pkg)
     final = session.execute(
         select(ContentPackage.status).where(ContentPackage.id == pkg.id)
     ).scalar_one()
