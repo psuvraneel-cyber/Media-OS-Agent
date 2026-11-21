@@ -36,6 +36,7 @@ export interface LearningPost {
 
 export interface LearningReport {
   platform: string;
+  audience_note?: string;
   settings: { min_posts: number; mature_after_hours: number; baseline_posts: number; explore_share: number };
   counts: { published: number; measured: number; waiting_for_72h: number };
   model: {
@@ -112,7 +113,8 @@ export function LearningPanel({
   initial?: Initial<LearningReport>;
 }) {
   const [dimension, setDimension] = useState("format");
-  const { data, error } = useApiResource<LearningReport>(learningPath(brandId), initial);
+  const [platform, setPlatform] = useState<"INSTAGRAM" | "FACEBOOK">("INSTAGRAM");
+  const { data, error } = useApiResource<LearningReport>(learningPath(brandId, platform), initial);
 
   if (error) return <ErrorBanner title="Could not load what's working" message={error} />;
   if (!isReport(data)) return null;
@@ -140,6 +142,25 @@ export function LearningPanel({
           </Badge>
         }
       >
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" role="radiogroup" aria-label="Platform">
+          {(["INSTAGRAM", "FACEBOOK"] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              role="radio"
+              aria-checked={platform === p}
+              onClick={() => setPlatform(p)}
+              className={`rounded-md border px-2.5 py-1 ${
+                platform === p
+                  ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
+                  : "border-white/[0.08] text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              {p === "INSTAGRAM" ? "Instagram" : "Facebook"}
+            </button>
+          ))}
+          {report.audience_note ? <span className="text-slate-500">{report.audience_note}</span> : null}
+        </div>
         <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Compare by">
           {DIMENSIONS.map((d) => (
             <button

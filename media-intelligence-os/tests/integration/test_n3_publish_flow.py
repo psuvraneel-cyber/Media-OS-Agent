@@ -709,8 +709,14 @@ def test_scheduling_refuses_empty_slide_files(env: dict[str, Any], tmp_path: Pat
 # ------------------------------------------------------------------ learning loop (N5)
 
 
-def _published_posts(env: dict[str, Any], specs: list[tuple[str, str, int]]) -> list[uuid.UUID]:
-    """Published Instagram posts with metrics: (format, hook, views at 96 h) each, a day apart."""
+def _published_posts(
+    env: dict[str, Any],
+    specs: list[tuple[str, str, int]],
+    *,
+    platform: str = "INSTAGRAM",
+    metric: str = "views",
+) -> list[uuid.UUID]:
+    """Published posts with metrics: (format, hook, audience at 96 h) each, a day apart."""
     from decimal import Decimal
 
     from media_os_api.db.models import PostMetricObservation
@@ -723,7 +729,7 @@ def _published_posts(env: dict[str, Any], specs: list[tuple[str, str, int]]) -> 
         svc.sync_channels(db, brand, env["postiz"])
         chan = db.execute(
             select(ChannelAccount).where(
-                ChannelAccount.brand_profile_id == brand.id, ChannelAccount.platform == "INSTAGRAM"
+                ChannelAccount.brand_profile_id == brand.id, ChannelAccount.platform == platform
             )
         ).scalar_one()
         for i, (fmt, hook, views) in enumerate(specs):
@@ -757,8 +763,8 @@ def _published_posts(env: dict[str, Any], specs: list[tuple[str, str, int]]) -> 
                 brand_profile_id=brand.id,
                 channel_account_id=chan.id,
                 content_package_id=pkg.id,
-                platform="INSTAGRAM",
-                postiz_post_id=f"learn-{i}",
+                platform=platform,
+                postiz_post_id=f"learn-{platform}-{i}",
                 scheduled_at=when,
                 status="PUBLISHED",
                 idempotency_key=f"learn-{uuid.uuid4().hex}",
@@ -772,8 +778,8 @@ def _published_posts(env: dict[str, Any], specs: list[tuple[str, str, int]]) -> 
                         channel_account_id=chan.id,
                         content_package_id=pkg.id,
                         publish_schedule_id=sched.id,
-                        platform="INSTAGRAM",
-                        metric_key="views",
+                        platform=platform,
+                        metric_key=metric,
                         value=Decimal(int(views * share)),
                         observed_at=when + timedelta(hours=hours),
                         source="test",
@@ -826,6 +832,28 @@ def test_learning_report_measures_posts_and_holds_back_verdicts(
         [alert] = _alerts(env, "weekly")
         text = alert.payload["text"]
         assert "Weekly insights" in text and "No firm conclusions yet" in text
+    finally:
+        _drop_observations(env)
+
+
+def test_facebook_posts_are_measured_by_their_reach(
+    env: dict[str, Any], client: TestClient
+) -> None:
+    _published_posts(
+        env,
+        [("CAROUSEL", "QUESTION", 4), ("CAROUSEL", "MISTAKE", 2), ("CAROUSEL", "QUESTION", 8)],
+        platform="FACEBOOK",
+        metric="unique_viewers",
+    )
+    try:
+        r = client.get(f"/api/v1/analytics/learning?{BRAND_Q}&platform=FACEBOOK").json()
+        assert r["platform"] == "FACEBOOK" and r["counts"]["measured"] == 3
+        assert {p["audience_metric"] for p in r["posts"]} == {"unique_viewers"}
+        assert all(p["actual_lift"] is not None for p in r["posts"])
+        assert "reach" in r["audience_note"]
+        # Instagram's report doesn't mix in Facebook posts.
+        ig = client.get(f"/api/v1/analytics/learning?{BRAND_Q}").json()
+        assert ig["counts"]["published"] == 0
     finally:
         _drop_observations(env)
 

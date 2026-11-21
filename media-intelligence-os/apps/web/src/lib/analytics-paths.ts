@@ -44,8 +44,9 @@ export function assetUrl(brand: string, assetId: string): string {
   return `/api/v1/content/assets/${encodeURIComponent(assetId)}/file?${buildQuery({ brand })}`;
 }
 
-export function learningPath(brand: string): string {
-  return `/analytics/learning?${buildQuery({ brand })}`;
+export function learningPath(brand: string, platform: "INSTAGRAM" | "FACEBOOK" = "INSTAGRAM"): string {
+  // Instagram is the default, so its path stays the one the server pre-loads.
+  return `/analytics/learning?${buildQuery(platform === "INSTAGRAM" ? { brand } : { brand, platform })}`;
 }
 
 export function accountPath(brand: string, window: "7" | "30" = "7"): string {

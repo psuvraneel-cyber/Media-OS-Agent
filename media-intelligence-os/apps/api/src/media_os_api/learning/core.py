@@ -72,7 +72,8 @@ class Outcome:
     published_at: datetime
     title: str
     features: dict[str, str]  # tag -> value, e.g. {"hook_type": "QUESTION"}
-    views: float | None = None
+    views: float | None = None  # the audience number (see AUDIENCE_KEYS)
+    audience_metric: str | None = None  # which one: views | unique_viewers | plays
     reach: float | None = None
     engagement: float | None = None
     mature: bool = False
@@ -107,6 +108,18 @@ def measure(
         if v is not None:
             out[key] = v
     return out, bool(out)
+
+
+# A post's audience, by the best number its platform reports: Instagram and Facebook videos
+# report views; Facebook image posts only report unique viewers (their reach); plays last.
+AUDIENCE_KEYS = ("views", "unique_viewers", "plays")
+
+
+def audience_of(values: Mapping[str, float]) -> tuple[float | None, str | None]:
+    for key in AUDIENCE_KEYS:
+        if key in values:
+            return values[key], key
+    return None, None
 
 
 def engagement_of(values: Mapping[str, float]) -> float | None:

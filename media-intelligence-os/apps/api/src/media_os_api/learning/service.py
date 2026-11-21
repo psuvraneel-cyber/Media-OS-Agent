@@ -35,6 +35,14 @@ MODEL_DIMENSIONS = (
 REPORT_DIMENSIONS = (*MODEL_DIMENSIONS, "visual_style", "call_to_action", "strategy", "hour")
 PRIMARY_PLATFORM = "INSTAGRAM"  # Facebook reach is still close to zero
 MODEL_VERSION = "learned-v1"
+AUDIENCE_NOTES = {
+    "INSTAGRAM": "Views (times shown).",
+    "FACEBOOK": (
+        "Facebook image posts only report reach (unique viewers), so that's what they're "
+        "measured by; videos and reels report views. Each post is compared with the Page's own "
+        "usual post."
+    ),
+}
 WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
@@ -91,6 +99,7 @@ def outcomes_for(
     for post in _load_posts(db, brand.id, platform=platform):
         series = {k: [(o.at, o.value) for o in obs] for k, obs in post.series.items()}
         values, mature = core.measure(series, post.published_at, now)
+        audience, audience_key = core.audience_of(values)
         score = (post.package.score or {}).get("total")
         out.append(
             core.Outcome(
@@ -100,10 +109,11 @@ def outcomes_for(
                 published_at=post.published_at,
                 title=_post_title(post.package),
                 features=features_of(post.package, post.published_at, brand.timezone),
-                views=values.get("views"),
-                reach=values.get("reach"),
+                views=audience,
+                audience_metric=audience_key,
+                reach=values.get("reach", values.get("unique_viewers")),
                 engagement=core.engagement_of(values),
-                mature=mature and "views" in values,
+                mature=mature and audience is not None,
                 v0_score=float(score) if isinstance(score, int | float) else None,
             )
         )
@@ -137,6 +147,7 @@ def _post_json(o: core.Outcome) -> dict[str, Any]:
         "published_at": o.published_at.astimezone(UTC).isoformat(),
         "mature": o.mature,
         "views_72h": round(o.views) if o.views is not None else None,
+        "audience_metric": o.audience_metric,
         "reach_72h": round(o.reach) if o.reach is not None else None,
         "engagement_rate": round(o.engagement_rate, 4) if o.engagement_rate is not None else None,
         "baseline_views": round(o.baseline) if o.baseline is not None else None,
@@ -167,6 +178,7 @@ def learning_report(
     return {
         "brand": brand.slug,
         "platform": platform,
+        "audience_note": AUDIENCE_NOTES.get(platform, "Views."),
         "generated_at": now.isoformat(),
         "settings": {
             "min_posts": need,
