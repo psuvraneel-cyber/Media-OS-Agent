@@ -65,6 +65,8 @@ class TelegramClient:
             )
         self._token = token
         self.chat_id = chat_id
+        # The bot's own user id: the part of the token before the colon (public, not secret).
+        self.bot_id = token.split(":", 1)[0]
         self._client = httpx.Client(
             transport=transport,
             follow_redirects=False,

@@ -155,3 +155,41 @@ def test_card_shows_the_post_and_escapes_its_text() -> None:
     assert "heuristic" in text  # the learned score isn't trusted yet
     pkg.score = {"total": 82, "learned": {"active": True, "predicted_lift": 1.8}}
     assert "Expected: 1.8× your usual views" in card_text(pkg)
+
+
+def test_dashboard_link_only_for_addresses_a_phone_can_open() -> None:
+    from media_os_api.notify.review import phone_reachable
+
+    assert phone_reachable("https://media-os.tail1234.ts.net")
+    assert phone_reachable("http://100.101.102.103:3100")
+    for bad in (
+        "http://127.0.0.1:3100",
+        "http://127.0.0.2:3100",
+        "http://[::1]:3100",
+        "http://localhost:3100",
+        "http://app.localhost:3100",
+        "http://[::1",  # malformed
+        "ftp://example.com",
+        "",
+    ):
+        assert not phone_reachable(bad), bad
+
+
+def test_prompt_length_counts_emoji_like_telegram() -> None:
+    from media_os_api.notify.review import PROMPT_LIMIT, caption_prompt, tg_len
+
+    assert tg_len("🎉") == 2 and tg_len("a") == 1
+    pkg = ContentPackage(id=uuid.uuid4(), version=1, caption="🎉" * 3000)
+    assert tg_len(caption_prompt("Title", pkg)) <= PROMPT_LIMIT
+
+
+def test_replies_count_only_to_the_bots_own_questions() -> None:
+    from media_os_api.notify.review import is_review_reply
+
+    marker = f"[ref:rj:{uuid.uuid4()}:3]"
+    from_bot = {"reply_to_message": {"text": marker, "from": {"id": 8000, "is_bot": True}}}
+    from_user = {"reply_to_message": {"text": marker, "from": {"id": 8000, "is_bot": False}}}
+    other_bot = {"reply_to_message": {"text": marker, "from": {"id": 9999, "is_bot": True}}}
+    assert is_review_reply(from_bot, "8000")
+    assert not is_review_reply(from_user, "8000")
+    assert not is_review_reply(other_bot, "8000")

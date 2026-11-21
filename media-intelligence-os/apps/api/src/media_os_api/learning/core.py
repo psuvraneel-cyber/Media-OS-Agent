@@ -208,7 +208,10 @@ def group_stats(
                 if posts
                 else None,
                 mean_log_lift=mean,
-                avg_views=_mean(o.views for o in posts),
+                # Only meaningful when every post is the same account measured the same way.
+                avg_views=_mean(o.views for o in posts)
+                if len({(o.channel, o.audience_metric) for o in posts}) == 1
+                else None,
                 avg_engagement_rate=_mean(o.engagement_rate for o in posts),
                 verdict=verdict,
                 needed=max(0, min_posts - n),

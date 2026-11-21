@@ -17,6 +17,7 @@ Approve / Reject / Edit caption buttons.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import uuid
 from datetime import UTC, datetime
@@ -64,10 +65,27 @@ def review_buttons(pkg_id: uuid.UUID | str, version: int = 1) -> list[list[dict[
         [{"text": "✏️ Edit caption", "callback_data": f"ed:{pkg_id}:{version}"}],
     ]
     url = _dashboard()
-    # A loopback address would open the phone itself: only link a dashboard the phone can reach.
-    if urlparse(url).hostname not in ("127.0.0.1", "localhost", "::1"):
+    if phone_reachable(url):
         rows[1].append({"text": "Open in Media OS", "url": f"{url}/approvals"})
     return rows
+
+
+def phone_reachable(url: str) -> bool:
+    """A dashboard address a phone could open: http(s), and not a loopback address (which would
+    open the phone itself). A malformed address just means no button."""
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https") or not host:
+        return False
+    if host == "localhost" or host.endswith(".localhost"):
+        return False
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True  # a host name
 
 
 def _dashboard() -> str:
@@ -118,8 +136,6 @@ def card_text(pkg: ContentPackage) -> str:
 def handle_review_card(
     session: Session, job: JobRun, *, telegram: Any = telegram_from_env
 ) -> dict[str, Any]:
-    from media_os_api.carousel.service import active_slides, expected_slides
-    from media_os_api.content.uploads import resolve_asset_path
 
     payload = dict(job.payload or {})
     try:
@@ -130,8 +146,14 @@ def handle_review_card(
     if pkg is None or pkg.status != "QA_PASSED" or pkg.approval_status != "PENDING":
         return {"sent": False, "reason": "NOT_WAITING_FOR_REVIEW"}
     version = payload.get("version")
-    if isinstance(version, int) and version != pkg.version:
+    if not isinstance(version, int):
+        # A job queued before versions were recorded: its version is in its idempotency key.
+        found = re.search(r":v(\d+)$", job.idempotency_key or "")
+        version = int(found.group(1)) if found else None
+    if version is None or version != pkg.version:
         return {"sent": False, "reason": "NEWER_VERSION"}  # that version's own job sends its card
+    if _marked(session, pkg, CARD_SENT):
+        return {"sent": False, "reason": "ALREADY_SENT"}
     try:
         client = telegram()
     except TelegramError as exc:
@@ -144,27 +166,17 @@ def handle_review_card(
             "card couldn't be sent.",
             code="TELEGRAM_NOT_CONFIGURED",
         )
-    photos: list[bytes] = []
-    slides = active_slides(session, pkg)
-    for a in slides:
-        path = resolve_asset_path(a.local_path)
-        data = path.read_bytes() if path is not None and path.is_file() else b""
-        if not data or (a.file_size and len(data) < a.file_size):
-            client.close()
-            raise RetryableTaskError(
-                f"Slide not readable yet: {a.local_path}", code="SLIDE_MISSING"
-            )
-        photos.append(data)
-    expected = expected_slides(pkg)
-    if not photos or (expected is not None and len(photos) != expected):
-        client.close()
-        raise RetryableTaskError("Not every slide is available yet.", code="SLIDE_MISSING")
     try:
-        # A retry after the album went out (e.g. the card failed) doesn't send the album again.
-        if not _album_sent(session, pkg):
+        photos = _read_slides(session, pkg)
+        # Telegram's Bot API has no idempotency keys, so delivery is at-least-once: a marker is
+        # committed right after each send, and a retry skips what's marked. Only a crash in the
+        # instant between Telegram accepting a send and its marker committing can repeat it,
+        # which is preferred over a card that never arrives.
+        if not _marked(session, pkg, ALBUM_SENT):
             client.send_photos(photos, silent=True)
-            _mark_album_sent(session, pkg)
+            _mark(session, pkg, ALBUM_SENT)
         sent = client.send_message(card_text(pkg), buttons=review_buttons(pkg.id, pkg.version))
+        _mark(session, pkg, CARD_SENT)
     except TelegramError as exc:
         if exc.retryable:
             raise RetryableTaskError(str(exc), code=exc.code) from None
@@ -175,13 +187,37 @@ def handle_review_card(
 
 
 ALBUM_SENT = "REVIEW_ALBUM_SENT"
+CARD_SENT = "REVIEW_CARD_SENT"
+
+
+def _read_slides(session: Session, pkg: ContentPackage) -> list[bytes]:
+    """Every slide's bytes, or a retryable error when any isn't complete and readable yet."""
+    from media_os_api.carousel.service import active_slides, expected_slides
+    from media_os_api.content.uploads import resolve_asset_path
+
+    photos: list[bytes] = []
+    for a in active_slides(session, pkg):
+        try:
+            path = resolve_asset_path(a.local_path)
+            data = path.read_bytes() if path is not None and path.is_file() else b""
+        except OSError:
+            data = b""
+        if not data or (a.file_size and len(data) < a.file_size):
+            raise RetryableTaskError(
+                f"Slide not readable yet: {a.local_path}", code="SLIDE_MISSING"
+            )
+        photos.append(data)
+    expected = expected_slides(pkg)
+    if not photos or (expected is not None and len(photos) != expected):
+        raise RetryableTaskError("Not every slide is available yet.", code="SLIDE_MISSING")
+    return photos
 
 
 def _album_key(pkg: ContentPackage) -> str:
     return f"{pkg.id}:v{pkg.version}"
 
 
-def _album_sent(session: Session, pkg: ContentPackage) -> bool:
+def _marked(session: Session, pkg: ContentPackage, action: str) -> bool:
     from sqlalchemy import select
 
     from media_os_api.db.models import AuditEvent
@@ -189,14 +225,14 @@ def _album_sent(session: Session, pkg: ContentPackage) -> bool:
     return (
         session.execute(
             select(AuditEvent.id).where(
-                AuditEvent.action == ALBUM_SENT, AuditEvent.target_id == _album_key(pkg)
+                AuditEvent.action == action, AuditEvent.target_id == _album_key(pkg)
             )
         ).first()
         is not None
     )
 
 
-def _mark_album_sent(session: Session, pkg: ContentPackage) -> None:
+def _mark(session: Session, pkg: ContentPackage, action: str) -> None:
     """Recorded in its own committed transaction, so it survives the job failing afterwards."""
     from sqlalchemy import Engine
 
@@ -209,7 +245,7 @@ def _mark_album_sent(session: Session, pkg: ContentPackage) -> None:
         record_audit_event(
             own,
             actor_id="worker:notify",
-            action=ALBUM_SENT,
+            action=action,
             target_type="content_package",
             target_id=_album_key(pkg),
             outcome="SUCCESS",
@@ -227,9 +263,19 @@ def _pkg(session: Session, raw: str) -> ContentPackage | None:
         return None
 
 
-def is_review_reply(message: dict[str, Any]) -> bool:
+def is_review_reply(message: dict[str, Any], bot_id: str | None = None) -> bool:
+    """A reply to one of the bot's own questions. The question must have been sent by the bot:
+    anyone can type a "[ref:...]" marker, so a reply to someone else's message never counts."""
     asked = message.get("reply_to_message") or {}
-    return bool(_REF.search(str(asked.get("text") or "")))
+    if not _REF.search(str(asked.get("text") or "")):
+        return False
+    sender = asked.get("from") or {}
+    return bot_id is None or (bool(sender.get("is_bot")) and str(sender.get("id")) == bot_id)
+
+
+def tg_len(text: str) -> int:
+    """Message length as Telegram counts it: UTF-16 code units (an emoji can be two)."""
+    return len(text.encode("utf-16-le")) // 2
 
 
 def caption_prompt(title: str, pkg: ContentPackage) -> str:
@@ -245,9 +291,10 @@ def caption_prompt(title: str, pkg: ContentPackage) -> str:
     while True:
         shown = caption[:keep] + ("…" if keep < len(caption) else "")
         text = f"{head}<pre>{msg.e(shown)}</pre>"
-        if len(text) <= PROMPT_LIMIT or keep == 0:
+        size = tg_len(text)
+        if size <= PROMPT_LIMIT or keep == 0:
             return text
-        keep = max(0, keep - (len(text) - PROMPT_LIMIT) - 10)
+        keep = max(0, keep - (size - PROMPT_LIMIT) - 10)
 
 
 def handle_button(session: Session, client: TelegramClient, query: dict[str, Any]) -> str:
@@ -274,7 +321,14 @@ def handle_button(session: Session, client: TelegramClient, query: dict[str, Any
     if action == "ap":
         try:
             with session.begin_nested():
-                scheduled = decide_package(session, pkg, approve=True, reason=None, actor_id=ACTOR)
+                scheduled = decide_package(
+                    session,
+                    pkg,
+                    approve=True,
+                    reason=None,
+                    actor_id=ACTOR,
+                    expected_version=int(ver),
+                )
         except DecisionError as exc:
             client.answer_button(str(query.get("id")), str(exc))
             return f"approve-refused:{exc.code}"
@@ -318,7 +372,7 @@ def handle_reply(session: Session, client: TelegramClient, message: dict[str, An
 
     asked = message.get("reply_to_message") or {}
     match = _REF.search(str(asked.get("text") or ""))
-    if not match:
+    if not match or not is_review_reply(message, client.bot_id):
         return None
     action, raw, ver = match.groups()
     pkg = _pkg(session, raw)
@@ -343,7 +397,14 @@ def handle_reply(session: Session, client: TelegramClient, message: dict[str, An
         reason = None if text.lower() in ("skip", "-") else text
         try:
             with session.begin_nested():
-                decide_package(session, pkg, approve=False, reason=reason, actor_id=ACTOR)
+                decide_package(
+                    session,
+                    pkg,
+                    approve=False,
+                    reason=reason,
+                    actor_id=ACTOR,
+                    expected_version=int(ver),
+                )
         except DecisionError as exc:
             client.send_message(f"Couldn't reject {title}: {msg.e(str(exc))}", silent=True)
             return f"reject-refused:{exc.code}"
@@ -357,7 +418,7 @@ def handle_reply(session: Session, client: TelegramClient, message: dict[str, An
         return "empty-caption"
     try:
         with session.begin_nested():
-            qa = edit_package(session, pkg, actor_id=ACTOR, caption=text)
+            qa = edit_package(session, pkg, actor_id=ACTOR, caption=text, expected_version=int(ver))
     except EditError as exc:
         client.send_message(f"Couldn't change the caption: {msg.e(str(exc))}", silent=True)
         return f"edit-refused:{exc.code}"

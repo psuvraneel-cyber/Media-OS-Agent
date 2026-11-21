@@ -220,6 +220,7 @@ def edit_package(
     slides: list[dict[str, Any]] | None = None,
     caption: str | None = None,
     hashtags: list[str] | None = None,
+    expected_version: int | None = None,
 ) -> QaReport | None:
     """Apply the owner's text edits to a carousel awaiting review, re-run text QA and re-render.
 
@@ -236,6 +237,8 @@ def edit_package(
     from media_os_api.content.uploads import is_owner_upload
 
     lock_package(session, pkg)
+    if expected_version is not None and pkg.version != expected_version:
+        raise EditError("The carousel changed since; nothing was edited.", code="STALE_VERSION")
     if pkg.format != "CAROUSEL" or is_owner_upload(pkg):
         raise EditError("Only generated carousels can be edited here.", code="NOT_EDITABLE")
     if pkg.approval_status != "PENDING" or pkg.status not in EDITABLE_STATUSES:
@@ -490,11 +493,17 @@ def decide_package(
     approve: bool,
     reason: str | None,
     actor_id: str,
+    expected_version: int | None = None,
 ) -> bool:
     """Approve or reject a carousel awaiting review: the one set of rules the dashboard and the
     Telegram buttons share. Returns True when auto-scheduling put an approved carousel in a slot.
     """
     lock_package(session, pkg)  # one at a time with re-renders and edits of this carousel
+    if expected_version is not None and pkg.version != expected_version:
+        # Checked again under the lock: an edit may have landed after the caller looked.
+        raise DecisionError(
+            "The carousel changed since; nothing was decided.", code="STALE_VERSION"
+        )
     if pkg.approval_status != "PENDING":
         raise DecisionError(f"Already {pkg.approval_status}.", code="ALREADY_DECIDED")
     note = (reason or "").strip()[:500]

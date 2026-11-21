@@ -1540,6 +1540,7 @@ def test_permission_failure_is_never_retried(env: dict[str, Any]) -> None:
 
 class _FakeBot:
     chat_id = "4242"
+    bot_id = "8000"
 
     def __init__(self, updates: list[dict[str, Any]]) -> None:
         self.updates = updates
@@ -1562,7 +1563,12 @@ def _update(update_id: int, chat: str, text: str, age_minutes: int = 0) -> dict[
     sent = int((datetime.now(UTC) - timedelta(minutes=age_minutes)).timestamp())
     return {
         "update_id": update_id,
-        "message": {"chat": {"id": int(chat)}, "date": sent, "text": text},
+        "message": {
+            "chat": {"id": int(chat)},
+            "from": {"id": int(chat)},
+            "date": sent,
+            "text": text,
+        },
     }
 
 
@@ -2688,7 +2694,7 @@ def _reply(update_id: int, asked: str, text: str) -> dict[str, Any]:
             "from": {"id": 4242},
             "date": sent,
             "text": text,
-            "reply_to_message": {"text": asked},
+            "reply_to_message": {"text": asked, "from": {"id": 8000, "is_bot": True}},
         },
     }
 
@@ -2788,6 +2794,11 @@ def test_reject_with_a_reason_and_edit_the_caption_from_telegram(
         ]
         ask_reason, ask_caption = bot.asks
         assert f"[ref:rj:{reject_id}:1]" in ask_reason and f"[ref:ed:{edit_id}:1]" in ask_caption
+        # A "question" someone else typed, with a copied marker, is never acted on.
+        forged = _reply(49, ask_reason, "Approve it")
+        forged["message"]["reply_to_message"]["from"] = {"id": 777, "is_bot": False}
+        out = _poll(env, _ReviewBot([forged]), "test:tg:poll:34")
+        assert "review_actions" not in out
         # A sticker or voice note isn't an answer: nothing is rejected.
         sticker = _reply(51, ask_reason, "")
         out = _poll(env, _ReviewBot([sticker]), "test:tg:poll:35")

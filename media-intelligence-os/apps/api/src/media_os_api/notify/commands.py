@@ -195,6 +195,31 @@ def reply_for(session: Session, text: str, now: datetime) -> str:
     return HELP  # /help, /start, and anything else
 
 
+POLL_LOCK_ID = 74_210_001  # Postgres advisory lock: Telegram polling
+
+
+def _poll_lock(session: Session) -> bool:
+    from sqlalchemy import text
+
+    if session.get_bind().dialect.name != "postgresql":
+        return True
+    return bool(
+        session.execute(text("SELECT pg_try_advisory_xact_lock(:k)"), {"k": POLL_LOCK_ID}).scalar()
+    )
+
+
+def _saved_offset(session: Session) -> int | None:
+    rows = session.execute(
+        select(JobRun.result_payload)
+        .where(JobRun.task_name == COMMANDS_TASK, JobRun.status == "SUCCEEDED")
+        .order_by(JobRun.worker_finished_at.desc().nulls_last())
+        .limit(50)
+    ).scalars()
+    offsets = [r.get("offset") for r in rows if isinstance(r, dict)]
+    ints = [o for o in offsets if isinstance(o, int)]
+    return max(ints) if ints else None
+
+
 def owner_user_id(chat_id: str) -> str:
     """The Telegram user allowed to act on review cards: `TELEGRAM_OWNER_USER_ID`, or, in a
     private chat with the bot, the chat id itself (it's the owner's user id there). A group chat
@@ -215,9 +240,11 @@ def handle_telegram_commands(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     now = now or datetime.now(UTC)
-    previous = _last_success(session, COMMANDS_TASK)
-    offset = (previous.result_payload or {}).get("offset") if previous else None
-    offset = offset if isinstance(offset, int) else None
+    # One poll at a time (a slow run can't overlap the next minute's), and the read position only
+    # ever moves forward: the highest offset any recent successful poll saved.
+    if not _poll_lock(session):
+        return {"skipped": "ANOTHER_POLL_RUNNING"}
+    offset = _saved_offset(session)
     try:
         client = telegram()
     except TelegramError as exc:
@@ -251,7 +278,7 @@ def handle_telegram_commands(
                 text = str(message.get("text") or "")
                 if str(chat.get("id")) != client.chat_id:
                     ignored += 1  # someone else found the bot: never answer them
-                elif review.is_review_reply(message):
+                elif review.is_review_reply(message, client.bot_id):
                     # A reason or a new caption: kept however late it comes (the owner may take a
                     # while to answer), but only from the owner.
                     if str(sender) != owner:
@@ -263,6 +290,7 @@ def handle_telegram_commands(
                     isinstance(sent_at, int)
                     and now - datetime.fromtimestamp(sent_at, UTC) <= MAX_MESSAGE_AGE
                     and text.startswith("/")
+                    and str(sender) == owner  # status and queue are for the owner only
                 ):
                     client.send_message(reply_for(session, text, now))
                     handled += 1
