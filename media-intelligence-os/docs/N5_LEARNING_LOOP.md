@@ -19,7 +19,11 @@ Code: `apps/api/src/media_os_api/learning/` (`core.py` is the maths, pure and un
   The model learns `log2(lift)`, so 2× and 0.5× are equally far from usual.
 - **Engagement** (shown, not yet learned from): likes + 2×comments + 3×saves + 3×shares, and the
   same divided by reach.
-- **Instagram first.** Facebook reach is still near zero; the API takes `platform=FACEBOOK` too.
+- **Each platform by its own audience number.** Instagram posts and Facebook videos report
+  views; Facebook image posts only report reach (unique viewers), so that's what they're
+  measured by. Each platform is compared only with its own usual post. What's working has an
+  Instagram / Facebook switch (`platform=FACEBOOK` in the API), and the weekly report adds a
+  Facebook line while its audience is still small.
 
 ## 2. Per-tag results
 

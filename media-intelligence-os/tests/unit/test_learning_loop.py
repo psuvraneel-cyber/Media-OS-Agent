@@ -257,3 +257,31 @@ def test_weekly_report_states_conclusions_with_enough_posts() -> None:
     text = weekly_text(_report(groups=groups), brand_name="Nimontron", now=now)
     assert "Do more of" in text and "Format: Reel (6.0×, 31 posts)" in text
     assert "Stop or change" in text and "Format: Carousel (0.4×, 40 posts)" in text
+
+
+# --------------------------------------------------------------------------- Facebook
+
+
+def test_audience_uses_the_best_number_the_platform_reports() -> None:
+    assert core.audience_of({"views": 9, "unique_viewers": 4}) == (9, "views")
+    assert core.audience_of({"unique_viewers": 4, "reactions": 1}) == (4, "unique_viewers")
+    assert core.audience_of({"plays": 2}) == (2, "plays")
+    assert core.audience_of({"reactions": 1}) == (None, None)
+
+
+def test_weekly_report_adds_a_facebook_line() -> None:
+    from media_os_api.learning.weekly import facebook_line
+
+    now = datetime(2026, 11, 23, 3, 30, tzinfo=UTC)
+    fb = {
+        "counts": {"published": 2},
+        "posts": [
+            {"title": "Card in minutes", "views_72h": 3},
+            {"title": "Promo reel", "views_72h": 11},
+        ],
+    }
+    assert "2 post(s) measured, 14 people reached" in facebook_line(fb)
+    assert "Promo reel (11)" in facebook_line(fb)
+    assert facebook_line({"counts": {"published": 0}, "posts": []}) == ""
+    text = weekly_text(_report(), brand_name="Nimontron", now=now, facebook=fb)
+    assert "📘 <b>Facebook</b>" in text

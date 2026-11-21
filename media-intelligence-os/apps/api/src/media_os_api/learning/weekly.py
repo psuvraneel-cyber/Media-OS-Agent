@@ -47,7 +47,29 @@ def _x(lift: float | None) -> str:
     return f"{lift:.1f}×" if lift is not None else "–"
 
 
-def weekly_text(report: dict[str, Any], *, brand_name: str, now: datetime) -> str:
+def facebook_line(report: dict[str, Any] | None) -> str:
+    """One line on Facebook: its audience is still small, so it's summarised, not analysed."""
+    if not report or not report["counts"]["published"]:
+        return ""
+    measured = [p for p in report["posts"] if p["views_72h"] is not None]
+    if not measured:
+        return "📘 <b>Facebook</b>: no post has reached 3 days old yet."
+    total = sum(p["views_72h"] or 0 for p in measured)
+    best = max(measured, key=lambda p: p["views_72h"] or 0)
+    return (
+        f"📘 <b>Facebook</b>: {len(measured)} post(s) measured, {total:,} people reached in "
+        f"their first 3 days in total; best: {e(short(best['title'], 50))} "
+        f"({best['views_72h']:,})."
+    )
+
+
+def weekly_text(
+    report: dict[str, Any],
+    *,
+    brand_name: str,
+    now: datetime,
+    facebook: dict[str, Any] | None = None,
+) -> str:
     week_ago = now - timedelta(days=7)
     posts = report["posts"]
     this_week = [
@@ -147,6 +169,9 @@ def weekly_text(report: dict[str, Any], *, brand_name: str, now: datetime) -> st
                 f"⏰ Best time so far: {e(top[0]['value'])} ({_x(top[0]['median_lift'])}, "
                 f"{top[0]['n']} posts; not proven yet)"
             )
+    fb = facebook_line(facebook)
+    if fb:
+        lines += ["", fb]
     return "\n".join(lines)
 
 
@@ -178,13 +203,14 @@ def handle_weekly_report(
     brands = session.execute(select(BrandProfile).where(BrandProfile.is_active.is_(True))).scalars()
     for brand in brands:
         report = learning_report(session, brand, now=now)
-        if not report["counts"]["published"]:
+        facebook = learning_report(session, brand, now=now, platform="FACEBOOK")
+        if not report["counts"]["published"] and not facebook["counts"]["published"]:
             continue  # nothing posted yet: nothing to say
         week = now.strftime("%G-W%V")
         queue_alert(
             session,
             key=f"weekly:{brand.slug}:{week}",
-            text=weekly_text(report, brand_name=brand.name, now=now),
+            text=weekly_text(report, brand_name=brand.name, now=now, facebook=facebook),
             severity="info",
         )
         sent.append(brand.slug)
