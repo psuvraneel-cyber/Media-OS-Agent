@@ -21,7 +21,9 @@ Code: `apps/api/src/media_os_api/learning/` (`core.py` is the maths, pure and un
   same divided by reach.
 - **Each platform by its own audience number.** Instagram posts and Facebook videos report
   views; Facebook image posts only report reach (unique viewers), so that's what they're
-  measured by. Each platform is compared only with its own usual post. What's working has an
+  measured by. A post is only compared with posts of the same account (each Facebook Page
+  separately) measured by the same number, so reach and views are never pooled. API fields are
+  neutral: `audience_72h`, `baseline_audience`, `avg_audience`, with `audience_metric`. What's working has an
   Instagram / Facebook switch (`platform=FACEBOOK` in the API), and the weekly report adds a
   Facebook line while its audience is still small.
 

@@ -818,7 +818,7 @@ def test_learning_report_measures_posts_and_holds_back_verdicts(
         assert r["counts"] == {"published": 5, "measured": 5, "waiting_for_72h": 0}
         reel = next(p for p in r["posts"] if p["features"]["format"] == "REEL")
         # Views at 72 h are interpolated between the 24 h (150) and 96 h (300) syncs.
-        assert reel["views_72h"] == 250 and reel["actual_lift"] > 10
+        assert reel["audience_72h"] == 250 and reel["actual_lift"] > 10
         assert reel["predicted_lift"] is not None
         formats = {g["value"]: g for g in r["groups"]["format"]}
         assert formats["REEL"]["verdict"] == "NOT_ENOUGH_DATA" and formats["REEL"]["needed"] == 29

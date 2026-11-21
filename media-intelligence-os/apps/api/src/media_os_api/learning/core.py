@@ -74,6 +74,7 @@ class Outcome:
     features: dict[str, str]  # tag -> value, e.g. {"hook_type": "QUESTION"}
     views: float | None = None  # the audience number (see AUDIENCE_KEYS)
     audience_metric: str | None = None  # which one: views | unique_viewers | plays
+    channel: str = ""  # the social account (one Facebook Page can't be compared with another)
     reach: float | None = None
     engagement: float | None = None
     mature: bool = False
@@ -130,11 +131,15 @@ def engagement_of(values: Mapping[str, float]) -> float | None:
 
 
 def assign_lifts(outcomes: list[Outcome]) -> None:
-    """Set each mature post's baseline and lift, per platform, oldest first."""
-    by_platform: dict[str, list[Outcome]] = {}
+    """Set each mature post's baseline and lift, oldest first.
+
+    Posts are only compared with posts of the same account measured by the same number (on
+    Facebook, image posts report unique viewers and videos report views: never pooled)."""
+    by_platform: dict[tuple[str, str, str], list[Outcome]] = {}
     for o in outcomes:
         if o.mature and o.views is not None:
-            by_platform.setdefault(o.platform, []).append(o)
+            key = (o.platform, o.channel, o.audience_metric or "views")
+            by_platform.setdefault(key, []).append(o)
     for posts in by_platform.values():
         posts.sort(key=lambda o: o.published_at)
         everything = [o.views for o in posts if o.views is not None]

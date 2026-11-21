@@ -178,7 +178,7 @@ const GROUP = (value: string, n: number, lift: number) => ({
   value,
   n,
   median_lift: lift,
-  avg_views: 100,
+  avg_audience: 100,
   avg_engagement_rate: 0.05,
   verdict: "NOT_ENOUGH_DATA" as const,
   needed: 30 - n,
@@ -201,8 +201,8 @@ const LEARNING: LearningReport = {
       title: "Nimontron promo 27s",
       published_at: "2026-11-17T12:30:00Z",
       mature: true,
-      views_72h: 228,
-      baseline_views: 9,
+      audience_72h: 228,
+      baseline_audience: 9,
       actual_lift: 22.4,
       predicted_lift: 0.6,
       v0_score: null,
@@ -215,8 +215,8 @@ const LEARNING: LearningReport = {
       title: "Too new to measure",
       published_at: "2026-11-20T13:30:00Z",
       mature: false,
-      views_72h: null,
-      baseline_views: null,
+      audience_72h: null,
+      baseline_audience: null,
       actual_lift: null,
       predicted_lift: null,
       v0_score: 82,
@@ -351,6 +351,34 @@ describe("What's working (learning loop)", () => {
     expect(within(row).getByText("0.6×")).toBeInTheDocument(); // predicted
     expect(screen.getByText(/Measured once it.s 72 hours old/)).toBeInTheDocument();
     expect(screen.getByText(/Nothing proven yet/)).toBeInTheDocument();
+  });
+});
+
+describe("What's working: Facebook", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("never shows Instagram's numbers under Facebook, and names Facebook's audience number", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => {};
+    const fb: LearningReport = {
+      ...LEARNING,
+      platform: "FACEBOOK",
+      audience_note: "Facebook image posts only report reach (unique viewers).",
+      posts: [{ ...LEARNING.posts[0], schedule_id: "fb-1", title: "FB card", audience_72h: 7, audience_metric: "unique_viewers" }],
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      expect(String(input)).toContain("platform=FACEBOOK");
+      await new Promise<void>((r) => (release = r));
+      return json(fb);
+    });
+    renderView();
+    await user.click(screen.getByRole("radio", { name: "Facebook" }));
+    expect(await screen.findByText(/Loading Facebook results/)).toBeInTheDocument();
+    expect(screen.queryByText("Nimontron promo 27s")).not.toBeInTheDocument();
+    release();
+    expect(await screen.findByText("FB card")).toBeInTheDocument();
+    expect(screen.getByText("Avg audience (72 h)")).toBeInTheDocument();
+    expect(screen.getByText("reached")).toBeInTheDocument();
   });
 });
 

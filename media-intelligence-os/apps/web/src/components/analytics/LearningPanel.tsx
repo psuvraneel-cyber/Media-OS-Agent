@@ -13,7 +13,7 @@ export interface LearningGroup {
   value: string;
   n: number;
   median_lift: number | null;
-  avg_views: number | null;
+  avg_audience: number | null;
   avg_engagement_rate: number | null;
   verdict: "BETTER" | "WORSE" | "NO_CLEAR_DIFFERENCE" | "NOT_ENOUGH_DATA";
   needed: number;
@@ -26,8 +26,9 @@ export interface LearningPost {
   title: string;
   published_at: string;
   mature: boolean;
-  views_72h: number | null;
-  baseline_views: number | null;
+  audience_72h: number | null;
+  audience_metric?: string | null;
+  baseline_audience: number | null;
   actual_lift: number | null;
   predicted_lift: number | null;
   v0_score: number | null;
@@ -64,6 +65,8 @@ const DIMENSIONS: { key: string; label: string }[] = [
   { key: "slot", label: "Time of day" },
   { key: "weekday", label: "Day" },
 ];
+
+const AUDIENCE_WORD: Record<string, string> = { unique_viewers: "reached", plays: "plays" };
 
 const LANGUAGE: Record<string, string> = { EN: "English", BN: "Bengali", BN_EN: "Bilingual" };
 
@@ -118,7 +121,10 @@ export function LearningPanel({
 
   if (error) return <ErrorBanner title="Could not load what's working" message={error} />;
   if (!isReport(data)) return null;
+  // Until the selected platform's report arrives, keep showing the switch but not the old numbers.
+  const stale = data.platform !== platform;
   const report = data;
+  const audienceHeader = platform === "FACEBOOK" ? "Avg audience (72 h)" : "Avg views (72 h)";
 
   const minPosts = report.settings.min_posts;
   const groups = report.groups[dimension] ?? [];
@@ -129,6 +135,39 @@ export function LearningPanel({
         ? "beats a plain guess"
         : "doesn't beat a plain guess yet"
       : null;
+
+  const platformSwitch = (
+    <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" role="radiogroup" aria-label="Platform">
+      {(["INSTAGRAM", "FACEBOOK"] as const).map((p) => (
+        <button
+          key={p}
+          type="button"
+          role="radio"
+          aria-checked={platform === p}
+          onClick={() => setPlatform(p)}
+          className={`rounded-md border px-2.5 py-1 ${
+            platform === p
+              ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
+              : "border-white/[0.08] text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          {p === "INSTAGRAM" ? "Instagram" : "Facebook"}
+        </button>
+      ))}
+      {!stale && report.audience_note ? <span className="text-slate-500">{report.audience_note}</span> : null}
+    </div>
+  );
+
+  if (stale) {
+    return (
+      <SurfaceCard icon={<Lightbulb />} title="What's working">
+        {platformSwitch}
+        <p className="text-xs text-slate-400">
+          Loading {platform === "FACEBOOK" ? "Facebook" : "Instagram"} results…
+        </p>
+      </SurfaceCard>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -142,25 +181,7 @@ export function LearningPanel({
           </Badge>
         }
       >
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs" role="radiogroup" aria-label="Platform">
-          {(["INSTAGRAM", "FACEBOOK"] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              role="radio"
-              aria-checked={platform === p}
-              onClick={() => setPlatform(p)}
-              className={`rounded-md border px-2.5 py-1 ${
-                platform === p
-                  ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-200"
-                  : "border-white/[0.08] text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              {p === "INSTAGRAM" ? "Instagram" : "Facebook"}
-            </button>
-          ))}
-          {report.audience_note ? <span className="text-slate-500">{report.audience_note}</span> : null}
-        </div>
+        {platformSwitch}
         <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Compare by">
           {DIMENSIONS.map((d) => (
             <button
@@ -190,7 +211,7 @@ export function LearningPanel({
                 <th scope="col" className="py-1.5 font-medium">{DIMENSIONS.find((d) => d.key === dimension)?.label}</th>
                 <th scope="col" className="py-1.5 text-right font-medium">Posts</th>
                 <th scope="col" className="py-1.5 text-right font-medium">vs usual</th>
-                <th scope="col" className="py-1.5 text-right font-medium">Avg views (72 h)</th>
+                <th scope="col" className="py-1.5 text-right font-medium">{audienceHeader}</th>
                 <th scope="col" className="py-1.5 pl-3 font-medium">Verdict</th>
               </tr>
             </thead>
@@ -202,7 +223,7 @@ export function LearningPanel({
                     <td className="py-1.5 text-slate-200">{nice(g.value)}</td>
                     <td className="py-1.5 text-right text-slate-300">{g.n}</td>
                     <td className={`py-1.5 text-right font-medium ${liftTone(g.median_lift)}`}>{lift(g.median_lift)}</td>
-                    <td className="py-1.5 text-right text-slate-300">{g.avg_views ?? "–"}</td>
+                    <td className="py-1.5 text-right text-slate-300">{g.avg_audience ?? "–"}</td>
                     <td className="py-1.5 pl-3">
                       <Badge tone={v.tone}>{v.text}</Badge>
                     </td>
@@ -268,7 +289,9 @@ export function LearningPanel({
             <thead className="text-left text-slate-500">
               <tr>
                 <th scope="col" className="px-5 py-2 font-medium">Post</th>
-                <th scope="col" className="px-3 py-2 text-right font-medium">Views (72 h)</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">
+                  {platform === "FACEBOOK" ? "Audience (72 h)" : "Views (72 h)"}
+                </th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Usual</th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Actual</th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">Predicted</th>
@@ -290,8 +313,13 @@ export function LearningPanel({
                   </td>
                   {p.mature ? (
                     <>
-                      <td className="px-3 py-2 text-right text-slate-300">{p.views_72h ?? "–"}</td>
-                      <td className="px-3 py-2 text-right text-slate-500">{p.baseline_views ?? "–"}</td>
+                      <td className="px-3 py-2 text-right text-slate-300">
+                        {p.audience_72h ?? "–"}
+                        {p.audience_metric && p.audience_metric !== "views" && p.audience_72h !== null ? (
+                          <span className="ml-1 text-[10px] text-slate-500">{AUDIENCE_WORD[p.audience_metric] ?? ""}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 text-right text-slate-500">{p.baseline_audience ?? "–"}</td>
                       <td className={`px-3 py-2 text-right font-medium ${liftTone(p.actual_lift)}`}>{lift(p.actual_lift)}</td>
                       <td className="px-3 py-2 text-right text-slate-300">{lift(p.predicted_lift)}</td>
                     </>
