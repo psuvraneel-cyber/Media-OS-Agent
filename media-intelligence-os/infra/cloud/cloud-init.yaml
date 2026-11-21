@@ -1,0 +1,43 @@
+#cloud-config
+# Always-on Postiz VM (Ubuntu 24.04, ARM, e.g. Oracle Cloud "VM.Standard.A1.Flex" free tier).
+# Paste this into "Initialization script" when creating the instance. It installs Docker and
+# Tailscale and locks the firewall down to SSH; Postiz is only ever reachable over Tailscale.
+# Nothing secret is in here: you join Tailscale yourself after the first boot (see README.md).
+
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - ufw
+  - unattended-upgrades
+
+runcmd:
+  # Docker Engine + Compose plugin (official repository).
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - >-
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc]
+    https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable"
+    > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - systemctl enable --now docker
+  - usermod -aG docker ubuntu
+  # Tailscale (private network between this VM and your laptop/phone).
+  - curl -fsSL https://tailscale.com/install.sh | sh
+  - systemctl enable --now tailscaled
+  # Firewall: SSH only from outside; everything on the Tailscale interface.
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow OpenSSH
+  - ufw allow in on tailscale0
+  - ufw --force enable
+  # Elasticsearch (used by Temporal) needs this.
+  - sysctl -w vm.max_map_count=262144
+  - echo "vm.max_map_count=262144" > /etc/sysctl.d/99-elasticsearch.conf
+  # Automatic security updates.
+  - dpkg-reconfigure -f noninteractive unattended-upgrades
+  - mkdir -p /opt/postiz /var/backups/postiz
+  - chown ubuntu:ubuntu /opt/postiz /var/backups/postiz

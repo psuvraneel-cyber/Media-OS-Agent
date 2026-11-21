@@ -93,3 +93,9 @@ docker compose down
 1. Back up `postiz-postgres` (`docker exec postiz-runtime-postgres pg_dump -U postiz-user -Fc postiz-db-local > backups\postiz_YYYYMMDD.dump`) and snapshot `.env` / `postiz-runtime-uploads`.
 2. Verify any newer upstream `gitroomhq/postiz-app` release notes, advisories, and `postiz-docker-compose` schema changes before changing the pinned digest in `docker-compose.yaml`.
 3. Pull new pinned digest (`docker compose pull`), run `docker compose up -d --wait`, and verify `/api/auth/can-register` and `pytest tests/integration/test_postiz_api_mcp.py`.
+
+## Always-on cloud VM (optional)
+
+To publish with the laptop off, Postiz can run on a free always-on VM, reachable only over
+Tailscale. Step-by-step: `infra/cloud/README.md`. Media OS then talks to it over https, and only
+to a host listed in `POSTIZ_REMOTE_HOSTS`.

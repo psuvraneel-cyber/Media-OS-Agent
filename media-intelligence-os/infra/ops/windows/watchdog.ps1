@@ -261,11 +261,19 @@ function Restart-Container([string]$Name, [string]$Reason, $State) {
 if (Test-Path $PauseFile) { exit 0 }
 $state = Get-State
 
+# Cloud mode: Postiz runs on the always-on VM (POSTIZ_REMOTE_HOSTS is set), so it publishes with the
+# laptop off. The local Postiz containers aren't watched, and Docker isn't started for posts.
+$PostizRemote = [bool](Read-EnvValue 'POSTIZ_REMOTE_HOSTS')
+if ($PostizRemote) {
+    $Watched = @($Watched | Where-Object { $_ -notlike 'postiz-runtime-*' })
+}
+
 $info = Invoke-Docker @('info', '--format', '{{.ServerVersion}}')
 if (-not $info.Ok) {
     # Docker is off. You may have turned it off to keep the laptop cool, so it's only started from
     # an hour before a scheduled post until 20 minutes after it (times saved while it was running).
-    $due = Get-DuePost
+    # In cloud mode the VM publishes, so a stopped Docker is simply left alone.
+    $due = if ($PostizRemote) { $null } else { Get-DuePost }
     $sinceIso = { param($iso) ((Get-Date) - [datetime]::Parse($iso, [Globalization.CultureInfo]::InvariantCulture)).TotalMinutes }
     if ($due -is [DateTimeOffset]) {
         $label = $due.ToString('h:mm tt')
@@ -312,9 +320,9 @@ Set-Prop $state 'dockerAutoStartFirst' $null
 # Keep the saved post times fresh, for when Docker is next turned off.
 Save-UpcomingPosts
 
-# 1. Postiz publishing worker: connected to Temporal, and not crash-looping?
-$postiz = Get-ContainerState $PostizApp
-$temporal = Get-ContainerState $Temporal
+# 1. Postiz publishing worker: connected to Temporal, and not crash-looping? (Local Postiz only.)
+$postiz = if ($PostizRemote) { $null } else { Get-ContainerState $PostizApp }
+$temporal = if ($PostizRemote) { $null } else { Get-ContainerState $Temporal }
 if ($postiz -and $postiz.Status -eq 'running' -and $temporal -and $temporal.Health -eq 'healthy') {
     $uptime = Invoke-Docker @('inspect', '-f', '{{.State.StartedAt}}', $PostizApp)
     $startedMinutesAgo = 999

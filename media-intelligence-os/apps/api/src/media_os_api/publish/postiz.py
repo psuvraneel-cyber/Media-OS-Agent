@@ -1,12 +1,17 @@
 """Minimal Postiz Public API client (v2.25.3) for scheduling carousels.
 
-Postiz runs locally (loopback / host.docker.internal), so this client talks only to the configured
-base URL and never follows redirects. Auth is the raw API key in `Authorization` (Postiz rejects a
+Postiz runs locally (loopback / host.docker.internal) or on the owner's always-on cloud VM. This
+client talks only to the configured base URL and never follows redirects. A host other than the
+local ones must be listed in `POSTIZ_REMOTE_HOSTS` (comma-separated, e.g. the VM's Tailscale name)
+and use https, so a typo or a tampered setting can't send the API key anywhere else.
+Auth is the raw API key in `Authorization` (Postiz rejects a
 `Bearer` prefix). The key is read from the environment and never logged.
 """
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -32,15 +37,25 @@ class Integration:
     disabled: bool
 
 
-def _check_base(url: str) -> str:
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "host.docker.internal")
+
+
+def remote_hosts(env: Mapping[str, str] | None = None) -> set[str]:
+    raw = (os.environ if env is None else env).get("POSTIZ_REMOTE_HOSTS", "")
+    return {h.strip().lower().rstrip(".") for h in raw.split(",") if h.strip()}
+
+
+def _check_base(url: str, env: Mapping[str, str] | None = None) -> str:
     parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https") or parsed.hostname not in (
-        "localhost",
-        "127.0.0.1",
-        "host.docker.internal",
-    ):
-        raise ValueError("POSTIZ_BASE_URL must point at the local Postiz instance.")
-    return url.rstrip("/")
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme in ("http", "https") and host in LOCAL_HOSTS:
+        return url.rstrip("/")
+    if parsed.scheme == "https" and host and host in remote_hosts(env):
+        return url.rstrip("/")
+    raise ValueError(
+        "POSTIZ_BASE_URL must point at the local Postiz, or at an https:// host listed in "
+        "POSTIZ_REMOTE_HOSTS."
+    )
 
 
 class PostizClient:

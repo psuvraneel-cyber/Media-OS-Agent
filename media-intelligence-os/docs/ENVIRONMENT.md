@@ -52,3 +52,11 @@ Verified on **2026-11-10** on the target Windows workstation prior to building P
    - Docker Node base: `node:22-alpine@sha256:0e1754758c2df4cfa3e68d59e2e1b7374bb7fd9ea6328eaaacf15cc934af8202` (`next@16.4.6` standalone, `react@19.3.1`, `tailwindcss@4.3.5`, `typescript@5.9.3`, `vitest@5.1.0`).
    - Database & Broker images: `postgres:17-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac`, `redis:7.2@sha256:5b816bb37d9707a70f10ef5002ecf8ee431750d397010fc4314c93dca887962f`.
 6. **No Automatic Host Modifications:** No global Windows packages or system configurations were altered during Phase 0–4; runtime credentials live outside Git in `C:\Media OS Agent\media-os-runtime\.env` and backups in `C:\Media OS Agent\media-os-backups\`.
+
+## Postiz on a cloud VM
+
+| Variable | Where | Meaning |
+|---|---|---|
+| `POSTIZ_API_BASE` | worker | Postiz base URL, e.g. `https://postiz.<tailnet>.ts.net` (default: the local Postiz) |
+| `POSTIZ_BASE_URL` | api | same URL, for the dashboard's reachability check |
+| `POSTIZ_REMOTE_HOSTS` | worker, self-healer | comma-separated allow-list of remote Postiz hosts; the API key is only sent to these, over https. When set, the Windows self-healer stops managing the local Postiz and no longer starts Docker before posts. |

@@ -254,3 +254,19 @@ def test_local_day_bounds_and_group_id() -> None:
 
     pid = uuid.uuid4()
     assert group_id(pid, when) == group_id(pid, when) != group_id(pid, end)
+
+
+def test_remote_postiz_only_on_a_listed_https_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    from media_os_api.publish.postiz import _check_base
+
+    vm = "postiz.tail1234.ts.net"
+    env = {"POSTIZ_REMOTE_HOSTS": f" {vm} , 100.101.102.103 "}
+    assert _check_base(f"https://{vm}/", env) == f"https://{vm}"
+    assert _check_base("http://host.docker.internal:4007", env)  # local still works
+    for bad in (f"http://{vm}", "https://evil.example.com", f"https://{vm}.evil.com"):
+        with pytest.raises(ValueError):
+            _check_base(bad, env)
+    with pytest.raises(ValueError):
+        _check_base(f"https://{vm}", {})  # not listed: refused
+    monkeypatch.setenv("POSTIZ_REMOTE_HOSTS", vm)
+    assert PostizClient(base_url=f"https://{vm}", api_key=KEY)  # read from the environment
