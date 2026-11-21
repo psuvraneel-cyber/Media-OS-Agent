@@ -195,6 +195,18 @@ def reply_for(session: Session, text: str, now: datetime) -> str:
     return HELP  # /help, /start, and anything else
 
 
+def owner_user_id(chat_id: str) -> str:
+    """The Telegram user allowed to act on review cards: `TELEGRAM_OWNER_USER_ID`, or, in a
+    private chat with the bot, the chat id itself (it's the owner's user id there). A group chat
+    without `TELEGRAM_OWNER_USER_ID` allows nobody."""
+    import os
+
+    configured = os.environ.get("TELEGRAM_OWNER_USER_ID", "").strip()
+    if configured:
+        return configured
+    return chat_id if chat_id.isdigit() else "<no owner set for a group chat>"
+
+
 def handle_telegram_commands(
     session: Session,
     job: JobRun,
@@ -214,45 +226,50 @@ def handle_telegram_commands(
         return {"offset": offset, "handled": 0, "reason": "TELEGRAM_NOT_CONFIGURED"}
     handled = ignored = 0
     actions: list[str] = []
+    owner = owner_user_id(client.chat_id)
     try:
         updates = client.get_updates(offset=offset)
         for update in updates:
             update_id = update.get("update_id")
-            if isinstance(update_id, int):
-                offset = max(offset or 0, update_id + 1)
+            next_offset = update_id + 1 if isinstance(update_id, int) else None
             query = update.get("callback_query")
-            if isinstance(query, dict):
-                # A review button (Approve / Reject / Edit caption) from the owner's chat only.
-                q_chat = ((query.get("message") or {}).get("chat") or {}).get("id")
-                if str(q_chat) != client.chat_id:
-                    ignored += 1
-                    continue
-                actions.append(review.handle_button(session, client, query))
-                handled += 1
-                continue
             message = update.get("message")
-            if not isinstance(message, dict):
-                continue
-            chat = message.get("chat") or {}
-            sent_at = message.get("date")
-            text = str(message.get("text") or "")
-            if str(chat.get("id")) != client.chat_id:
-                ignored += 1  # someone else found the bot: never answer them
-                continue
-            if (
-                not isinstance(sent_at, int)
-                or now - datetime.fromtimestamp(sent_at, UTC) > MAX_MESSAGE_AGE
-            ):
-                continue
-            done = review.handle_reply(session, client, message)  # a reason or a new caption
-            if done is not None:
-                actions.append(done)
-                handled += 1
-                continue
-            if not text.startswith("/"):
-                continue
-            client.send_message(reply_for(session, text, now))
-            handled += 1
+            if isinstance(query, dict):
+                # A review button (Approve / Reject / Edit caption): the owner's chat, and pressed
+                # by the owner (in a group chat, other members can see the card but not act).
+                q_chat = ((query.get("message") or {}).get("chat") or {}).get("id")
+                presser = (query.get("from") or {}).get("id")
+                if str(q_chat) != client.chat_id or str(presser) != owner:
+                    ignored += 1
+                else:
+                    actions.append(review.handle_button(session, client, query))
+                    handled += 1
+            elif isinstance(message, dict):
+                chat = message.get("chat") or {}
+                sender = (message.get("from") or {}).get("id")
+                sent_at = message.get("date")
+                text = str(message.get("text") or "")
+                if str(chat.get("id")) != client.chat_id:
+                    ignored += 1  # someone else found the bot: never answer them
+                elif review.is_review_reply(message):
+                    # A reason or a new caption: kept however late it comes (the owner may take a
+                    # while to answer), but only from the owner.
+                    if str(sender) != owner:
+                        ignored += 1
+                    else:
+                        actions.append(review.handle_reply(session, client, message) or "none")
+                        handled += 1
+                elif (
+                    isinstance(sent_at, int)
+                    and now - datetime.fromtimestamp(sent_at, UTC) <= MAX_MESSAGE_AGE
+                    and text.startswith("/")
+                ):
+                    client.send_message(reply_for(session, text, now))
+                    handled += 1
+            # Only now is the update done: a Telegram blip above leaves it for the next poll, so a
+            # press or reply is never lost.
+            if next_offset is not None:
+                offset = max(offset or 0, next_offset)
     except TelegramError as exc:
         if exc.retryable:
             # A timeout or network blip: the next run (one minute later) polls again anyway, so
