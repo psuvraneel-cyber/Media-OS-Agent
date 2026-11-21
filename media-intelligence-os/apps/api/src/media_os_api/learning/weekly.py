@@ -47,19 +47,38 @@ def _x(lift: float | None) -> str:
     return f"{lift:.1f}×" if lift is not None else "–"
 
 
+AUDIENCE_WORDS = {"views": "views", "unique_viewers": "people reached", "plays": "plays"}
+
+
 def facebook_line(report: dict[str, Any] | None) -> str:
-    """One line on Facebook: its audience is still small, so it's summarised, not analysed."""
+    """One line on Facebook: its audience is still small, so it's summarised, not analysed.
+
+    Facebook measures image posts by people reached and videos by views or plays, so the numbers
+    are never added together; the best post is named with its own number."""
     if not report or not report["counts"]["published"]:
         return ""
-    measured = [p for p in report["posts"] if p["views_72h"] is not None]
+    posts = report["posts"]
+    measured = [p for p in posts if p["audience_72h"] is not None]
     if not measured:
+        hours = report["settings"]["mature_after_hours"]
+        now = datetime.fromisoformat(report["generated_at"])
+        old = [
+            p
+            for p in posts
+            if now - datetime.fromisoformat(p["published_at"]) >= timedelta(hours=hours)
+        ]
+        if old:
+            return (
+                f"📘 <b>Facebook</b>: {len(old)} post(s) are over 3 days old, but Facebook hasn't "
+                "reported audience numbers for them."
+            )
         return "📘 <b>Facebook</b>: no post has reached 3 days old yet."
-    total = sum(p["views_72h"] or 0 for p in measured)
-    best = max(measured, key=lambda p: p["views_72h"] or 0)
+    best = max(measured, key=lambda p: p["actual_lift"] or 0)
+    word = AUDIENCE_WORDS.get(best.get("audience_metric") or "views", "views")
     return (
-        f"📘 <b>Facebook</b>: {len(measured)} post(s) measured, {total:,} people reached in "
-        f"their first 3 days in total; best: {e(short(best['title'], 50))} "
-        f"({best['views_72h']:,})."
+        f"📘 <b>Facebook</b>: {len(measured)} post(s) measured at 3 days. Best: "
+        f"{e(short(best['title'], 50))} ({best['audience_72h']:,} {word}, "
+        f"{_x(best['actual_lift'])} the Page's usual)."
     )
 
 
@@ -75,7 +94,7 @@ def weekly_text(
     this_week = [
         p
         for p in posts
-        if datetime.fromisoformat(p["published_at"]) >= week_ago and p["views_72h"] is not None
+        if datetime.fromisoformat(p["published_at"]) >= week_ago and p["audience_72h"] is not None
     ]
     need = report["settings"]["min_posts"]
     lines = [f"📈 <b>Weekly insights: {e(brand_name)}</b>", ""]
@@ -84,7 +103,7 @@ def weekly_text(
     if this_week:
         best = max(this_week, key=lambda p: p["actual_lift"] or 0)
         worst = min(this_week, key=lambda p: p["actual_lift"] or 0)
-        total = sum(p["views_72h"] or 0 for p in this_week)
+        total = sum(p["audience_72h"] or 0 for p in this_week)
         lines.append(
             f"<b>This week</b>: {len(this_week)} post(s) measured, {total:,} views in their first "
             "3 days."
