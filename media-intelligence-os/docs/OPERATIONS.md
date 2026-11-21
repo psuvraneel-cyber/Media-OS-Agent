@@ -126,6 +126,12 @@ Migration `0004_add_brand_topic_assignments` establishes the multi-brand editori
   - **Choosing a design:** Generate posts offers the built-in design, any ready and active set, or "Let Media OS choose" (also what daily drafts use). Automatic choice prefers sets tagged for the post's occasion, otherwise rotates the least recently used of untagged sets and the built-in design. Sets marked "manual only" are never chosen automatically.
   - **Snapshots:** the chosen design is copied into the post's `source_manifest`, so editing or deleting a set never changes posts already written. A missing image falls back to the built-in design for that slide, with a render warning.
 
+### Review from your phone (Telegram)
+
+- When a generated carousel's slides render and pass every check, the worker sends the slides to the owner's Telegram chat as an album, then a card (title, topic, language, checks, score or learned prediction, caption) with **✅ Approve**, **❌ Reject**, **✏️ Edit caption** and **Open in Media OS** (`media_os.notify.review_card`, one card per version).
+- **Approve** uses the same rules as the dashboard (QA passed, no missing slides) and auto-schedules when that's on. **Reject** asks for a reason by reply (or *skip*); the reason goes to the writer. **Edit caption** sends the current caption to copy and asks for the new one by reply; it's re-checked and re-rendered, and a fresh card follows.
+- Presses and replies are read by the same 1-minute poll as /status, so they're answered within about a minute, and only from `TELEGRAM_CHAT_ID`.
+
 ### Learning loop (N5): what's working, learned score, weekly report
 
 - **Analytics → What's working:** every post measured at 72 hours against the account's usual post (lift), results per format, topic, hook, language, occasion, design, time of day and weekday, predicted vs actual for every post, best posting times. A verdict needs 30 measured posts per group (`LEARNING_MIN_POSTS`); below that it reads "Not enough data yet".

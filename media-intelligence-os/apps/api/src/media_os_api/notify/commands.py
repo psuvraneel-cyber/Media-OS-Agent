@@ -13,7 +13,8 @@ The read position (Telegram's update offset) is kept in the job's own result, so
 is needed: each run continues from the last successful one. Messages older than 10 minutes are
 skipped rather than answered late (e.g. the first run after a long outage).
 
-Read-only: commands never change content, schedules or settings.
+Commands are read-only. Review buttons (Approve / Reject / Edit caption, see `notify.review`) and
+the replies they ask for are the only actions, and only from the owner's chat.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from sqlalchemy.orm import Session
 from media_os_api.db.models import ContentPackage, JobRun, PublishSchedule
 from media_os_api.jobs.errors import PermanentTaskError
 from media_os_api.notify import messages as msg
+from media_os_api.notify import review
 from media_os_api.notify.telegram import TelegramClient, TelegramError, telegram_from_env
 
 COMMANDS_TASK = "media_os.notify.telegram_commands"
@@ -43,6 +45,8 @@ HELP = (
     "/status · health, last and next post, anything stuck or failed\n"
     "/queue · the next scheduled posts\n"
     "/help · this message\n\n"
+    "New carousels arrive here with their slides and ✅ Approve · ❌ Reject · ✏️ Edit caption "
+    "buttons (answered within a minute).\n\n"
     "You'll also get alerts here automatically when something goes wrong, and a report every "
     "night at 22:00 IST."
 )
@@ -209,12 +213,23 @@ def handle_telegram_commands(
     if client is None:
         return {"offset": offset, "handled": 0, "reason": "TELEGRAM_NOT_CONFIGURED"}
     handled = ignored = 0
+    actions: list[str] = []
     try:
         updates = client.get_updates(offset=offset)
         for update in updates:
             update_id = update.get("update_id")
             if isinstance(update_id, int):
                 offset = max(offset or 0, update_id + 1)
+            query = update.get("callback_query")
+            if isinstance(query, dict):
+                # A review button (Approve / Reject / Edit caption) from the owner's chat only.
+                q_chat = ((query.get("message") or {}).get("chat") or {}).get("id")
+                if str(q_chat) != client.chat_id:
+                    ignored += 1
+                    continue
+                actions.append(review.handle_button(session, client, query))
+                handled += 1
+                continue
             message = update.get("message")
             if not isinstance(message, dict):
                 continue
@@ -228,6 +243,11 @@ def handle_telegram_commands(
                 not isinstance(sent_at, int)
                 or now - datetime.fromtimestamp(sent_at, UTC) > MAX_MESSAGE_AGE
             ):
+                continue
+            done = review.handle_reply(session, client, message)  # a reason or a new caption
+            if done is not None:
+                actions.append(done)
+                handled += 1
                 continue
             if not text.startswith("/"):
                 continue
@@ -247,4 +267,7 @@ def handle_telegram_commands(
         raise PermanentTaskError(str(exc), code=exc.code) from None
     finally:
         client.close()
-    return {"offset": offset, "handled": handled, "ignored_other_chats": ignored}
+    out: dict[str, Any] = {"offset": offset, "handled": handled, "ignored_other_chats": ignored}
+    if actions:
+        out["review_actions"] = actions
+    return out

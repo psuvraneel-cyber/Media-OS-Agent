@@ -47,8 +47,6 @@ from media_os_api.publish.service import (
     request_schedule,
 )
 from media_os_api.services import BrandNotFoundError, get_brand
-from media_os_api.services.audit_service import record_audit_event
-from media_os_api.workflow.state_machine import ContentLifecycleStatus, transition_content_status
 
 router = APIRouter(tags=["content"])
 
@@ -486,69 +484,22 @@ def decide_carousel(
     session: Annotated[SessionPayload, Depends(require_csrf)],
     brand: Annotated[str, Query(min_length=1, max_length=128)],
 ) -> CarouselSummary:
-    actor = f"owner:{session.subject}"
+    from media_os_api.carousel.service import DecisionError, decide_package
+
     with _db(request) as db:
         pkg = _package(db, _brand_id(db, brand), package_id)
-        from media_os_api.carousel.service import lock_package
-
-        lock_package(db, pkg)  # one at a time with re-renders and edits of this carousel
-        if pkg.approval_status != "PENDING":
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                {"code": "ALREADY_DECIDED", "message": f"Already {pkg.approval_status}."},
-            )
-        if payload.decision == "APPROVE":
-            if pkg.status != "QA_PASSED":
-                raise HTTPException(
-                    status.HTTP_409_CONFLICT,
-                    {
-                        "code": "QA_NOT_PASSED",
-                        "message": "Only QA-passed carousels can be approved.",
-                    },
-                )
-            from media_os_api.carousel.service import expected_slides, missing_slides
-
-            if pkg.format == "CAROUSEL" and missing_slides(
-                _slide_assets(db, pkg), expected_slides(pkg)
-            ):
-                raise HTTPException(
-                    status.HTTP_409_CONFLICT,
-                    {
-                        "code": "SLIDES_MISSING",
-                        "message": "Some slide images are missing. Re-render the slides first.",
-                    },
-                )
-            pkg.approval_status = "APPROVED"
-        else:
-            pkg.approval_status = "REJECTED"
-            transition_content_status(
+        try:
+            scheduled = decide_package(
                 db,
-                content_package_id=pkg.id,
-                to_status=ContentLifecycleStatus.REJECTED,
-                actor_id=actor,
-                reason=(payload.reason or "Rejected in review")[:500],
-                expected_brand_id=pkg.brand_profile_id,
+                pkg,
+                approve=payload.decision == "APPROVE",
+                reason=payload.reason,
+                actor_id=f"owner:{session.subject}",
             )
-            db.refresh(pkg)
-        record_audit_event(
-            db,
-            actor_id=actor,
-            action="CAROUSEL_APPROVED" if payload.decision == "APPROVE" else "CAROUSEL_REJECTED",
-            target_type="content_package",
-            target_id=str(pkg.id),
-            outcome="SUCCESS",
-            metadata={"reason": (payload.reason or "")[:200]},
-        )
-        db.flush()
-        # Autopilot: an approved Media OS carousel goes straight into the next free posting slot
-        # when the brand has auto-scheduling on (owner uploads are scheduled by hand).
-        scheduled = False
-        if payload.decision == "APPROVE":
-            from media_os_api.content.autopilot import auto_schedule
-
-            profile = db.get(BrandProfile, pkg.brand_profile_id)
-            scheduled = profile is not None and auto_schedule(db, pkg, profile) is not None
-            db.flush()
+        except DecisionError as exc:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, {"code": exc.code, "message": str(exc)}
+            ) from exc
         return CarouselSummary(
             **_summary(pkg, _slide_assets(db, pkg)),
             schedules=_schedules(db, pkg),

@@ -39,6 +39,7 @@ from media_os_api.jobs.routing import (
 )
 from media_os_api.learning.weekly import WEEKLY_TASK, handle_weekly_report
 from media_os_api.notify.commands import COMMANDS_TASK, handle_telegram_commands
+from media_os_api.notify.review import REVIEW_TASK, handle_review_card
 from media_os_api.notify.service import (
     DIGEST_TASK,
     NOTIFY_TASK,
@@ -140,6 +141,7 @@ PHASE4_TASK_REGISTRY: dict[str, TaskHandler] = {
     NOTIFY_TASK: handle_send_telegram,
     WATCHDOG_TASK: handle_watchdog,
     DIGEST_TASK: handle_daily_digest,
+    REVIEW_TASK: handle_review_card,  # slides + Approve/Reject/Edit buttons on Telegram
     COMMANDS_TASK: handle_telegram_commands,  # /status, /queue, /help from the owner's chat
 }
 

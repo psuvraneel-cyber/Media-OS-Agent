@@ -16,6 +16,7 @@ None and alerts are skipped (the system keeps working without them).
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Mapping
@@ -102,9 +103,85 @@ class TelegramClient:
         message_id = result.get("message_id") if isinstance(result, dict) else None
         return SentMessage(message_id=message_id if isinstance(message_id, int) else None)
 
+    def send_photos(self, photos: list[bytes], *, silent: bool = True) -> None:
+        """Send 2-10 images as one album (sendMediaGroup), or a single photo (sendPhoto)."""
+        if not photos:
+            return
+        photos = photos[:10]
+        if len(photos) == 1:
+            self._call_files(
+                "sendPhoto",
+                {"chat_id": self.chat_id, "disable_notification": json.dumps(silent)},
+                {"photo": ("slide-1.png", photos[0], "image/png")},
+            )
+            return
+        media = [{"type": "photo", "media": f"attach://slide{i}"} for i in range(len(photos))]
+        self._call_files(
+            "sendMediaGroup",
+            {
+                "chat_id": self.chat_id,
+                "media": json.dumps(media),
+                "disable_notification": json.dumps(silent),
+            },
+            {
+                f"slide{i}": (f"slide-{i + 1}.png", data, "image/png")
+                for i, data in enumerate(photos)
+            },
+        )
+
+    def ask(self, text: str, *, placeholder: str = "") -> SentMessage:
+        """A message the owner answers by replying (Telegram opens the reply box for them)."""
+        markup: dict[str, Any] = {"force_reply": True, "selective": True}
+        if placeholder:
+            markup["input_field_placeholder"] = placeholder[:64]
+        data = self._call(
+            "sendMessage",
+            {
+                "chat_id": self.chat_id,
+                "text": truncate(text),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                "reply_markup": markup,
+            },
+        )
+        result = data.get("result") if isinstance(data, dict) else None
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        return SentMessage(message_id=message_id if isinstance(message_id, int) else None)
+
+    def answer_button(self, callback_id: str, text: str = "") -> None:
+        """Stop the button's loading spinner, with an optional toast."""
+        try:
+            self._call(
+                "answerCallbackQuery", {"callback_query_id": callback_id, "text": text[:190]}
+            )
+        except TelegramError as exc:
+            if exc.code != "TELEGRAM_BAD_REQUEST":  # an old press can't be answered: fine
+                raise
+
+    def replace_buttons(
+        self, message_id: int, buttons: list[list[Mapping[str, str]]] | None
+    ) -> None:
+        """Swap a card's buttons (None removes them), e.g. once it's been decided."""
+        try:
+            self._call(
+                "editMessageReplyMarkup",
+                {
+                    "chat_id": self.chat_id,
+                    "message_id": message_id,
+                    "reply_markup": {"inline_keyboard": [list(r) for r in (buttons or [])]},
+                },
+            )
+        except TelegramError as exc:
+            if exc.code != "TELEGRAM_BAD_REQUEST":  # "message is not modified": fine
+                raise
+
     def get_updates(self, *, offset: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        """New messages sent to the bot (short poll: returns immediately)."""
-        body: dict[str, Any] = {"timeout": 0, "limit": limit, "allowed_updates": ["message"]}
+        """New messages and button presses sent to the bot (short poll: returns immediately)."""
+        body: dict[str, Any] = {
+            "timeout": 0,
+            "limit": limit,
+            "allowed_updates": ["message", "callback_query"],
+        }
         if offset is not None:
             body["offset"] = offset
         data = self._call("getUpdates", body)
@@ -112,9 +189,23 @@ class TelegramClient:
         return [u for u in result or [] if isinstance(u, dict)] if isinstance(result, list) else []
 
     def _call(self, method: str, body: Mapping[str, Any]) -> Any:
+        return self._post(method, json=body)
+
+    def _call_files(
+        self,
+        method: str,
+        fields: Mapping[str, str],
+        files: Mapping[str, tuple[str, bytes, str]],
+    ) -> Any:
+        """Multipart upload (photos). Uploads get a longer timeout than plain messages."""
+        return self._post(method, data=dict(fields), files=dict(files), timeout=60.0)
+
+    def _post(self, method: str, *, timeout: float | None = None, **kwargs: Any) -> Any:
         url = f"https://{API_HOST}/bot{self._token}/{method}"
         try:
-            response = self._client.post(url, json=body)
+            if timeout is not None:
+                kwargs["timeout"] = httpx.Timeout(timeout, connect=5.0)
+            response = self._client.post(url, **kwargs)
         except httpx.TimeoutException:
             raise TelegramError(
                 "Telegram request timed out.", code="TELEGRAM_TIMEOUT", retryable=True

@@ -2564,3 +2564,214 @@ def test_posts_per_day_setting_changes_the_scheduling_limit(
             platforms=["INSTAGRAM"],
             actor_id="owner:t",
         )
+
+
+# ------------------------------------------------------------------ review from Telegram
+
+
+class _ReviewBot(_FakeBot):
+    def __init__(self, updates: list[dict[str, Any]]) -> None:
+        super().__init__(updates)
+        self.photos: list[int] = []
+        self.cards: list[tuple[str, Any]] = []
+        self.asks: list[str] = []
+        self.answered: list[str] = []
+        self.replaced: list[int] = []
+
+    def send_photos(self, photos: list[bytes], **_: Any) -> None:
+        self.photos.append(len(photos))
+
+    def send_message(self, text: str, **kw: Any) -> Any:
+        self.sent.append(text)
+        self.cards.append((text, kw.get("buttons")))
+        return type("Sent", (), {"message_id": 77})()
+
+    def ask(self, text: str, **_: Any) -> Any:
+        self.asks.append(text)
+        return type("Sent", (), {"message_id": 78})()
+
+    def answer_button(self, callback_id: str, text: str = "") -> None:
+        self.answered.append(text)
+
+    def replace_buttons(self, message_id: int, buttons: Any) -> None:
+        self.replaced.append(message_id)
+
+
+def _ready_for_review(
+    env: dict[str, Any], client: TestClient, monkeypatch: Any, key: str, root: Path
+) -> str:
+    """A generated carousel whose slides rendered and passed: waiting for the owner."""
+    from media_os_api.carousel.render_job import RENDER_TASK
+
+    pid = _pending_carousel(env, client, monkeypatch, key)
+    rel = Path("carousels") / pid / "v1"
+    (root / rel).mkdir(parents=True, exist_ok=True)
+    with session_scope(env["factory"]) as db:
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None
+        for job in db.execute(
+            select(JobRun).where(
+                JobRun.task_name == RENDER_TASK, JobRun.payload["content_package_id"].astext == pid
+            )
+        ).scalars():
+            job.status = "SUCCEEDED"
+        for i in range(1, len(pkg.slide_data) + 1):
+            data = _png()
+            (root / rel / f"slide-{i:02d}.png").write_bytes(data)
+            db.add(
+                Asset(
+                    brand_profile_id=pkg.brand_profile_id,
+                    content_package_id=pkg.id,
+                    asset_type="CAROUSEL_SLIDE",
+                    local_path=f"{rel.as_posix()}/slide-{i:02d}.png",
+                    mime_type="image/png",
+                    file_size=len(data),
+                    checksum="x",
+                    width=1080,
+                    height=1350,
+                    status="ACTIVE",
+                )
+            )
+        for to in (ContentLifecycleStatus.RENDERED, ContentLifecycleStatus.QA_PASSED):
+            transition_content_status(db, content_package_id=pkg.id, to_status=to, actor_id="t")
+    return pid
+
+
+def _press(update_id: int, chat: str, data: str) -> dict[str, Any]:
+    return {
+        "update_id": update_id,
+        "callback_query": {
+            "id": f"q{update_id}",
+            "data": data,
+            "message": {"message_id": 77, "chat": {"id": int(chat)}},
+        },
+    }
+
+
+def _reply(update_id: int, asked: str, text: str) -> dict[str, Any]:
+    sent = int(datetime.now(UTC).timestamp())
+    return {
+        "update_id": update_id,
+        "message": {
+            "chat": {"id": 4242},
+            "date": sent,
+            "text": text,
+            "reply_to_message": {"text": asked},
+        },
+    }
+
+
+def _poll(env: dict[str, Any], bot: _ReviewBot, key: str) -> dict[str, Any]:
+    from media_os_api.jobs.ledger import enqueue_durable_job
+    from media_os_api.notify import commands
+
+    with session_scope(env["factory"]) as db:
+        job, _ = enqueue_durable_job(
+            db,
+            task_name=commands.COMMANDS_TASK,
+            task_type="NOTIFY",
+            payload={},
+            idempotency_key=key,
+        )
+        return commands.handle_telegram_commands(db, job, telegram=lambda: bot)  # type: ignore[arg-type,return-value]
+
+
+def test_review_card_sends_the_slides_and_approve_works_from_telegram(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from media_os_api.notify.review import REVIEW_TASK, handle_review_card
+
+    pid = _ready_for_review(env, client, monkeypatch, "test:tg:1", tmp_path)
+    with session_scope(env["factory"]) as db:
+        # Rendering queued the card (one per version).
+        card_job = db.execute(
+            select(JobRun).where(JobRun.idempotency_key == f"review-card:{pid}:v1")
+        ).scalar_one_or_none()
+        assert card_job is None  # this test promoted the post by hand, so queue it here
+        from media_os_api.notify.review import enqueue_review_card
+
+        pkg = db.get(ContentPackage, uuid.UUID(pid))
+        assert pkg is not None
+        enqueue_review_card(db, pkg)
+        card_job = db.execute(
+            select(JobRun).where(JobRun.idempotency_key == f"review-card:{pid}:v1")
+        ).scalar_one()
+        bot = _ReviewBot([])
+        out = handle_review_card(db, card_job, telegram=lambda: bot)
+    assert out["sent"] is True and bot.photos == [5]
+    text, buttons = bot.cards[0]
+    assert "Ready for your review" in text
+    assert [b["callback_data"] for b in buttons[0]] == [f"ap:{pid}", f"rj:{pid}"]
+
+    try:
+        stranger = _ReviewBot([_press(40, "999", f"ap:{pid}")])
+        assert _poll(env, stranger, "test:tg:poll:0")["ignored_other_chats"] == 1
+        owner = _ReviewBot([_press(41, "4242", f"ap:{pid}")])
+        out = _poll(env, owner, "test:tg:poll:1")
+        assert out["review_actions"] == ["approved"]
+        assert owner.answered == ["Approved"] and owner.replaced == [77]
+        with session_scope(env["factory"]) as db:
+            pkg = db.get(ContentPackage, uuid.UUID(pid))
+            assert pkg is not None and pkg.approval_status == "APPROVED"
+        # Pressing again is harmless.
+        again = _ReviewBot([_press(42, "4242", f"ap:{pid}")])
+        assert _poll(env, again, "test:tg:poll:2")["review_actions"] == [
+            "approve-refused:ALREADY_DECIDED"
+        ]
+        # The card for a decided post isn't sent.
+        with session_scope(env["factory"]) as db:
+            late = handle_review_card(
+                db,
+                JobRun(task_name=REVIEW_TASK, payload={"content_package_id": pid}),
+                telegram=lambda: _ReviewBot([]),
+            )
+        assert late == {"sent": False, "reason": "NOT_WAITING_FOR_REVIEW"}
+    finally:
+        _drop_commands(env)
+
+
+def test_reject_with_a_reason_and_edit_the_caption_from_telegram(
+    env: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from media_os_api.carousel.feedback import owner_notes
+
+    reject_id = _ready_for_review(env, client, monkeypatch, "test:tg:2", tmp_path)
+    edit_id = _ready_for_review(env, client, monkeypatch, "test:tg:3", tmp_path)
+    try:
+        bot = _ReviewBot(
+            [_press(50, "4242", f"rj:{reject_id}"), _press(51, "4242", f"ed:{edit_id}")]
+        )
+        assert _poll(env, bot, "test:tg:poll:3")["review_actions"] == [
+            "asked-reason",
+            "asked-caption",
+        ]
+        ask_reason, ask_caption = bot.asks
+        assert f"[ref:rj:{reject_id}]" in ask_reason and f"[ref:ed:{edit_id}]" in ask_caption
+
+        new_caption = f"বিয়ের কার্ড এখন সহজ। Bengali wedding cards, made easy. {PLAY}"
+        replies = _ReviewBot(
+            [
+                _reply(52, ask_reason, "Too salesy, sounds like an ad"),
+                _reply(53, ask_caption, new_caption),
+            ]
+        )
+        out = _poll(env, replies, "test:tg:poll:4")
+        assert out["review_actions"] == ["rejected", "edited"]
+        with session_scope(env["factory"]) as db:
+            rejected = db.get(ContentPackage, uuid.UUID(reject_id))
+            edited = db.get(ContentPackage, uuid.UUID(edit_id))
+            assert rejected is not None and rejected.approval_status == "REJECTED"
+            assert any("Too salesy" in n.note for n in owner_notes(db, env["bid"]))
+            assert edited is not None and edited.caption == new_caption
+            assert edited.version == 2 and edited.status == "DRAFTED"  # re-renders, new card
+    finally:
+        _drop_commands(env)
+
+
+def _drop_commands(env: dict[str, Any]) -> None:
+    from media_os_api.notify import commands
+
+    with session_scope(env["factory"]) as db:
+        ids = select(JobRun.id).where(JobRun.task_name == commands.COMMANDS_TASK)
+        db.execute(delete(OutboxEvent).where(OutboxEvent.job_run_id.in_(ids)))
+        db.execute(delete(JobRun).where(JobRun.task_name == commands.COMMANDS_TASK))
