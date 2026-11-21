@@ -130,7 +130,10 @@ Migration `0004_add_brand_topic_assignments` establishes the multi-brand editori
 
 - When a generated carousel's slides render and pass every check, the worker sends the slides to the owner's Telegram chat as an album, then a card (title, topic, language, checks, score or learned prediction, caption) with **✅ Approve**, **❌ Reject**, **✏️ Edit caption** and **Open in Media OS** (`media_os.notify.review_card`, one card per version).
 - **Approve** uses the same rules as the dashboard (QA passed, no missing slides) and auto-schedules when that's on. **Reject** asks for a reason by reply (or *skip*); the reason goes to the writer. **Edit caption** sends the current caption to copy and asks for the new one by reply; it's re-checked and re-rendered, and a fresh card follows.
-- Presses and replies are read by the same 1-minute poll as /status, so they're answered within about a minute, and only from `TELEGRAM_CHAT_ID`.
+- Presses and replies are read by the same 1-minute poll as /status, so they're answered within about a minute. Only the owner can act: in a private chat with the bot that's automatic; if `TELEGRAM_CHAT_ID` is a group, set `TELEGRAM_OWNER_USER_ID` (otherwise nobody can act from it).
+- Every button and question names the carousel's version, so an old card can't approve or edit newer content ("This card is out of date"). A reply without text (sticker, voice note) changes nothing.
+- The **Open in Media OS** button only appears when `MEDIA_OS_DASHBOARD_URL` is an address your phone can reach (not 127.0.0.1).
+- If Telegram isn't configured, the review-card job fails visibly in Runtime Logs instead of silently.
 
 ### Learning loop (N5): what's working, learned score, weekly report
 

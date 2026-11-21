@@ -80,6 +80,17 @@ def test_old_button_presses_and_unchanged_cards_are_not_errors() -> None:
         client.answer_button("q1", "hi")  # no exception
         client.replace_buttons(7, None)  # no exception
 
+    sent: list[dict[str, Any]] = []
+
+    def ok(request: httpx.Request) -> httpx.Response:
+        sent.append({"path": request.url.path, **json.loads(request.content)})
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    with _client(ok) as client:
+        client.replace_buttons(7, None)
+    assert sent[0]["path"].endswith("/editMessageReplyMarkup")
+    assert sent[0]["message_id"] == 7 and sent[0]["reply_markup"] == {"inline_keyboard": []}
+
     def down(_r: httpx.Request) -> httpx.Response:
         return httpx.Response(502, json={"ok": False})
 
@@ -88,18 +99,48 @@ def test_old_button_presses_and_unchanged_cards_are_not_errors() -> None:
     assert err.value.retryable
 
 
-def test_buttons_fit_telegram_limits() -> None:
+def test_buttons_name_the_version_and_fit_telegram_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pid = uuid.uuid4()
-    rows = review_buttons(pid)
+    rows = review_buttons(pid, 123)
     data = [b["callback_data"] for row in rows for b in row if "callback_data" in b]
-    assert data == [f"ap:{pid}", f"rj:{pid}", f"ed:{pid}"]
+    assert data == [f"ap:{pid}:123", f"rj:{pid}:123", f"ed:{pid}:123"]
     assert all(len(d.encode()) <= 64 for d in data)  # Telegram's callback_data limit
+    # The default dashboard address is the laptop's loopback: useless on a phone, so no link.
+    monkeypatch.delenv("MEDIA_OS_DASHBOARD_URL", raising=False)
+    assert not any("url" in b for row in review_buttons(pid) for b in row)
+    monkeypatch.setenv("MEDIA_OS_DASHBOARD_URL", "https://media-os.tail1234.ts.net")
+    links = [b["url"] for row in review_buttons(pid) for b in row if "url" in b]
+    assert links == ["https://media-os.tail1234.ts.net/approvals"]
+
+
+def test_caption_prompt_stays_valid_html_under_the_limit() -> None:
+    from media_os_api.notify.review import PROMPT_LIMIT, caption_prompt
+
+    pkg = ContentPackage(id=uuid.uuid4(), version=2, caption="<&>" * 1500)
+    text = caption_prompt("Title", pkg)
+    assert len(text) <= PROMPT_LIMIT
+    assert text.endswith("</pre>") and f"[ref:ed:{pkg.id}:2]" in text
+    body = text.split("<pre>", 1)[1].removesuffix("</pre>")
+    assert "<" not in body and ">" not in body  # every character escaped, none cut mid-entity
+    assert body.endswith(("&lt;", "&amp;", "&gt;", "…"))
+
+
+def test_only_the_owner_can_act(monkeypatch: pytest.MonkeyPatch) -> None:
+    from media_os_api.notify.commands import owner_user_id
+
+    monkeypatch.delenv("TELEGRAM_OWNER_USER_ID", raising=False)
+    assert owner_user_id("987654321") == "987654321"  # private chat: the chat is the owner
+    assert owner_user_id("-100123") != "-100123"  # group without an owner set: nobody
+    monkeypatch.setenv("TELEGRAM_OWNER_USER_ID", "555")
+    assert owner_user_id("-100123") == "555"
 
 
 def test_card_shows_the_post_and_escapes_its_text() -> None:
     pkg = ContentPackage(
         title="Wedding <season> & you",
-        caption="Line one\n\nGet it: https://play.google.com/x",
+        caption="Line <i>one</i> & more\n\nGet it: https://play.google.com/x",
         hashtags=["#Nimontron"],
         slide_data=[{}, {}, {}],
         post_tags={"pillar": "wedding_season", "language": "BN_EN"},
@@ -108,6 +149,7 @@ def test_card_shows_the_post_and_escapes_its_text() -> None:
     )
     text = card_text(pkg)
     assert "Wedding &lt;season&gt; &amp; you" in text
+    assert "Line &lt;i&gt;one&lt;/i&gt; &amp; more" in text and "<i>one" not in text
     assert "wedding season · Bilingual · 3 slides" in text
     assert "⚠️ no card" in text and "#Nimontron" in text
     assert "heuristic" in text  # the learned score isn't trusted yet
